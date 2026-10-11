@@ -1,107 +1,118 @@
 # AURA – Artificial Understanding & Retrieval Assistant
 
-**Dein lokales «zweites Gehirn» für Windows.** AURA durchsucht deine Outlook-Mails, deinen Kalender, deinen Edge-Verlauf und deine Dokumente und beantwortet Fragen dazu – vollständig auf deinem Rechner. Dazu kommt eine schlanke Workflow-Engine, die Unterlagen nach festen Regeln prüft und Word-Vorlagen ausfüllt.
+Ein lokales «zweites Gehirn» für Windows: AURA durchsucht deine Outlook-Mails und -Termine, den Edge-Verlauf und Dokumentordner und beantwortet Fragen dazu – vollständig auf dem eigenen Rechner. Dazu kommt eine Workflow-Engine, die Word-Vorlagen aus Unterlagen ausfüllt.
 
-> *A local, privacy-first search & question-answering assistant for Outlook, calendar, browser history and documents, with a lightweight workflow engine. Runs entirely on a Windows laptop GPU in pure Python – no cloud, no installation.*
+Stand: v64 (Oktober 2026) · Änderungen: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
 ## Warum AURA
 
-- **Alles bleibt lokal.** Keine Cloud, keine Telemetrie, keine Eingaben an fremde Modelle. Sprachmodell und Suche laufen auf der eigenen Grafikkarte.
-- **Keine Installation.** Reines Python mit mitgelieferten Paketen. Kein `pip`, kein Admin-Recht, kein PyTorch – die GPU wird direkt über DirectX angesprochen.
-- **Start per Doppelklick** auf `AURA.pyw`.
+- **Lokal:** Keine Cloud, keine Telemetrie, keine externen Modellaufrufe. Das Sprachmodell läuft auf der Grafikkarte des Notebooks.
+- **Ohne Installation:** Reines Python, kein `pip`, keine Administratorrechte. Start per Doppelklick auf `AURA.pyw`.
+- **Nachvollziehbar:** Antworten nennen ihre Quellen; Workflow-Entscheide stammen aus Regeln, nicht aus dem Bauchgefühl des Modells.
 
 ## Funktionen
 
-**Fragen an die eigenen Daten**
-- Quellen per Schalter: Outlook-Mails (Ordner wählbar), Outlook-Kalender, Edge-Verlauf, Dokumentordner (PDF mit Text, Word, Text, Markdown)
-- Hybride Suche (Stichwort + Bedeutung) mit Filtern für Person und Zeitraum
-- Antworten mit Quellenangabe; Klick öffnet das Original in Outlook bzw. die Datei
-- Listen ohne Sprachmodell, z.B. «Welche Termine habe ich diese Woche?»
-- Automatischer Abgleich alle 15 Minuten
-- Infotexte zu jedem Knopf und Feld (Mouseover)
+**Fragen stellen**
+- Suche nach Wörtern und nach Bedeutung (Vektoren), kombiniert.
+- Filter nach Person und Zeitraum aus der Frage heraus («Was schrieb X letzte Woche zum Budget?»).
+- Antworten mit Quellenangaben; ohne Sprachmodell zeigt AURA die besten Fundstellen.
 
 **Workflows**
-- Unterlagen einlesen → Fakten durch das Sprachmodell erfassen → **Entscheide per Regeltabelle** (rechnen und vergleichen macht nie das Modell) → feste **Word-Vorlage** ausfüllen
-- **Belegpflicht:** Angaben, die nur mit wörtlichem Zitat aus den Unterlagen gelten; erfundene Zitate werden erkannt und verworfen
-- Sichtbare Platzhalter statt erfundenem Text, wenn Informationen fehlen
-- **Prüfbericht** getrennt vom Ergebnisdokument: Hinweise, verworfene Angaben, Belege, Plausibilitätsprüfungen
-- Eigene Wissenssammlungen je Workflow (z.B. Gesetzestexte, nach Artikeln zerlegt, mit Stand-Datum)
-- Workflows als Pakete (`workflow.json` + Wissen + Vorlagen + Läufe), vollständig im Fenster verwaltbar
-- Zwischenstand nach jedem Schritt, «ab Schritt neu starten», Prompt-Cache für wiederkehrende Teile
+- Füllen eine Word-Vorlage aus Unterlagen (z.B. PDF) aus – auf Knopfdruck oder nach Zeitplan.
+- Neue Workflows entstehen mit «Workflow beschreiben» und einer Word-Vorlage. AURA erstellt daraus einen **Feldplan**: Für jedes Feld wird festgelegt, ob der Wert aus den Unterlagen stammt (*Fakt*), sich aus einer Regel ergibt (*Abgeleitet*), immer gleich ist (*Fest*) oder von Hand ergänzt wird (*Manuell*).
+- Grundsatz: **Fakten liest das Sprachmodell, Entscheide trifft eine Regel.** Regeln werden ohne Programmierung im Feldplan erfasst («Wenn Betrag > 5000 → Zweite Unterschrift») und laufen ohne Sprachmodell.
+- Jeder Lauf erzeugt das Ergebnisdokument und einen getrennten Prüfbericht (Hinweise, Platzhalter, welche Regel gegriffen hat).
+- Anleitung für Gestalter: [docs/WORKFLOWS.md](docs/WORKFLOWS.md)
+
+**Wissen**
+- Wissenssammlungen (z.B. Gesetzestexte) für Workflows und optional für den Chat; Rechtstexte werden nach Artikeln zerlegt und zitierbar («BöB Art. 21»).
 
 ## Voraussetzungen
 
 | | |
-|---|---|
-| Betriebssystem | Windows 10/11 (64 Bit) |
+| --- | --- |
+| Betriebssystem | Windows 10 oder 11 (64-bit) |
 | Python | 3.11 oder neuer, mit tkinter (Standardinstallation von python.org) |
-| Grafikkarte | DirectX 11 / DirectML; **getestet nur auf Intel Core Ultra (integrierte GPU)**. Andere GPUs sind ungetestet. |
-| Arbeitsspeicher | 16 GB, für Sprachmodelle ab 4B-Grösse eher 32 GB |
-| Speicherplatz | ~3 GB (Embedding) + 8–17 GB je Sprachmodell |
-| Optional | Microsoft Outlook (klassisch) für Mail und Kalender; Microsoft Edge für den Verlauf |
+| Grafikkarte | DirectX 11 / DirectML; getestet nur mit integrierter GPU von Intel Core Ultra |
+| Arbeitsspeicher | 16 GB, für Sprachmodelle ab 4B rund 32 GB |
+| Speicherplatz | ca. 3 GB für das Embedding-Modell, plus 8–17 GB je Sprachmodell |
+| Optional | klassisches Microsoft Outlook (Mails, Kalender), Microsoft Edge (Verlauf) |
 
 ## Installation
 
-1. **Release-ZIP herunterladen** (Seite *Releases*, nicht «Code → Download ZIP»).
-2. **Entpacken in einen lokalen Ordner**, z.B. `C:\aura`. Nicht in OneDrive oder auf ein Netzlaufwerk – die Datenbank verträgt keine Synchronisation.
-3. **Modelle herunterladen** von Hugging Face und in `models\` ablegen (Details in [`models/README.md`](models/README.md)):
-   - Embedding (Pflicht): [`intfloat/multilingual-e5-large`](https://huggingface.co/intfloat/multilingual-e5-large) → `models\multilingual-e5-large\`
-   - Sprachmodell (optional, für ausformulierte Antworten und Workflows): z.B. [`Qwen/Qwen3-4B-Instruct-2507`](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507) → `models\Qwen3-4B\`
-   - Benötigt werden je Ordner `config.json`, `tokenizer.json` und die `*.safetensors`-Dateien.
-4. **`AURA.pyw` doppelklicken.** Beim ersten Start legt AURA Datenbank und Einstellungen selbst an.
+1. Die Release-ZIP von der Seite *Releases* herunterladen (nicht «Code → Download ZIP»).
+2. In einen lokalen Ordner entpacken, z.B. `C:\aura`. **Nicht** in OneDrive oder auf Netzlaufwerke – die Datenbank verträgt keine Synchronisation.
+3. Modelle von Hugging Face herunterladen und in `models\` ablegen (Details: `models/README.md`):
 
-Ohne Sprachmodell funktioniert AURA auch: Es zeigt dann die besten Fundstellen statt einer ausformulierten Antwort.
+   | Modell | Zweck | Ordner |
+   | --- | --- | --- |
+   | [intfloat/multilingual-e5-large](https://huggingface.co/intfloat/multilingual-e5-large) | Suche nach Bedeutung (Pflicht) | `models\multilingual-e5-large\` |
+   | [Qwen/Qwen3-4B-Instruct-2507](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507) | Antworten und Workflows (empfohlen) | `models\Qwen3-4B\` |
+
+   Jeder Modellordner braucht `config.json`, `tokenizer.json` und die `*.safetensors`-Dateien.
+4. Doppelklick auf `AURA.pyw`. Beim ersten Start legt AURA Datenbank und Einstellungen an.
+
+Ohne Sprachmodell funktioniert AURA ebenfalls und zeigt statt ausformulierter Antworten die besten Fundstellen.
 
 ## Erste Schritte
 
-1. Zahnrad **⚙** → Quellen verbinden und **Sync** drücken (bei Outlook vorher **Ordner** wählen).
-2. **Vektoren berechnen** – einmalig, je nach Datenmenge einige Minuten bis Stunden; danach nur noch für Neues.
+1. «Quellen» öffnen, Quellen verbinden und **Sync** drücken. Bei Outlook zuerst **Ordner** wählen.
+2. **Vektoren berechnen** – einmalig, je nach Datenmenge Minuten bis Stunden; danach nur noch neue Einträge.
 3. Sprachmodell wählen und **Laden** (ca. 1 Minute).
 4. Frage stellen.
 
-Workflows: **Workflows öffnen** → Workflow wählen → Dateien wählen → **▶ Starten**. Ergebnis und Prüfbericht erscheinen nach dem Lauf als Knöpfe.
+Workflow ausführen: «Workflows öffnen» → Workflow wählen → «Dateien wählen …» → «▶ Starten». Ergebnis und Prüfbericht erscheinen nach dem Lauf als Knöpfe und unter «Ergebnisse».
+
+## Daten verwalten
+
+| Was | Wo | Wirkung |
+| --- | --- | --- |
+| Einzelnen Lauf löschen | «Ergebnisse» → «Löschen» | Laufordner wandert nach `workflows\_geloescht\_laeufe` (zurückholbar) |
+| Workflow löschen | Workflow → «Löschen» | Paket wandert nach `workflows\_geloescht` (zurückholbar) |
+| Alles zurücksetzen | «Quellen» → «Alles zurücksetzen …» | Löscht alle eingelesenen Mails, Termine, Verlaufseinträge und Dokumente samt Vektoren, den Synchronisationsstand und die Quellenauswahl; schaltet den Auto-Abgleich aus. AURA startet neu. Outlook, Originaldateien, Wissen, Workflows und Modelle bleiben. |
+
+Speicherplatz prüfen und aufräumen: `py tools\ordner_pruefen.py` zeigt je Ordner Grösse, Zweck und was gelöscht werden kann (ändert nichts).
 
 ## Updates
 
-Neue Version als ZIP in «Downloads» speichern, AURA schliessen und im AURA-Ordner ausführen:
+Die ZIP der neuen Version in «Downloads» speichern, AURA schliessen und im AURA-Ordner ausführen:
 
 ```
 py tools\patch_einspielen.py
 ```
 
-Eigene Daten (`data\`, `models\`, `workflows\`, `wissen\`) bleiben erhalten.
+Die Datenordner `data\`, `models\`, `workflows\` und `wissen\` bleiben erhalten.
 
 ## Datenschutz
 
-- AURA liest Outlook, Kalender und Verlauf **nur lokal** und speichert die Texte in einer lokalen SQLite-Datenbank (`data\`).
-- Es gibt keine Netzverbindung ausser dem Laden offizieller Quellen, wenn ein Workflow das ausdrücklich vorsieht.
-- Eingabedateien eines Workflow-Laufs werden nie in die allgemeine Suche aufgenommen.
-- Die Datenbank enthält Inhalte deiner Mails: Ordner entsprechend schützen und nie in ein Repository oder einen synchronisierten Ordner legen.
+- Alle Daten bleiben auf dem Rechner: Datenbank in `data\`, Protokolle in `logs\`, Workflow-Läufe in `workflows\<name>\laeufe\`.
+- AURA liest Outlook und Dateien nur; es verändert oder löscht dort nichts.
+- **Für Mitwirkende:** `data\`, `logs\`, `models\`, `workflows\*\laeufe\` und die Dokumente in `wissen\` bzw. `workflows\*\wissen\` nie committen – die `.gitignore` schliesst sie aus. Word-Vorlagen nur einchecken, wenn sie nicht vertraulich sind. Vor einem Commit hilft `py tools\ordner_pruefen.py` (Abschnitt «schon in Git erfasst»).
 
 ## Grenzen
 
-- Kleine lokale Modelle (4B/8B) machen Fehler. Ergebnisse von Workflows sind **Entwürfe zur fachlichen Prüfung**, keine Entscheide.
-- Gescannte PDFs ohne Textschicht werden nicht gelesen (kein OCR).
-- Ein Workflow-Lauf mit einem 4B-Modell dauert auf einer integrierten GPU 5–15 Minuten. Das Notebook nicht zuklappen.
-- Getestet auf einer einzigen Hardware-Klasse.
+- Kleine lokale Modelle (4B/8B) machen Fehler. Workflow-Ergebnisse sind Entwürfe zur fachlichen Prüfung, keine Entscheide.
+- Gescannte PDFs ohne Textschicht werden nicht gelesen (keine Texterkennung).
+- Ein Workflow-Lauf dauert mit einem 4B-Modell auf integrierter Grafik je nach Vorlage 2–5 Minuten. Notebook während eines Laufs nicht zuklappen; Zeitplan-Läufe starten nur, wenn AURA offen ist.
+- Getestet auf einer einzigen Hardwareklasse.
 
 ## Aufbau
 
-```
-AURA.pyw        Start
-aura\           Programm (Oberfläche, Suche, Konnektoren, GPU-Engine, Workflow-Engine)
-tools\          Kommandozeile (wf_run.py), Updates, Messwerkzeuge
-vendor\         mitgelieferte Pakete
-models\         Modelle (nicht im Repository)
-workflows\      Workflow-Pakete
-wissen\         gemeinsame Wissenssammlungen
-data\ logs\     werden beim Start angelegt (nicht im Repository)
-```
-
-Workflow-Format und Bausteine: siehe [`docs/workflows.md`](docs/workflows.md).
+| Ordner | Inhalt | Im Repository |
+| --- | --- | --- |
+| `AURA.pyw` | Startskript (Doppelklick) | ja |
+| `aura\` | Programm: Oberfläche, Suche, Konnektoren, GPU-Engine, Workflow-Engine | ja |
+| `tools\` | Kommandozeilenwerkzeuge (`wf_run.py`, `ordner_pruefen.py`, Updates, Messungen) | ja (nur `*.py`) |
+| `vendor\` | mitgelieferte Pakete | ja |
+| `docs\` | Anleitungen | ja |
+| `pruefpakete\` | fertige Prüfpunkte für Prüflisten | ja |
+| `workflows\` | Workflow-Pakete (`workflow.json`, Vorlagen, Wissen, Läufe) | nur `workflow.json` (Vorlagen nach Prüfung) |
+| `wissen\` | gemeinsame Wissenssammlungen | nur `LIESMICH.md` |
+| `models\` | Sprach- und Embedding-Modelle | nein |
+| `data\`, `logs\` | Datenbank, Einstellungen, Protokolle – entstehen beim ersten Start | nein |
 
 ## Lizenz
 
-Drittkomponenten: siehe [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) (customtkinter, comtypes, pypdf). Die Modelle unterliegen ihren eigenen Lizenzen (Qwen3: Apache 2.0, multilingual-e5-large: MIT).
+Komponenten Dritter sind in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) aufgeführt (customtkinter, comtypes, pypdf). Die Modelle stehen unter eigenen Lizenzen: Qwen3 unter Apache 2.0, multilingual-e5-large unter MIT.
