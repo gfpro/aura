@@ -1,0 +1,11 @@
+# Niemals ins Repository: Daten, Modelle, Logs
+data/
+models/*
+!models/README.md
+logs/
+eval/*.txt
+*.db
+*.db-wal
+*.db-shm
+__pycache__/
+*.pyc
