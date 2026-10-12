@@ -1,4 +1,5 @@
-# engine/gpu.py — Version 20261010v44  (AURA)  v44: zweiter Konstantenpuffer mit 16 Werten (64 Bytes)
+# engine/gpu.py — Version 20261012v70  (AURA)  v44: zweiter Konstantenpuffer mit 16 Werten (64 Bytes)
+#   v70: buffer(..., stride=16) fuer uint4-Zugriffe (int8-Gewichte); free() gibt einen Puffer sofort frei
 # Native GPU-Engine fuer multilingual-e5-large: DirectX 11 Compute ueber ctypes, keine Installation.
 # Bausteine: Linear(+GELU), Add+LayerNorm, Self-Attention. Batch = 1 Text, max. 512 Tokens.
 
@@ -155,13 +156,22 @@ class GPU:
             except Exception: pass
         self._objs = []; self.staging = {}; self.dev = c_void_p(); self.ctx = c_void_p()
 
-    def buffer(self, n, data=None):
-        """GPU-Puffer fuer n Floats; data = bytes-artig (z.B. memoryview aus safetensors)."""
-        init = (ctypes.c_char * (n * 4)).from_buffer_copy(data) if data is not None else None
-        b = self._buf(_BD(n * 4, 0, 0x80, 0, 0x40, 4), init)
+    def buffer(self, n, data=None, stride=4):
+        """GPU-Puffer fuer n Elemente zu stride Bytes (Standard: n Floats); data = bytes-artig (z.B. memoryview aus safetensors)."""
+        init = (ctypes.c_char * (n * stride)).from_buffer_copy(data) if data is not None else None
+        b = self._buf(_BD(n * stride, 0, 0x80, 0, 0x40, stride), init)
         v = c_void_p()
         self._ok(_com(self.dev, 8, [c_void_p, POINTER(_UD), POINTER(c_void_p)], b, byref(_UD(0, 1, 0, n, 0)), byref(v)), "CreateUAV")
         self._objs.append(v); return {"buf": b, "uav": v, "n": n}
+
+    def free(self, b):
+        """v70: Puffer (und seine Sicht) sofort freigeben, z.B. Zwischenpuffer nach dem Laden."""
+        for o in (b.get("uav"), b.get("buf")):
+            if o is not None and o in self._objs:
+                self._objs.remove(o)
+                try: _com(o, 2, [], restype=c_uint)
+                except Exception: pass
+        b["uav"] = b["buf"] = None
 
     def write(self, b, data):
         """Schreibt data an den Anfang des Puffers (Box noetig, sonst liest D3D die volle Puffergroesse)."""

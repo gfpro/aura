@@ -1,4 +1,9 @@
-# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261012v67
+# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261012v71
+# v71: Logo (aura\assets: logo_*.png in der Seitenleiste, aura.ico für Fenster und Taskleiste).
+# v70: Schalter «8 Bit (schneller)» unter dem Sprachmodell (Einstellung llm_int8).
+# v69: Darstellung Hell/Dunkel/System umschaltbar (unten links, gespeichert); Untertitel ausgeschrieben; Modellname kürzer.
+# v68: Farbschema Navy (dunkel), Info-Leiste rechts (Sprachmodell, Vektordatenbank, Workflows; ein-/ausblendbar, blendet sich
+#      bei schmalem Fenster aus), Startseite mit Kacheln statt Knöpfen; «Letzte Ergebnisse» wandert in die Info-Leiste.
 # v67: Knopf «↳ Bezug zur letzten Frage» (gilt fuer eine Frage, schaltet sich nach dem Senden aus).
 # v60: «Alles zurücksetzen» (Quellen); Startseite «Letzte Ergebnisse» wird aufgefrischt; Läufe lassen sich löschen (Papierkorb).
 # v59: Tabellen in den Ergebnis-Karten (Termine, Mails …).
@@ -10,6 +15,7 @@ import ctypes, queue, re, time, tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import customtkinter as ctk
 import os
+from pathlib import Path                                            # v71
 from . import VERSION, log, hilfe
 from .config import MODELS, load_settings, save_settings, location_warning
 from .connectors import CONNECTORS
@@ -21,19 +27,27 @@ APP_NAME = "AURA"
 SUBTITLE = "Artificial Understanding & Retrieval Assistant"
 F = "Segoe UI"
 # Farbpaare (hell, dunkel) - folgen automatisch dem Windows-Farbschema
-BG      = ("#F5F6F8", "#0F1115")
-SIDE    = ("#FFFFFF", "#161A21")
-CARD    = ("#F3F4F6", "#1E232C")
-BUBBLE  = ("#FFFFFF", "#1E232C")
-BORDER  = ("#E5E7EB", "#2A303B")
-INK     = ("#111827", "#E8EAED")
-MUTED   = ("#6B7280", "#9AA3AF")
-ACCENT, ACCENT_HI = "#4F6BED", "#3D57D6"
-OK, OFF, ERR = "#22C55E", ("#C4C8CF", "#4B5260"), "#E5484D"
+BG      = ("#F4F5FA", "#0B1020")          # v68: Navy-Schema
+SIDE    = ("#FFFFFF", "#10172E")
+CARD    = ("#EEF0F7", "#18213D")
+BUBBLE  = ("#FFFFFF", "#151D36")
+BORDER  = ("#E1E4EE", "#263156")
+INK     = ("#111827", "#E6E9F2")
+MUTED   = ("#6B7280", "#8E98B5")
+ACCENT, ACCENT_HI = "#6E56F8", "#5A43E0"
+TEAL    = ("#0F9D7A", "#2DD4A4")          # v68: Statusfarbe der Info-Leiste
+OK, OFF, ERR = "#10B981", ("#C4C8CF", "#4B5260"), "#E5484D"
+FH = "Georgia"
+MODI = {"Hell": "light", "Dunkel": "dark", "System": "system"}            # v69                            # v68: Serifen nur für wenige Überschriften
 # v46: Startfragen. Mit «XY» wird nur ins Eingabefeld uebernommen (XY markiert), sonst sofort gefragt.
 SUGGESTIONS = ["Welche Termine habe ich diese Woche?",
                "Welche Mails habe ich heute erhalten?",
                "Welche Informationen sind zum Thema XY vorhanden?"]
+# v68: Kacheln der Startseite (Symbol, Titel, Untertitel, Frage; None = Workflows öffnen)
+TILES = [("▦", "Termine diese Woche", "Kalender aus Outlook", SUGGESTIONS[0]),
+         ("✉", "Mails von heute", "Posteingang, lokal durchsucht", SUGGESTIONS[1]),
+         ("⌕", "Thema suchen", "Mails, Dokumente, Verlauf", SUGGESTIONS[2]),
+         ("▶", "Workflow starten", "Abläufe und Ergebnisse", None)]
 
 def visible(t):
     """Qwen3-Denkteil <think>…</think> nicht anzeigen (auch leer, wie bei /no_think)."""
@@ -41,6 +55,7 @@ def visible(t):
     return t.split("</think>", 1)[1].strip() if "</think>" in t else ""
 
 def font(size=13, weight="normal"): return ctk.CTkFont(family=F, size=size, weight=weight)
+def hfont(size=18): return ctk.CTkFont(family=FH, size=size, weight="bold")
 def fmt(v): return f"{v:,}".replace(",", "'")
 def secs(v): return f"{v:.0f} s" if v >= 10 else f"{v:.1f} s"
 
@@ -58,11 +73,12 @@ class App:
         # CustomTkinter multipliziert geometry() mit der Windows-Skalierung (z.B. 150 %) -> vorher herausrechnen
         sc = ctk.ScalingTracker.get_window_scaling(root) or 1.0
         sw, sh = root.winfo_screenwidth() / sc, root.winfo_screenheight() / sc
-        W, H = int(min(sw * 0.60, 1200)), int(min(sh * 0.64, 760))   # v47: 20 % kleiner als bisher, zentriert
+        W, H = int(min(sw * 0.80, 1480)), int(min(sh * 0.72, 820))   # v68: breiter wegen Info-Leiste rechts
         root.geometry(f"{W}x{H}+{int((sw - W) / 2)}+{int(max(0, (sh - H) / 3))}")
         root.title(f"{APP_NAME} – {SUBTITLE}"); root.minsize(820, 560); root.configure(fg_color=BG)
         root.grid_columnconfigure(1, weight=1); root.grid_rowconfigure(0, weight=1)
-        self._sidebar(); self._main()
+        self.last_speed = None                                         # v68: Tempo der letzten Antwort (Info-Leiste)
+        self._sidebar(); self._main(); self._rightbar()
         hilfe.auto(root, "haupt")                                      # v38: Infotexte
         root.bind("<Escape>", lambda e: self.close_panel(), add="+")   # v46: Slide-In schliessen
         warn = location_warning()
@@ -75,6 +91,7 @@ class App:
         self.fvars = {}; self.flist = []; self.confirm_open = False; self.decline_until = 0.0
         self.next_auto = time.time() + 120; root.after(30000, self.autotick)
         root.after(1500, self._erg_badge)                              # v54
+        root.bind("<Configure>", self._on_resize, add="+"); root.after(400, self._rb_apply)   # v68
 
     # ------------------------------------------------------------------ Seitenleiste
     def _sidebar(self):
@@ -84,11 +101,14 @@ class App:
         # Kopf: Logo, Name, Zahnrad (Quellen)
         hd = ctk.CTkFrame(side, fg_color="transparent"); hd.grid(row=0, column=0, sticky="ew", padx=(22, 14), pady=(22, 0))
         hd.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(hd, text="◆", width=36, height=36, corner_radius=10, fg_color=ACCENT,
-                     text_color="white", font=font(16, "bold")).grid(row=0, column=0)
+        logo = self._logo(40)                                            # v71
+        if logo is not None: ctk.CTkLabel(hd, text="", image=logo, width=40, height=40).grid(row=0, column=0)
+        else: ctk.CTkLabel(hd, text="◆", width=36, height=36, corner_radius=10, fg_color=ACCENT,
+                           text_color="white", font=font(16, "bold")).grid(row=0, column=0)
         tt = ctk.CTkFrame(hd, fg_color="transparent"); tt.grid(row=0, column=1, sticky="w", padx=10)
         ctk.CTkLabel(tt, text=APP_NAME, font=font(20, "bold"), text_color=INK, height=22).pack(anchor="w")
-        ctk.CTkLabel(tt, text="Dein lokales zweites Gehirn", font=font(11), text_color=MUTED, height=14).pack(anchor="w")
+        ctk.CTkLabel(tt, text="Artificial Understanding &\nRetrieval Assistant", font=font(11), text_color=MUTED,
+                     justify="left", anchor="w").pack(anchor="w")                     # v69
         r = 1
 
         # ---- Sprachmodell
@@ -107,6 +127,9 @@ class App:
         self.b_llm = ctk.CTkButton(lrow, text="Laden", width=80, height=28, corner_radius=8, font=font(12, "bold"),
                                    fg_color=ACCENT, hover_color=ACCENT_HI, command=self.toggle_llm)
         self.b_llm.grid(row=0, column=2); self.llm_ready = False
+        self.q8_var = tk.BooleanVar(value=bool(self.s.get("llm_int8", False)))                # v70
+        ctk.CTkSwitch(side, text="8 Bit (schneller)", variable=self.q8_var, font=font(11), text_color=INK, progress_color=ACCENT,
+                      switch_width=32, switch_height=16, command=self.toggle_q8).grid(row=r, column=0, sticky="w", padx=18, pady=(6, 0)); r += 1
         self._llm_view("none" if self.s["llm"] == "extractive" else "off",
                        "kein Laden noetig" if self.s["llm"] == "extractive" else "nicht geladen")
 
@@ -151,6 +174,10 @@ class App:
                                    hover_color=BORDER, text_color=INK, command=self.open_ergebnisse)          # v54
         self.b_erg.grid(row=r, column=0, sticky="ew", padx=16, pady=(6, 0)); r += 1
         hilfe.tip(self.b_erg, "Ergebnisse aller Workflows: neueste zuerst, mit Öffnen, Speichern und Laufordner.")
+        self.rb_var = tk.BooleanVar(value=bool(self.s.get("rechte_leiste", True)))          # v68
+        ctk.CTkSwitch(side, text="Info-Leiste rechts", variable=self.rb_var, font=font(11), text_color=INK,
+                      progress_color=ACCENT, switch_width=32, switch_height=16, command=self.toggle_rb).grid(
+            row=r, column=0, sticky="w", padx=18, pady=(10, 0)); r += 1
         self.pb = ctk.CTkProgressBar(side, height=6, corner_radius=3, progress_color=ACCENT, fg_color=BORDER)
         self.pb.grid(row=r, column=0, sticky="ew", padx=16, pady=(10, 4)); self.pb.set(0); r += 1
         self.prog = ctk.CTkLabel(side, text="", font=font(11), text_color=MUTED, wraplength=270, justify="left", anchor="w")
@@ -159,13 +186,168 @@ class App:
         vl = ctk.CTkLabel(side, text=f"Version {VERSION}  ·  lokal, ohne Cloud  ·  Log", font=font(10), text_color=MUTED,
                           cursor="hand2")
         vl.bind("<Button-1>", lambda e: self.open_log()); hilfe.tip(vl, "#version")
+        self.sb_mode = ctk.CTkSegmentedButton(side, values=list(MODI), height=26, font=font(11), command=self.set_mode,  # v69
+                                              selected_color=ACCENT, selected_hover_color=ACCENT_HI, unselected_color=CARD,
+                                              unselected_hover_color=BORDER, fg_color=CARD, text_color=INK)
+        self.sb_mode.set(next((k for k, v in MODI.items() if v == self.s.get("darstellung", "system")), "System"))
+        self.sb_mode.grid(row=r + 1, column=0, sticky="ew", padx=16, pady=(0, 2))
+        hilfe.tip(self.sb_mode, "Darstellung: Hell, Dunkel oder wie Windows (System). Wird gespeichert.")
         vl.grid(
-            row=r + 1, column=0, sticky="sw", padx=20, pady=12)
+            row=r + 2, column=0, sticky="sw", padx=20, pady=(6, 12))
 
     def _title(self, parent, text, r):
         ctk.CTkLabel(parent, text=text.upper(), font=font(10, "bold"), text_color=MUTED, anchor="w").grid(
             row=r, column=0, sticky="w", padx=22, pady=(20, 6))
         return r + 1
+
+    # ------------------------------------------------------------------ v68: Info-Leiste rechts
+    RB_MIN = 1180                     # Fensterbreite (ohne Windows-Skalierung), unter der sich die Leiste ausblendet
+
+    def _rightbar(self):
+        """Nur Anzeige: liest Werte, die schon vorliegen (Statistik, Modellzustand, protokoll.json). Legt nie Jobs in den Worker."""
+        rb = self.rb = ctk.CTkFrame(self.root, width=300, corner_radius=0, fg_color=SIDE)
+        rb.grid_propagate(False); rb.pack_propagate(False)
+        sf = ctk.CTkScrollableFrame(rb, fg_color="transparent", scrollbar_button_color=BORDER, scrollbar_button_hover_color=MUTED)
+        sf.pack(fill="both", expand=True, padx=2, pady=10); sf.grid_columnconfigure(0, weight=1)
+        # --- Sprachmodell
+        c = self._rb_card(sf, "SPRACHMODELL", 0)
+        self.rb_mname = ctk.CTkLabel(c, text="", font=hfont(15), text_color=INK, anchor="w", justify="left", wraplength=240)
+        self.rb_mname.grid(row=1, column=0, sticky="w", padx=14)
+        self.rb_mtyp = ctk.CTkLabel(c, text="", font=font(10), text_color=MUTED, anchor="w", height=14)
+        self.rb_mtyp.grid(row=4, column=0, sticky="w", padx=14, pady=(0, 10))      # v69: Architektur klein
+        self.rb_mstate = ctk.CTkLabel(c, text="", font=font(11), text_color=MUTED, anchor="w")
+        self.rb_mstate.grid(row=2, column=0, sticky="w", padx=14, pady=(2, 0))
+        self.rb_mspeed = ctk.CTkLabel(c, text="", font=font(11), text_color=MUTED, anchor="w", justify="left", wraplength=230)
+        self.rb_mspeed.grid(row=3, column=0, sticky="w", padx=14, pady=(2, 2))
+        hilfe.tip(c, "Gewähltes Sprachmodell und sein Zustand. Tempo = Schreibgeschwindigkeit der letzten Antwort im Chat.")
+        # --- Vektordatenbank
+        c = self._rb_card(sf, "WISSEN · DATENBANK", 1)
+        self.rb_vbig = ctk.CTkLabel(c, text="–", font=hfont(18), text_color=INK, anchor="w")
+        self.rb_vbig.grid(row=1, column=0, sticky="w", padx=14)
+        self.rb_vsub = ctk.CTkLabel(c, text="", font=font(11), text_color=MUTED, anchor="w")
+        self.rb_vsub.grid(row=2, column=0, sticky="w", padx=14)
+        self.rb_vbar = ctk.CTkProgressBar(c, height=6, corner_radius=3, progress_color=TEAL, fg_color=BORDER)
+        self.rb_vbar.grid(row=3, column=0, sticky="ew", padx=14, pady=(8, 6)); self.rb_vbar.set(0)
+        self.rb_vsrc = ctk.CTkFrame(c, fg_color="transparent"); self.rb_vsrc.grid(row=4, column=0, sticky="ew", padx=10)
+        self.rb_vsrc.grid_columnconfigure(0, weight=1)
+        self.rb_vauto = ctk.CTkLabel(c, text="", font=font(10), text_color=MUTED, anchor="w", justify="left", wraplength=230)
+        self.rb_vauto.grid(row=5, column=0, sticky="w", padx=14, pady=(4, 12))
+        hilfe.tip(c, "Eingelesene Objekte und Textstücke je Quelle. Der Balken zeigt, wie viele Textstücke schon einen Vektor haben "
+                     "(Suche nach Bedeutung). Unter 100 %: links «Vektoren berechnen».")
+        # --- Workflows
+        c = self._rb_card(sf, "WORKFLOWS", 2)
+        ctk.CTkButton(c, text="alle anzeigen →", width=0, height=20, corner_radius=8, font=font(11), fg_color="transparent",
+                      hover_color=BORDER, text_color=ACCENT, command=self.open_ergebnisse).grid(row=0, column=0, sticky="e", padx=10, pady=(8, 0))
+        self.rb_plan = ctk.CTkLabel(c, text="", font=font(11), text_color=INK, anchor="w", justify="left", wraplength=230)
+        self.rb_plan.grid(row=1, column=0, sticky="w", padx=14)
+        self.rb_wbox = ctk.CTkFrame(c, fg_color="transparent"); self.rb_wbox.grid(row=2, column=0, sticky="ew", padx=8, pady=(4, 10))
+        self.rb_wbox.grid_columnconfigure(0, weight=1)
+        hilfe.auto(rb, "haupt")
+        self._rb_model(); self._rb_stats(); self._rb_runs()
+
+    def _rb_card(self, parent, title, row):
+        c = ctk.CTkFrame(parent, fg_color=CARD, corner_radius=12, border_width=1, border_color=BORDER)
+        c.grid(row=row, column=0, sticky="ew", padx=8, pady=6); c.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(c, text=title, font=font(10, "bold"), text_color=MUTED, anchor="w").grid(row=0, column=0, sticky="w", padx=14, pady=(10, 4))
+        return c
+
+    def _rb_ok(self): return getattr(self, "rb", None) is not None
+
+    def _rb_model(self, col=None, text=None):
+        if not self._rb_ok(): return
+        try:
+            nm = self.om.get(); kurz, _, rest = nm.partition(" [")
+            self.rb_mname.configure(text=kurz)
+            typ = rest.rstrip("]").replace(", ", " · ") if rest else ""
+            if self.s.get("llm_int8") and self.s.get("llm") != "extractive": typ = (typ + " · " if typ else "") + "8 Bit"
+            self.rb_mtyp.configure(text=typ)
+            if text is not None:
+                self.rb_mstate.configure(text=f"● {text}", text_color=TEAL if col == OK else ("#F59E0B" if col == "#F59E0B" else MUTED))
+            sp = self.last_speed
+            self.rb_mspeed.configure(text=(f"Letzte Antwort: {sp[0]:.1f} Tokens/s · {secs(sp[1])} gesamt".replace(".", ",")
+                                           if sp else "Noch keine Antwort mit Sprachmodell in dieser Sitzung."))
+        except Exception: log.get().exception("Info-Leiste Modell")
+
+    def _rb_stats(self):
+        if not self._rb_ok(): return
+        try:
+            st = self.stats or {}
+            on = [c for c in CONNECTORS if c.id in st]
+            it = sum(st[c.id].get("items", 0) for c in on); ch = sum(st[c.id].get("chunks", 0) for c in on)
+            ve = sum(st[c.id].get("vectors", 0) for c in on)
+            self.rb_vbig.configure(text=f"{fmt(it)} Objekte" if on else "Keine Quelle")
+            self.rb_vsub.configure(text=f"{fmt(ch)} Textstücke · {ve * 100 // ch if ch else 0} % mit Vektor" if on else "Links «Quellen» öffnen")
+            self.rb_vbar.set(ve / ch if ch else 0)
+            for w in self.rb_vsrc.winfo_children(): w.destroy()
+            ctk.CTkLabel(self.rb_vsrc, text=f"{len(on)} VON {len(CONNECTORS)} QUELLEN VERBUNDEN", font=font(9, "bold"),
+                         text_color=MUTED, anchor="w").grid(row=0, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
+            for i, c in enumerate(CONNECTORS, start=1):
+                x = st.get(c.id)
+                ctk.CTkLabel(self.rb_vsrc, text=("● " if x else "○ ") + c.label, font=font(11), anchor="w",
+                             text_color=INK if x else MUTED).grid(row=i, column=0, sticky="w", padx=4)
+                ctk.CTkLabel(self.rb_vsrc, text=fmt(x.get("items", 0)) if x else "–", font=font(11), text_color=MUTED,
+                             anchor="e").grid(row=i, column=1, sticky="e", padx=4)
+            auto = "ein" if self.s.get("autosync", True) else "aus"
+            self.rb_vauto.configure(text=f"Auto-Abgleich {auto}  ·  {self._auto_text()}")
+        except Exception: log.get().exception("Info-Leiste Statistik")
+
+    def _rb_runs(self):
+        if not self._rb_ok(): return
+        try:
+            from .ergebnisse import laeufe
+            from .workflow.app import WF_DIR
+            for w in self.rb_wbox.winfo_children(): w.destroy()
+            try:
+                from .zeitplan import mit_zeitplan, naechster
+                plan = sorted([(naechster(w["zeitplan"]), w["name"]) for w in mit_zeitplan(WF_DIR)], key=lambda x: (x[0] is None, x[0] or 0))
+                plan = [p for p in plan if p[0]]
+                self.rb_plan.configure(text=f"⏰ Als Nächstes: {plan[0][1]}, {plan[0][0].strftime('%d.%m. %H:%M')}" if plan else "")
+            except Exception: self.rb_plan.configure(text="")
+            ls = laeufe(WF_DIR, 5)
+            if not ls:
+                ctk.CTkLabel(self.rb_wbox, text="Noch keine Läufe.", font=font(11), text_color=MUTED, anchor="w").grid(row=0, column=0, sticky="w", padx=6)
+            for i, x in enumerate(ls):
+                ok = x["status"] == "ok"
+                row = ctk.CTkFrame(self.rb_wbox, fg_color="transparent", corner_radius=8); row.grid(row=i, column=0, sticky="ew", pady=1)
+                row.grid_columnconfigure(1, weight=1)
+                ic = ctk.CTkLabel(row, text="✓" if ok else "✕", width=22, font=font(12, "bold"), text_color=TEAL if ok else ERR)
+                ic.grid(row=0, column=0, rowspan=2, padx=(4, 4))
+                t1 = ctk.CTkLabel(row, text=("● " if x["neu"] else "") + x["workflow"][:30], font=font(11, "bold" if x["neu"] else "normal"),
+                                  text_color=INK, anchor="w", height=16, cursor="hand2")
+                t1.grid(row=0, column=1, sticky="w", pady=(4, 0))
+                t2 = ctk.CTkLabel(row, text=f"{x['zeit']}  ·  {x['seconds']:.0f} s" + ("" if ok else f"  ·  {x['status']}"), font=font(10),
+                                  text_color=MUTED, anchor="w", height=14)
+                t2.grid(row=1, column=1, sticky="w", pady=(0, 4))
+                for w in (row, ic, t1, t2):
+                    w.bind("<Button-1>", lambda e: self.open_ergebnisse())
+                    w.bind("<Enter>", lambda e, r=row: r.configure(fg_color=BORDER)); w.bind("<Leave>", lambda e, r=row: r.configure(fg_color="transparent"))
+        except Exception: log.get().exception("Info-Leiste Workflows")
+
+    def set_mode(self, label):
+        """v69: Hell/Dunkel/System sofort umschalten und speichern."""
+        m = MODI.get(label, "system"); ctk.set_appearance_mode(m)
+        self.s = load_settings(); self.s["darstellung"] = m; save_settings(self.s)
+
+    def toggle_rb(self):
+        self.s = load_settings(); self.s["rechte_leiste"] = bool(self.rb_var.get()); save_settings(self.s)
+        self._rb_apply()
+        if self.s["rechte_leiste"] and not self.rb.winfo_manager():
+            self.status.configure(text="Info-Leiste: Fenster zu schmal – Fenster breiter ziehen, dann erscheint sie.")
+
+    def _rb_apply(self):
+        if not self._rb_ok(): return
+        sc = ctk.ScalingTracker.get_window_scaling(self.root) or 1.0
+        show = bool(self.s.get("rechte_leiste", True)) and self.root.winfo_width() / sc >= self.RB_MIN
+        if show and not self.rb.winfo_manager(): self.rb.grid(row=0, column=2, sticky="nse")
+        elif not show and self.rb.winfo_manager(): self.rb.grid_remove()
+        self.root.after_idle(self._rewrap)
+
+    def _on_resize(self, e):
+        if e.widget is not self.root: return
+        if getattr(self, "_rs_job", None):
+            try: self.root.after_cancel(self._rs_job)
+            except Exception: pass
+        self._rs_job = self.root.after(250, self._rb_apply)
 
     # ------------------------------------------------------------------ v46: Slide-In von rechts
     def panel(self, title, key, width=440, on_close=None):
@@ -346,6 +528,7 @@ class App:
                 dot.configure(text_color=OK)
                 info.configure(text=f"{fmt(x.get('items', 0))} Objekte · {fmt(x.get('vectors', 0))}/{fmt(x.get('chunks', 0))} Vektoren"
                                + (f"\nzuletzt {x['last_sync']}" if x.get("last_sync") else ""), height=0)
+        self._rb_stats()                                                 # v68
 
     # ------------------------------------------------------------------ Chatbereich
     def _main(self):
@@ -380,47 +563,47 @@ class App:
 
     def _welcome(self):
         f = ctk.CTkFrame(self.chat, fg_color="transparent"); f.grid(row=0, column=0, pady=(24, 0))
-        ctk.CTkLabel(f, text="Woran arbeitest du?", font=font(26, "bold"), text_color=INK).pack()
-        ctk.CTkLabel(f, text="Ich durchsuche deine Mails, Termine, deinen Verlauf und Dokumente – lokal.",
+        ctk.CTkLabel(f, text="Woran arbeitest du heute?", font=hfont(28), text_color=INK).pack()
+        ctk.CTkLabel(f, text="AURA durchsucht deine Mails, Termine, deinen Verlauf und Dokumente – lokal auf diesem Rechner.",
                      font=font(13), text_color=MUTED).pack(pady=(6, 22))
-        self.welcome_erg = None; self.welcome_first = None
-        for i, s in enumerate(SUGGESTIONS):
-            b = hilfe.tip(ctk.CTkButton(f, text=s, height=38, corner_radius=19, font=font(13), fg_color=BUBBLE, hover_color=CARD,
-                                        text_color=INK, border_width=1, border_color=BORDER,
-                                        command=lambda s=s: self._fill(s)), "#beispiel")
-            b.pack(pady=4)
-            if i == 0: self.welcome_first = b
+        grid = ctk.CTkFrame(f, fg_color="transparent"); grid.pack()       # v68: Kacheln 2 × 2
+        for i, t in enumerate(TILES): self._tile(grid, *t).grid(row=i // 2, column=i % 2, padx=6, pady=6, sticky="nsew")
         self.welcome = f
-        self._welcome_erg()
+
+    def _logo(self, size):
+        """v71: Logo als PNG passend zur Windows-Skalierung (Tk kann PNG ohne Zusatzpaket). None = Datei fehlt."""
+        import warnings
+        try:
+            sc = ctk.ScalingTracker.get_window_scaling(self.root) or 1.0
+            want = size * sc; d = Path(__file__).resolve().parent / "assets"
+            n = next((n for n in (40, 60, 80, 256) if n >= want - 2), 256)
+            img = tk.PhotoImage(master=self.root, file=str(d / f"logo_{n}.png"))
+            f = max(1, round(n / want))
+            if f > 1: img = img.subsample(f, f)
+            self._logo_img = img; warnings.filterwarnings("ignore", message=".*CTkImage.*")
+            return img
+        except Exception: return None
+
+    def _tile(self, parent, sym, title, sub, q):
+        """v68: Kachel der Startseite; Klick auf jeden Teil löst aus."""
+        c = ctk.CTkFrame(parent, fg_color=BUBBLE, corner_radius=14, border_width=1, border_color=BORDER, width=300, height=74)
+        c.grid_propagate(False); c.grid_columnconfigure(1, weight=1)
+        ic = ctk.CTkLabel(c, text=sym, width=38, height=38, corner_radius=10, fg_color=CARD, text_color=ACCENT, font=font(16, "bold"))
+        ic.grid(row=0, column=0, rowspan=2, padx=(14, 10), pady=16)
+        t1 = ctk.CTkLabel(c, text=title, font=font(13, "bold"), text_color=INK, anchor="w", height=18, cursor="hand2")
+        t1.grid(row=0, column=1, sticky="sw", pady=(16, 0))
+        t2 = ctk.CTkLabel(c, text=sub, font=font(11), text_color=MUTED, anchor="w", height=16)
+        t2.grid(row=1, column=1, sticky="nw", pady=(0, 16))
+        go = (lambda e=None: self.open_workflows()) if q is None else (lambda e=None, q=q: self._fill(q))
+        for w in (c, ic, t1, t2):
+            w.bind("<Button-1>", go)
+            w.bind("<Enter>", lambda e: c.configure(border_color=ACCENT)); w.bind("<Leave>", lambda e: c.configure(border_color=BORDER))
+        hilfe.tip(c, "Öffnet die Workflows mit ihren Ergebnissen." if q is None else hilfe.TEXTE["*"]["#beispiel"])
+        return c
 
     def _welcome_erg(self):
-        """v60: Kasten «Letzte Ergebnisse» (neu) aufbauen – beim Start, nach einem Lauf, nach Löschen, beim Zurück zum Chat."""
-        f = getattr(self, "welcome", None)
-        if f is None or not f.winfo_exists(): return
-        if self.welcome_erg is not None:
-            try: self.welcome_erg.destroy()
-            except Exception: pass
-            self.welcome_erg = None
-        try:                                                             # v54: letzte Ergebnisse auf der Startseite
-            from .ergebnisse import laeufe
-            from .workflow.app import WF_DIR
-            ls = laeufe(WF_DIR, 3)
-            if ls:                                                       # v55: eingerahmt, damit es auffällt
-                box = self.welcome_erg = ctk.CTkFrame(f, fg_color=BUBBLE, corner_radius=14, border_width=2, border_color=ACCENT)
-                kw = {"before": self.welcome_first} if self.welcome_first is not None else {}
-                box.pack(pady=(0, 18), ipadx=10, ipady=6, **kw)
-                hd = ctk.CTkFrame(box, fg_color="transparent"); hd.pack(fill="x", padx=14, pady=(10, 4))
-                n = sum(1 for x in ls if x["neu"])
-                ctk.CTkLabel(hd, text="LETZTE ERGEBNISSE" + (f"  ·  {n} neu" if n else ""), font=font(11, "bold"),
-                             text_color=ACCENT).pack(side="left")
-                ctk.CTkButton(hd, text="alle anzeigen →", width=0, height=22, corner_radius=8, font=font(11), fg_color="transparent",
-                              hover_color=CARD, text_color=ACCENT, command=self.open_ergebnisse).pack(side="right")
-                for x in ls:
-                    sym = "✓" if x["status"] == "ok" else "✕"
-                    ctk.CTkButton(box, text=f"{'● ' if x['neu'] else ''}{sym}  {x['workflow']}  ·  {x['zeit']}", height=32, corner_radius=10,
-                                  font=font(12, "bold" if x["neu"] else "normal"), fg_color=CARD, hover_color=BORDER, text_color=INK,
-                                  anchor="w", width=380, command=self.open_ergebnisse).pack(padx=14, pady=2, fill="x")
-        except Exception: log.get().exception("Startseite Ergebnisse")
+        """v68: «Letzte Ergebnisse» steht jetzt in der Info-Leiste rechts (Name bleibt, wird von mehreren Stellen gerufen)."""
+        self._rb_runs()
 
     def _fill(self, s):
         """v46: ohne «XY» sofort fragen; mit «XY» nur einsetzen und XY markieren (Tippen ersetzt es)."""
@@ -507,6 +690,7 @@ class App:
             if tm.get("load", 0) >= 1: parts.append(f"Modell laden {secs(tm['load'])}")
             if "prefill" in tm: parts.append(f"Quellen lesen {secs(tm['prefill'])}")
             if tm.get("gen"): parts.append(f"Schreiben {secs(tm['gen'])} ({tm['out'] / tm['gen']:.1f} Tokens/s)")
+            if tm.get("gen"): self.last_speed = (tm["out"] / tm["gen"], tm["total"]); self._rb_model()      # v68
             ctk.CTkLabel(row, text=f"⏱ {secs(tm['total'])}   ·   " + "  ·  ".join(parts), font=font(11),
                          text_color=MUTED, anchor="w").pack(side="left", padx=(12, 0))
         hilfe.auto(row, "haupt")
@@ -564,6 +748,14 @@ class App:
         self._llm_view("none" if self.s["llm"] == "extractive" else "off",
                        "kein Laden noetig" if self.s["llm"] == "extractive" else "nicht geladen")
 
+    def toggle_q8(self):
+        """v70: 8-Bit-Gewichte ein/aus. Gilt beim nächsten «Laden»; ein geladenes Modell wird entladen."""
+        self.s = load_settings(); self.s["llm_int8"] = bool(self.q8_var.get()); save_settings(self.s)
+        if self.llm_ready:
+            self.w.submit("unload_llm"); self.status.configure(text="8 Bit geändert – Sprachmodell entladen. Bitte neu «Laden».")
+        else: self.status.configure(text="8 Bit geändert – gilt beim nächsten «Laden».")
+        self._rb_model()
+
     def toggle_llm(self):
         if self.llm_ready: self.w.submit("unload_llm"); return
         busy = self.b_embed.cget("state") == "disabled"
@@ -575,6 +767,7 @@ class App:
         col = {"ready": OK, "loading": "#F59E0B", "off": OFF, "none": OFF}.get(state, OFF)
         self.llm_dot.configure(text_color=col); self.llm_info.configure(text=text)
         self.llm_ready = state == "ready"
+        self._rb_model(col, text)                                        # v68
         if state == "none": self.b_llm.grid_remove()
         else:
             self.b_llm.grid(); self.b_llm.configure(text="Entladen" if state == "ready" else "Laden",
@@ -924,7 +1117,7 @@ class App:
                     if w is not None and w.alive() and getattr(w, "wpanel", None): w.wpanel.on_status(d[0])
                 elif kind == "autosync_done":
                     self.s["autosync_last"] = f"{d[0]} · +{d[1]} neu"; save_settings(self.s)
-                    self.auto_lbl.configure(text=self._auto_text())
+                    self.auto_lbl.configure(text=self._auto_text()); self._rb_stats()   # v68
                 elif kind == "error" and getattr(self, "wfwin", None) and self.wfwin.alive() and self.wfwin.running:
                     self.wfwin.on_done({"status": "fehler", "error": d[0]})
                     self.bubble(f"Fehler: {d[0]}", "err")
@@ -945,8 +1138,12 @@ class App:
 def main():
     try: ctypes.windll.shcore.SetProcessDpiAwareness(1)
     except Exception: pass
-    ctk.set_appearance_mode("system")            # hell/dunkel wie Windows
+    ctk.set_appearance_mode(load_settings().get("darstellung", "system"))   # v69: Hell/Dunkel/System aus den Einstellungen
     lg = log.get(); lg.info(f"===== AURA {VERSION} gestartet =====")
+    try: ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("armasuisse.AURA")   # v71: eigenes Taskleisten-Symbol
+    except Exception: pass
     root = ctk.CTk()
+    try: root.iconbitmap(str(Path(__file__).resolve().parent / "assets" / "aura.ico"))       # v71
+    except Exception: pass
     root.report_callback_exception = lambda t, v, tb: lg.error("Fehler in der Oberflaeche", exc_info=(t, v, tb))
     App(root); root.mainloop(); lg.info("AURA beendet")

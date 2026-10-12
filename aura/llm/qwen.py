@@ -1,4 +1,7 @@
-# aura/llm/qwen.py — Version 20261010v44  (AURA)  v28: Kontext bis 32k, Attention v1 nur bis 4k
+# aura/llm/qwen.py — Version 20261012v70  (AURA)  v28: Kontext bis 32k, Attention v1 nur bis 4k
+#   v70: 8-Bit-Gewichte (int8 + 1 Skala je 128 Werte, symmetrisch). Umrechnung beim Laden auf der GPU (kein zweiter
+#        Modellordner). Eigene Kernels fuer Schreiben (K_MV8), kleine Bloecke (K_MVT8) und Einlesen (k_linear8).
+#        Selbsttest: int8 gegen bf16 (Genauigkeit) und die int8-Varianten untereinander (Tempo). Ohne Erfolg -> bf16.
 #   v42: Split-K-Attention beim Schreiben (1 Token): Positionen auf viele GPU-Gruppen verteilt, danach zusammengefuehrt.
 #        Selbsttest vergleicht mit v2 und waehlt nur, wenn gleich und schneller.
 #   v43: Prompt-Cache. kv_ids merkt sich, welche Tokens im KV-Cache stehen; prefill liest nur den neuen Teil.
@@ -378,6 +381,114 @@ void main(uint3 d:SV_DispatchThreadID){
   for(uint i=d.x;i<N;i+=STRIDE){ float x=G[i]; G[i]=x/(1.0+exp(-x))*U[i]; }
 }"""
 
+
+# ----------------------------------------------------------------------------- v70: 8-Bit-Gewichte
+# Ablage: W8 = uint4-Puffer (16 int8 je Element, zeilenweise wie bf16), S = 1 float je 128 Werte (Index (o*IN+k)/128).
+_I8 = r"""
+float4 i8(uint u){ return float4((int)(u<<24)>>24, (int)(u<<16)>>24, (int)(u<<8)>>24, (int)u>>24); }
+"""
+
+# Umrechnung bf16 -> int8: ein Thread je Block zu 128 Werten (Block b = Werte b*128 .. b*128+127).
+K_QUANT = _BF + r"""
+cbuffer C:register(b0){ uint NB; uint P1; uint P2; uint P3; };
+RWStructuredBuffer<uint> B:register(u0); RWStructuredBuffer<uint4> W8:register(u1); RWStructuredBuffer<float> S:register(u2);
+uint q4(float a, float b, float c, float d, float inv){
+  int4 q=clamp((int4)round(float4(a,b,c,d)*inv), -127, 127);
+  return (uint)(q.x&255) | ((uint)(q.y&255)<<8) | ((uint)(q.z&255)<<16) | ((uint)(q.w&255)<<24); }
+[numthreads(64,1,1)]
+void main(uint3 d:SV_DispatchThreadID){
+  uint b=d.x, i; if(b>=NB) return;
+  uint base=b*64; float m=0;
+  for(i=0;i<64;i++){ uint u=B[base+i]; m=max(m, max(abs(lo(u)), abs(hi(u)))); }
+  float inv=(m>0)?127.0/m:0; S[b]=m/127.0;
+  for(i=0;i<8;i++){ uint p=base+i*8; uint4 r;
+    r.x=q4(lo(B[p  ]),hi(B[p  ]),lo(B[p+1]),hi(B[p+1]),inv); r.y=q4(lo(B[p+2]),hi(B[p+2]),lo(B[p+3]),hi(B[p+3]),inv);
+    r.z=q4(lo(B[p+4]),hi(B[p+4]),lo(B[p+5]),hi(B[p+5]),inv); r.w=q4(lo(B[p+6]),hi(B[p+6]),lo(B[p+7]),hi(B[p+7]),inv);
+    W8[b*8+i]=r; }
+}"""
+
+# Schreiben (1 Token): Gruppe = 8 Ausgabezeilen x 32 Threads; jeder Thread liest 16 Gewichte (uint4) am Stueck.
+K_MV8 = _I8 + r"""
+cbuffer C:register(b0){ uint IN; uint YOFF; uint XOFF; uint OUT; };
+RWStructuredBuffer<float> X:register(u0); RWStructuredBuffer<uint4> W:register(u1);
+RWStructuredBuffer<float> Y:register(u2); RWStructuredBuffer<float> S:register(u3);
+groupshared float red[256];
+[numthreads(256,1,1)]
+void main(uint3 g:SV_GroupID, uint3 l:SV_GroupThreadID){
+  uint li=l.x, j=li&31, o=g.x*8+(li>>5), n16=IN/16; float acc=0;
+  if(o<OUT){ uint wb=o*n16, sb=o*(IN/128);
+    for(uint q=j;q<n16;q+=32){ uint4 u=W[wb+q]; uint k=XOFF+q*16;
+      float d=dot(i8(u.x), float4(X[k],X[k+1],X[k+2],X[k+3])) + dot(i8(u.y), float4(X[k+4],X[k+5],X[k+6],X[k+7]))
+            + dot(i8(u.z), float4(X[k+8],X[k+9],X[k+10],X[k+11])) + dot(i8(u.w), float4(X[k+12],X[k+13],X[k+14],X[k+15]));
+      acc+=d*S[sb+(q>>3)]; } }
+  red[li]=acc; GroupMemoryBarrierWithGroupSync();
+  for(uint a=16;a>0;a>>=1){ if(j<a) red[li]+=red[li+a]; GroupMemoryBarrierWithGroupSync(); }
+  if(j==0&&o<OUT) Y[YOFF+o]=red[li];
+}"""
+
+# Wenige Tokens (T <= 16): Gruppe = 32 Zeilen x 8 Threads; Tokens je 128 Spalten im Gruppenspeicher.
+K_MVT8 = _I8 + r"""
+cbuffer C:register(b0){ uint T; uint IN; uint OUT; uint T0; };
+RWStructuredBuffer<float> X:register(u0); RWStructuredBuffer<uint4> W:register(u1);
+RWStructuredBuffer<float> Y:register(u2); RWStructuredBuffer<float> S:register(u3);
+groupshared float Xs[16][128]; groupshared float red[256][17];
+[numthreads(256,1,1)]
+void main(uint3 g:SV_GroupID, uint3 l:SV_GroupThreadID){
+  uint li=l.x, j=li&7, r=li>>3, o=g.x*32+r, t, c, k0, rr;
+  float acc[16]; [unroll] for(t=0;t<16;t++) acc[t]=0;
+  for(k0=0;k0<IN;k0+=128){
+    [unroll] for(rr=0;rr<8;rr++){ uint idx=li+256*rr; uint tt=idx>>7, kk=idx&127;
+      Xs[tt][kk]=(tt<T)?X[(T0+tt)*IN+k0+kk]:0; }
+    GroupMemoryBarrierWithGroupSync();
+    uint4 u=(o<OUT)?W[(o*IN+k0)/16+j]:uint4(0,0,0,0); float s=(o<OUT)?S[(o*IN+k0)/128]:0;
+    float4 w0=i8(u.x)*s, w1=i8(u.y)*s, w2=i8(u.z)*s, w3=i8(u.w)*s; uint kb=j*16;
+    [unroll] for(t=0;t<16;t++){
+      acc[t]+=dot(w0,float4(Xs[t][kb],Xs[t][kb+1],Xs[t][kb+2],Xs[t][kb+3]))+dot(w1,float4(Xs[t][kb+4],Xs[t][kb+5],Xs[t][kb+6],Xs[t][kb+7]))
+             +dot(w2,float4(Xs[t][kb+8],Xs[t][kb+9],Xs[t][kb+10],Xs[t][kb+11]))+dot(w3,float4(Xs[t][kb+12],Xs[t][kb+13],Xs[t][kb+14],Xs[t][kb+15])); }
+    GroupMemoryBarrierWithGroupSync();
+  }
+  [unroll] for(t=0;t<16;t++) red[li][t]=acc[t];
+  GroupMemoryBarrierWithGroupSync();
+  [unroll] for(rr=0;rr<2;rr++){ uint e=li+256*rr; uint ro=e>>4, tt=e&15; float sm=0;
+    for(c=0;c<8;c++) sm+=red[ro*8+c][tt];
+    uint oo=g.x*32+ro; if(tt<T&&oo<OUT) Y[(T0+tt)*OUT+oo]=sm; }
+}"""
+
+def k_linear8(TM, TN):
+    """Einlesen mit int8-Gewichten: wie k_linear_tiled, je Ausgabezeile wird ein uint4 (16 Werte = ganze k-Scheibe) gelesen."""
+    BT, BO = 16 * TM, 16 * TN
+    return _I8 + r"""
+cbuffer C:register(b0){ uint T; uint IN; uint OUT; uint PAD; };
+RWStructuredBuffer<float> X:register(u0); RWStructuredBuffer<uint4> W:register(u1);
+RWStructuredBuffer<float> Y:register(u2); RWStructuredBuffer<float> S:register(u3);
+groupshared float As[16][%(BT)d]; groupshared float Ws[16][%(BO)d];
+[numthreads(16,16,1)]
+void main(uint3 g:SV_GroupID, uint3 l:SV_GroupThreadID, uint li:SV_GroupIndex){
+  uint t0=g.y*%(BT)d, o0=g.x*%(BO)d, i, j, r;
+  float acc[%(TM)d][%(TN)d];
+  [unroll] for(i=0;i<%(TM)d;i++) [unroll] for(j=0;j<%(TN)d;j++) acc[i][j]=0;
+  for(uint k0=0;k0<IN;k0+=16){
+    [unroll] for(r=0;r<%(TM)d;r++){ uint idx=li+256*r; uint row=idx>>4, kk=idx&15; uint t=t0+row;
+      As[kk][row]=(t<T)?X[t*IN+k0+kk]:0; }
+    if(li<%(BO)d){ uint o=o0+li; uint4 u=(o<OUT)?W[(o*IN+k0)/16]:uint4(0,0,0,0); float s=(o<OUT)?S[(o*IN+k0)/128]:0;
+      float4 a=i8(u.x)*s, b=i8(u.y)*s, c=i8(u.z)*s, d=i8(u.w)*s;
+      Ws[0][li]=a.x; Ws[1][li]=a.y; Ws[2][li]=a.z; Ws[3][li]=a.w; Ws[4][li]=b.x; Ws[5][li]=b.y; Ws[6][li]=b.z; Ws[7][li]=b.w;
+      Ws[8][li]=c.x; Ws[9][li]=c.y; Ws[10][li]=c.z; Ws[11][li]=c.w; Ws[12][li]=d.x; Ws[13][li]=d.y; Ws[14][li]=d.z; Ws[15][li]=d.w; }
+    GroupMemoryBarrierWithGroupSync();
+    [unroll] for(uint kk=0;kk<16;kk++){
+      float a2[%(TM)d], w[%(TN)d];
+      [unroll] for(i=0;i<%(TM)d;i++) a2[i]=As[kk][l.y+16*i];
+      [unroll] for(j=0;j<%(TN)d;j++) w[j]=Ws[kk][l.x+16*j];
+      [unroll] for(i=0;i<%(TM)d;i++) [unroll] for(j=0;j<%(TN)d;j++) acc[i][j]+=a2[i]*w[j];
+    }
+    GroupMemoryBarrierWithGroupSync();
+  }
+  [unroll] for(i=0;i<%(TM)d;i++){ uint t=t0+l.y+16*i;
+    [unroll] for(j=0;j<%(TN)d;j++){ uint o=o0+l.x+16*j; if(t<T&&o<OUT) Y[t*OUT+o]=acc[i][j]; } }
+}""" % dict(BT=BT, BO=BO, TM=TM, TN=TN)
+
+LIN8_VARIANTS = {"q44": (4, 4), "q48": (4, 8)}
+
 # ----------------------------------------------------------------------------- Gewichte
 def bf16_to_f32(raw):
     """bf16-Bytes -> float32-Bytes (little endian: 2 Nullbytes davor)."""
@@ -413,7 +524,7 @@ class ShardedSafeTensors:
 
 # ----------------------------------------------------------------------------- Engine
 class Qwen3Engine:
-    def __init__(self, model_dir, progress=lambda *a: None, layers=None, maxT=MAXT):
+    def __init__(self, model_dir, progress=lambda *a: None, layers=None, maxT=MAXT, int8=False):
         self.dir = Path(model_dir)
         c = self.cfg = json.loads((self.dir / "config.json").read_text(encoding="utf-8"))
         self.H, self.I, self.L = c["hidden_size"], c["intermediate_size"], c["num_hidden_layers"]
@@ -443,7 +554,17 @@ class Qwen3Engine:
             except Exception as e: progress(f"Kernel {name} nicht verfuegbar: {e}")
         if self.NH % self.NKV or self.NH // self.NKV > 4: raise ValueError("Engine erwartet hoechstens 4 Q-Koepfe pro KV-Kopf")
         self.lin_kernel = "v2"; self.attn_kernel = "v2"; self.prof = None
-        P = "model.layers.%d."; up = lambda k: g.buffer(len(self.st.raw(k)) // 4, self.st.raw(k))
+        self.q8 = False; self.stg = None                                 # v70: 8-Bit-Gewichte
+        if int8:
+            try:
+                self.k_quant, self.k_mv8, self.k_mvt8 = g._shader(K_QUANT), g._shader(K_MV8), g._shader(K_MVT8)
+                self.k_lin8 = {n: (g._shader(k_linear8(tm, tn)), 16 * tm, 16 * tn) for n, (tm, tn) in LIN8_VARIANTS.items()}
+                nmax = max(LMH_ROWS * self.H, self.I * self.H, self.NH * 128 * self.H)
+                self.stg = g.buffer(nmax // 2); self.q8 = True; self.lin_kernel = "q44"
+            except Exception as e: progress(f"8-Bit-Kernels nicht verfuegbar ({e}) - lade mit bf16")
+        self.tag = self.dir.name + ("-int8" if self.q8 else "")          # v70: KV-Cache-Dateien nicht vermischen
+        P = "model.layers.%d."; up_bf = lambda k: g.buffer(len(self.st.raw(k)) // 4, self.st.raw(k))
+        up = (lambda k: self._quant(self.st.raw(k), *self.st.shape(k))) if self.q8 else up_bf
         upf = lambda k: (lambda b: g.buffer(len(b) // 4, b))(self.st.f32(k))
         self.w = []
         for l in range(self.L):
@@ -459,8 +580,8 @@ class Qwen3Engine:
         progress("Lade Sprachmodell: Ausgabeschicht", self.L, self.L)
         hr = self.st.raw(head); self.lmh = []
         for r0 in range(0, self.V, LMH_ROWS):
-            r1 = min(self.V, r0 + LMH_ROWS)
-            self.lmh.append((r0, r1, g.buffer((r1 - r0) * self.H // 2, hr[r0 * self.row_bytes: r1 * self.row_bytes])))
+            r1 = min(self.V, r0 + LMH_ROWS); part = hr[r0 * self.row_bytes: r1 * self.row_bytes]
+            self.lmh.append((r0, r1, self._quant(part, r1 - r0, self.H) if self.q8 else g.buffer((r1 - r0) * self.H // 2, part)))
         # RoPE-Tabelle (cos, sin) in doppelter Genauigkeit auf der CPU berechnet
         theta = c.get("rope_theta", 1e6)
         inv = [1.0 / theta ** (2 * i / self.D) for i in range(self.D // 2)]
@@ -482,8 +603,29 @@ class Qwen3Engine:
             self.nb = max(1, min(self.NH, SMAX_MB * 1_000_000 // (C * self.maxT * 4)))
             self.S = g.buffer(self.nb * C * self.maxT)
 
+    def _quant(self, raw, OUT, IN):
+        """v70: bf16-Gewichte -> int8 + Skalen, auf der GPU. Rueckgabe ("q8", W8, S)."""
+        if IN % 128: return self.g.buffer(len(raw) // 4, raw)           # passt nicht ins Raster -> bf16 lassen
+        nb = OUT * IN // 128; g = self.g
+        g.write(self.stg, raw)
+        w8, sc = g.buffer(OUT * IN // 16, stride=16), g.buffer(nb)
+        g._run(self.k_quant, struct.pack("<4I", nb, 0, 0, 0), [self.stg, w8, sc], ((nb + 63) // 64, 1, 1))
+        g.sync(); return ("q8", w8, sc)
+
+    def _lin8(self, x, w, y, T, IN, OUT, yoff=0, xoff=0):
+        _, w8, sc = w; g = self.g
+        if T == 1: g._run(self.k_mv8, struct.pack("<4I", IN, yoff, xoff, OUT), [x, w8, y, sc], ((OUT + 7) // 8, 1, 1))
+        elif T <= SMALL_MAX and self.small_kernel == "mt":
+            for t0 in range(0, T, 16):
+                g._run(self.k_mvt8, struct.pack("<4I", min(16, T - t0), IN, OUT, t0), [x, w8, y, sc], ((OUT + 31) // 32, 1, 1))
+        else:
+            k, bt, bo = self.k_lin8.get(self.lin_kernel) or self.k_lin8["q44"]
+            g._run(k, struct.pack("<4I", T, IN, OUT, 0), [x, w8, y, sc], ((OUT + bo - 1) // bo, (T + bt - 1) // bt, 1))
+        self._tick("linear")
+
     # ---- Bausteine
     def _lin(self, x, w, y, T, IN, OUT):
+        if isinstance(w, tuple): return self._lin8(x, w, y, T, IN, OUT)       # v70
         if T == 1: self.g._run(self.k_mv, struct.pack("<4I", IN, 0, 0, 0), [x, w, y], (OUT, 1, 1))
         elif T <= SMALL_MAX and self.small_kernel == "mt":                            # v44d: wenige Tokens
             for t0 in range(0, T, 16):
@@ -572,7 +714,10 @@ class Qwen3Engine:
         self._rms(self.O, self.R, self.norm, self.X, T, add=True)
         if not want_logits: return None
         for r0, r1, wb in self.lmh:
-            self.g._run(self.k_mv, struct.pack("<4I", self.H, r0, (T - 1) * self.H, 0), [self.X, wb, self.logits], (r1 - r0, 1, 1))
+            if isinstance(wb, tuple):                                    # v70
+                self.g._run(self.k_mv8, struct.pack("<4I", self.H, r0, (T - 1) * self.H, r1 - r0), [self.X, wb[1], self.logits, wb[2]],
+                            ((r1 - r0 + 7) // 8, 1, 1))
+            else: self.g._run(self.k_mv, struct.pack("<4I", self.H, r0, (T - 1) * self.H, 0), [self.X, wb, self.logits], (r1 - r0, 1, 1))
         return self.g.read(self.logits, self.V)
 
     def close(self): self.g.close()
@@ -583,7 +728,7 @@ class Qwen3Engine:
         from pathlib import Path as _P
         KD = self.NKV * 128; p = _P(path); p.parent.mkdir(parents=True, exist_ok=True); tmp = p.with_suffix(".tmp")
         with open(tmp, "wb") as f:
-            hd = _j.dumps({"modell": self.dir.name, "L": self.L, "kd": KD, "ids": self.kv_ids[:n]}).encode()
+            hd = _j.dumps({"modell": self.tag, "L": self.L, "kd": KD, "ids": self.kv_ids[:n]}).encode()
             f.write(struct.pack("<I", len(hd)) + hd)
             for l in range(self.L):
                 for b in (self.kc[l], self.vc[l]): f.write(self.g.read(b, n * KD).tobytes())
@@ -596,7 +741,7 @@ class Qwen3Engine:
         with open(path, "rb") as f:
             hd = _j.loads(f.read(struct.unpack("<I", f.read(4))[0]))
             n = len(hd["ids"])
-            if hd["modell"] != self.dir.name or hd["L"] != self.L or hd["kd"] != KD or n >= self.maxT: return 0
+            if hd["modell"] != self.tag or hd["L"] != self.L or hd["kd"] != KD or n >= self.maxT: return 0
             for l in range(self.L):
                 for b in (self.kc[l], self.vc[l]): self.g.write(b, f.read(n * KD * 4))
         self.kv_ids = list(hd["ids"]); return n
@@ -617,18 +762,19 @@ class Qwen3Engine:
             self.g.sync(); return (time.perf_counter() - t0) / reps
         progress("Sprachmodell: Kernel-Selbsttest ...")
         self.g.write(self.X, rand(T * H)); w = self.w[0]["mlp.gate_proj"]; out = {}
-        names = ["v1", "v2"] + list(self.k_lins); res["lin_names"] = names
+        names = list(self.k_lin8) if self.q8 else ["v1", "v2"] + list(self.k_lins); res["lin_names"] = names   # v70
         for v in names: res["lin_" + v] = 1e9
         for _ in range(3):                             # verschachtelt messen, je Variante das Minimum (robuster bei Last)
             for v in names:
                 self.lin_kernel = v; res["lin_" + v] = min(res["lin_" + v], timed(lambda: self._lin(self.X, w, self.Gt, T, H, I), 1))
                 if v not in out: out[v] = self.g.read(self.Gt, T * I)
-        best = "v1"
+        best = ref = names[0]
         for v in names:
             res["gflops_" + v] = 2 * T * H * I / res["lin_" + v] / 1e9
-            res["diff_" + v] = rel(out["v1"], out[v]) if v != "v1" else 0.0
+            res["diff_" + v] = rel(out[ref], out[v]) if v != ref else 0.0
             if res["diff_" + v] < 1e-3 and res["lin_" + v] < 0.9 * res["lin_" + best]: best = v
-        res["lin_diff"] = res["diff_v2"]; self.lin_kernel = best; out = {}
+        res["lin_diff"] = res.get("diff_v2", res.get("diff_" + names[-1], 0.0)); self.lin_kernel = best; out = {}
+        if self.q8: self._check_q8(res, rel, timed, progress)            # v70
         # v44d: kleine Bloecke (10 Tokens, wie das JSON-Geruest) - K_MATVEC_T gegen den gewaehlten Matrix-Kernel
         self.small_kernel = "v2"
         if self.k_mt:
@@ -690,6 +836,21 @@ class Qwen3Engine:
                      f"{res['pre_gemm'] * 1000:.0f} ms, Abweichung {res['pre_diff']:.1e} -> {self.pre_kernel}")
         self.kv_ids = []                                                 # v43: Selbsttest hat den Cache beschrieben
         self.bench = res; return res
+
+    def _check_q8(self, res, rel, timed, progress):
+        """v70: 1 Token durch gate_proj von Schicht 0 - int8 gegen die originalen bf16-Gewichte (Genauigkeit und Tempo).
+        Danach wird der Zwischenpuffer freigegeben."""
+        H, I = self.H, self.I; k = "model.layers.0.mlp.gate_proj.weight"; g = self.g
+        g.write(self.stg, self.st.raw(k))
+        res["q8_bf16"] = timed(lambda: g._run(self.k_mv, struct.pack("<4I", H, 0, 0, 0), [self.X, self.stg, self.Gt], (I, 1, 1)), 3)
+        a = g.read(self.Gt, I)
+        res["q8_int8"] = timed(lambda: self._lin8(self.X, self.w[0]["mlp.gate_proj"], self.Gt, 1, H, I), 3)
+        b = g.read(self.Gt, I); res["q8_diff"] = rel(a, b)
+        g.free(self.stg); self.stg = None
+        progress(f"8 Bit: Schreiben je Matrix bf16 {res['q8_bf16'] * 1000:.2f} ms, int8 {res['q8_int8'] * 1000:.2f} ms, "
+                 f"Abweichung {res['q8_diff']:.1e}")
+        if res["q8_diff"] > 0.05:
+            raise RuntimeError(f"8-Bit-Gewichte weichen zu stark ab ({res['q8_diff']:.1e}). «8 Bit» ausschalten und neu laden.")
 
     def prefill(self, ids, progress=lambda *a: None, cancelled=lambda: False):
         """v43: Tokens, die schon im KV-Cache stehen (gleicher Anfang), werden nicht nochmals gerechnet.

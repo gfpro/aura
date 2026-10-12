@@ -1,4 +1,4 @@
-# aura/hilfe.py — Infotexte (Tooltips) fuer alle Fenster. Version 20261011v60 (v60: Tooltip verschwindet beim Minimieren/Fensterwechsel, nicht mehr über anderen Programmen; v46: Slide-In, Vollansicht, Startfragen)
+# aura/hilfe.py — Infotexte (Tooltips) fuer alle Fenster. Version 20261012v70 (v70: Text «8 Bit»; v68: Info-Leiste rechts; v60: Tooltip verschwindet beim Minimieren/Fensterwechsel, nicht mehr über anderen Programmen; v46: Slide-In, Vollansicht, Startfragen)
 # Alle Texte stehen hier an einem Ort. Zuordnung:
 #   auto(fenster, ctx)  - findet Knoepfe/Schalter/Haekchen anhand ihrer Beschriftung (TEXTE[ctx], dann TEXTE["*"])
 #   tip(widget, key)    - fester Text fuer Felder ohne Beschriftung (key beginnt mit "#") oder freier Text
@@ -22,6 +22,11 @@ TEXTE = {
         "Workflows öffnen": "Öffnet die Workflows: Unterlagen nach festem Ablauf prüfen und eine Vorlage ausfüllen lassen (z.B. Verfahrensentscheid).",
         "➤": "Frage senden (Enter). Shift+Enter fügt eine neue Zeile ein.",
         "Kopieren": "Kopiert die Antwort in die Zwischenablage.",
+        "8 Bit (schneller)": "Ein: Das Sprachmodell wird beim Laden auf 8 Bit umgerechnet. Braucht halb so viel Grafikspeicher und "
+                             "schreibt schneller; die Antworten können minimal abweichen. Gilt beim nächsten «Laden».",
+        "Info-Leiste rechts": "Zeigt rechts Sprachmodell, Wissensdatenbank und die letzten Workflow-Läufe. Blendet sich bei "
+                              "schmalem Fenster automatisch aus – Fenster breiter ziehen, dann erscheint sie wieder.",
+        "alle anzeigen →": "Öffnet die Ansicht «Ergebnisse» mit allen Läufen, Dokumenten und Prüfhinweisen.",
         "Kontext": "Zeigt die Textstücke, die das Sprachmodell für diese Antwort gelesen hat. Hilfreich, wenn eine Antwort falsch wirkt: Stand die Information überhaupt drin?",
     },
     "quellen": {
