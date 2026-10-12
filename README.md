@@ -8,7 +8,7 @@ Stand: v64 (Oktober 2026) · Änderungen: [CHANGELOG.md](CHANGELOG.md)
 
 ## Warum AURA
 
-- **Lokal:** Keine Cloud, keine Telemetrie, keine externen Modellaufrufe. Das Sprachmodell läuft auf der Grafikkarte des Notebooks.
+- **Lokal:** Keine Cloud, keine Telemetrie, keine externen Modellaufrufe. Das Sprachmodell läuft auf der Intel Grafikkarte des Notebooks.
 - **Ohne Installation:** Reines Python, kein `pip`, keine Administratorrechte. Start per Doppelklick auf `AURA.pyw`.
 - **Nachvollziehbar:** Antworten nennen ihre Quellen; Workflow-Entscheide stammen aus Regeln, nicht aus dem Bauchgefühl des Modells.
 
@@ -37,8 +37,9 @@ Stand: v64 (Oktober 2026) · Änderungen: [CHANGELOG.md](CHANGELOG.md)
 | Python | 3.11 oder neuer, mit tkinter (Standardinstallation von python.org) |
 | Grafikkarte | DirectX 11 / DirectML; getestet nur mit integrierter GPU von Intel Core Ultra |
 | Arbeitsspeicher | 16 GB, für Sprachmodelle ab 4B rund 32 GB |
-| Speicherplatz | ca. 3 GB für das Embedding-Modell, plus 8–17 GB je Sprachmodell |
+| Speicherplatz | ca. 15 MB, 3 GB für das Embedding-Modell, plus 8–17 GB je Sprachmodell |
 | Optional | klassisches Microsoft Outlook (Mails, Kalender), Microsoft Edge (Verlauf) |
+| Umgebung | Die Nutzung ist für den BIT Client (HP Elitebook 8 G1i) optimiert. |
 
 ## Installation
 
