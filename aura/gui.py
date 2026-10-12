@@ -1,4 +1,5 @@
-# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261011v60
+# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261012v67
+# v67: Knopf «↳ Bezug zur letzten Frage» (gilt fuer eine Frage, schaltet sich nach dem Senden aus).
 # v60: «Alles zurücksetzen» (Quellen); Startseite «Letzte Ergebnisse» wird aufgefrischt; Läufe lassen sich löschen (Papierkorb).
 # v59: Tabellen in den Ergebnis-Karten (Termine, Mails …).
 # v57: Ergebnis-Karte erklärt, wenn ein Lauf nichts anzeigt (kein Ausgabe-Schritt).
@@ -368,6 +369,11 @@ class App:
         self.b_ask = ctk.CTkButton(bar, text="➤", width=46, height=46, corner_radius=23, font=font(18, "bold"),
                                    fg_color=ACCENT, hover_color=ACCENT_HI, command=self.ask)
         self.b_ask.grid(row=0, column=1, padx=(0, 12), pady=10, sticky="se"); self.buttons.append(self.b_ask)
+        self.follow = False                                              # v67: Bezug zur letzten Frage (einmalig)
+        self.b_follow = ctk.CTkButton(bar, text="↳ Bezug zur letzten Frage", height=24, corner_radius=12, font=font(11),
+                                      fg_color="transparent", hover_color=BORDER, text_color=MUTED, border_width=1,
+                                      border_color=BORDER, command=self.toggle_follow)
+        self.b_follow.grid(row=1, column=0, sticky="w", padx=(14, 6), pady=(0, 10))
         self.status = ctk.CTkLabel(main, text="Enter = senden  ·  Shift+Enter = neue Zeile", font=font(11),
                                    text_color=MUTED, anchor="w")
         self.status.grid(row=3, column=0, sticky="ew", padx=40, pady=(0, 12))
@@ -573,13 +579,22 @@ class App:
         else:
             self.b_llm.grid(); self.b_llm.configure(text="Entladen" if state == "ready" else "Laden",
                                                      state="disabled" if state == "loading" else "normal")
+    def toggle_follow(self, on=None):
+        """v67: Folgefrage-Knopf. Gilt nur fuer die naechste Frage."""
+        self.follow = (not self.follow) if on is None else on
+        self.b_follow.configure(fg_color=ACCENT if self.follow else "transparent",
+                                text_color="white" if self.follow else MUTED,
+                                border_color=ACCENT if self.follow else BORDER)
+
     def ask(self):
         q = self.entry.get("1.0", "end").strip()
         if not q or self.b_ask.cget("state") == "disabled": return
         if re.search(r"\bXY\b", q):                                    # v46: Platzhalter aus der Startfrage
             self.status.configure(text="Bitte «XY» durch ein Thema ersetzen."); return
         self.entry.delete("1.0", "end")
-        self.w.submit("ask", q, self.s["llm"] if any(m[0] == self.s["llm"] for m in self.models) else "extractive")
+        self.w.submit("ask", q, self.s["llm"] if any(m[0] == self.s["llm"] for m in self.models) else "extractive",
+                      self.follow)                                       # v67: True = Bezug, False = neues Thema
+        self.toggle_follow(False)
 
     # ------------------------------------------------------------------ v23: Auto-Abgleich
     def _auto_text(self):
@@ -882,7 +897,11 @@ class App:
                     self.stats = d[0]; self._show_stats()
                 elif kind == "answer_start":
                     if self.view_cur: self.show_chat()                   # v46: Antwort erscheint im Chat
-                    self.bubble(d[0], "q"); self.cur, lbl = self.bubble("…", "a"); self.cur_lbl = lbl; self.cur_text = ""
+                    qb, _ = self.bubble(d[0], "q")
+                    if len(d) > 2 and d[2]:                              # v67: Folgefrage sichtbar machen
+                        ctk.CTkLabel(qb, text=f"↳ Bezug: {d[2][:70]}{'…' if len(d[2]) > 70 else ''}", font=font(11),
+                                     text_color="#DCE3FF", anchor="w").pack(padx=16, pady=(0, 9), anchor="w")
+                    self.cur, lbl = self.bubble("…", "a"); self.cur_lbl = lbl; self.cur_text = ""
                     self.t_ask = time.perf_counter()
                 elif kind == "token" and self.cur:
                     self.cur_text += d[0]

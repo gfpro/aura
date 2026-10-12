@@ -5,6 +5,8 @@
 # v25: Workflows (job_workflows = Liste, job_workflow = ausfuehren).
 # v28: Wissenssammlungen (data\\wissen.db): job_wissen_sync, im Chat zuschaltbar (Einstellung wissen_chat).
 # v49: Auto-Abgleich wird verworfen, solange ein Workflow laeuft oder wartet (verfaelschte Laufzeiten).
+# v65: Folgefragen (Gespraechsgedaechtnis ueber die letzten 3 Fragen).
+# v67: Folgefrage nur per Knopf «Bezug zur letzten Frage» (follow=True); Worterkennung nur mit followup_auto.
 # v36: Workflow-Pakete, Neustart ab Schritt (job_workflow start_at).
 import ctypes, json, queue, re, threading, time, traceback
 from array import array
@@ -17,6 +19,11 @@ from .llm import discover
 from .rag import Retriever
 from .text import clean, make_chunks
 
+# v65: Folgefrage = kurz (<= 6 Woerter) und mit Rueckbezug, oder beginnt mit «und/und was/mehr dazu ...»
+FOLLOW_REF = re.compile(r"\b(dazu|davon|dafür|dafuer|dagegen|damit|darin|daran|darum|dahinter|hierzu|hierfür|dies|darüber|darueber|danach|davor|dabei|darauf|dort|deren|dessen|diese[nrms]?|jene[nrms]?|"
+                        r"er|sie|ihm|ihn|ihr|ihre[nrms]?|ihnen|das|es)\b", re.I)
+FOLLOW_START = re.compile(r"^\s*(und|aber|also|mehr|genauer|warum|wieso|weshalb|seit wann|bis wann|und was|was noch)\b", re.I)
+CHRONO = re.compile(r"\b(ablauf|verlauf|chronolog\w*|der reihe nach|von anfang an|wie hat sich|entwicklung)\b", re.I)
 DEADLINE = re.compile(r"\b(frist\w*|deadline|bis wann|sp[äa]testens|f[äa]llig\w*|eingabeschluss|termin f[üu]r)\b", re.I)
 
 def keep_awake(on):
@@ -32,6 +39,7 @@ class Worker(threading.Thread):
         self.cancel = threading.Event()
         self.embedder = None; self.retriever = Retriever(); self.backends = {}
         self.pending = None; self.auto_runs = 0                      # v23
+        self.chat = None                                              # v65: {'qs': [...], 'hits': [...], 't': Zeit}
 
     # ---- Schnittstelle fuer die Oberflaeche
     def submit(self, name, *args):
@@ -304,18 +312,37 @@ class Worker(threading.Thread):
         add.sort(key=lambda h: h["ts"], reverse=True)
         hits[:0] = add[:max_add]                                     # vorne: werden sicher ans Modell gegeben
 
-    def job_ask(self, question, backend_id):
+    def _followup(self, question, s, follow=None):
+        """Bisherige Fragen (max. 3) oder []. v67: follow=True (Knopf) = immer, False = nie,
+        None = Worterkennung nur wenn followup_auto (Standard aus) und letzte Antwort frisch."""
+        c = self.chat
+        if not c or follow is False: return []
+        if follow: return c["qs"]
+        mins = float(s.get("followup_minutes", 15))
+        if not s.get("followup_auto", False) or mins <= 0 or time.time() - c["t"] > mins * 60: return []
+        w = re.findall(r"[\wÄÖÜäöü@-]+", question)
+        own = [x for x in w[1:] if x[:1].isupper() and not FOLLOW_REF.fullmatch(x)]   # Nomen = eigenes Thema
+        if FOLLOW_START.search(question) or (len(w) <= 6 and (FOLLOW_REF.search(question) or not own)): return c["qs"]
+        return []
+
+    def job_ask(self, question, backend_id, follow=None):
         t_start = time.perf_counter()
+        prev = self._followup(question, load_settings(), follow)         # v65/v67
+        ref = prev[-1] if prev else ""                                   # v67: Anzeige «Bezug: …» in der Oberflaeche
+        asked = question                                                 # Originalfrage (Anzeige, Modell)
+        if prev:                                                         # Suche mit dem bisherigen Thema
+            question = " ".join(prev[-2:] + [asked]); self.progress(f"Folgefrage zu: {prev[-1][:60]}")
         # ---- Listenmodus ZUERST: ohne Embedding, ohne Filterlogik, ohne Sprachmodell (v18b)
         who = self.retriever.author_items(self.conn, question)
         lst = listmode.calendar_list(self.conn, question, who[0] if who else None) \
             or listmode.next_events(self.conn, question) or listmode.recent_mails(self.conn, question) \
             or listmode.web_list(self.conn, question)
         if lst:
-            self.emit("answer_start", question, "liste"); self.emit("token", lst[0])
+            self.emit("answer_start", asked, "liste", ref); self.emit("token", lst[0])
             self.emit("sources", lst[1], {"search": time.perf_counter() - t_start, "total": time.perf_counter() - t_start,
                                           "list": True})
             log.get().info(f"Antwort: Listenmodus, {len(lst[1])} Eintraege")
+            self.chat = {"qs": (prev + [asked])[-3:], "hits": [], "t": time.time()}
             self.progress(f"Fertig (Liste ohne Sprachmodell, {len(lst[1])} Einträge)"); return
         s = load_settings(); emb = self._embedder(); qvec = None
         if emb.available()[0] and self.conn.execute("SELECT 1 FROM chunks WHERE vec IS NOT NULL LIMIT 1").fetchone():
@@ -333,36 +360,54 @@ class Worker(threading.Thread):
         if info: self.progress(f"Filter: {', '.join(info)} ({len(items) if items is not None else 'alle'} Objekte)")
         if it and it.get("source") == "outlook_calendar" and not self.conn.execute(
                 "SELECT 1 FROM items WHERE source='outlook_calendar' LIMIT 1").fetchone():
-            self.emit("answer_start", question, mode)
+            self.emit("answer_start", asked, mode, ref)
             self.emit("token", "Der Outlook-Kalender ist noch nicht synchronisiert. Bitte bei «Outlook-Kalender» auf Sync klicken.")
             self.emit("sources", []); return
         if items is not None and not items:   # (None = kein Filter)
-            self.emit("answer_start", question, mode)
+            self.emit("answer_start", asked, mode, ref)
             self.emit("token", f"Keine Objekte für diesen Filter gefunden ({', '.join(info)}).")
             self.emit("sources", []); return
         if it and (it.get("recent") or (it.get("range") and items is not None and len(items) <= k)):
             hits = R.item_hits(self.conn, items, k)                 # Liste nach Datum statt nach Relevanz
         else:
-            hits = R.search(self.conn, question, qvec, k=k, mode=mode, items=items, prefer=R.facet(question))
+            hits = R.search(self.conn, question, qvec, k=k, mode=mode, items=items, prefer=R.facet(question),
+                            recency=float(s.get("recency_weight", 0.01)), half_days=int(s.get("recency_half_days", 180)))
             hits = self._drop_weak(hits, mode, s)
             if DEADLINE.search(question):
                 self._add_newer_in_thread(hits)
                 self._add_neighbours(hits, int(s.get("neighbour_hits", 2)))
                 hits.sort(key=lambda h: h["ts"], reverse=True)          # neueste zuerst: die gilt
             if it and it.get("range"): hits.sort(key=lambda h: h["ts"])
+            elif not DEADLINE.search(asked):                          # v64: die ans Modell gehenden nach Datum
+                n = int(s.get("llm_top_k", 4))                           # Auswahl bleibt nach Relevanz
+                hits[:n] = sorted(hits[:n], key=lambda h: h["ts"], reverse=not CHRONO.search(asked))
             wh = self._wissen_hits(question, s)                          # v28: Wissenssammlungen, falls eingeschaltet
             if wh: hits = hits[:2] + wh + hits[2:]; self.progress(f"Wissen: {len(wh)} Stellen aus {', '.join(sorted({h['source'][7:] for h in wh}))}")
-        self.emit("answer_start", question, mode)
+        if prev and self.chat and self.chat["hits"]:                     # v65: Quellen der letzten Antwort mitnehmen
+            have = {h["item_id"] for h in hits}
+            old = [h for h in self.chat["hits"] if h["item_id"] not in have][:int(s.get("followup_keep", 2))]
+            if old:
+                hits = hits[:2] + old + hits[2:]
+                if not DEADLINE.search(asked) and not (it and it.get("range")):
+                    n = int(s.get("llm_top_k", 4))
+                    hits[:n] = sorted(hits[:n], key=lambda h: h["ts"], reverse=not CHRONO.search(asked))
+        self.emit("answer_start", asked, mode, ref)
         t_search = time.perf_counter() - t_start
         be = self._llm(backend_id); be.settings = s; be.used = None; be.timing = None
         t_gen = time.perf_counter()
         # Das Modell kennt weder Datum noch Uhrzeit -> mitgeben (sonst «heute» = Datum der Quelle)
-        q_llm = question if backend_id == "extractive" else \
-            f"(Aktuell: {listmode.now_text()}. Vergangenes als vergangen behandeln.)\n{question}"
-        if backend_id != "extractive" and DEADLINE.search(question):
+        ctx_q = f"(Folgefrage. Vorherige Frage: {prev[-1]})\n" if prev else ""          # v65: nur die Frage, nie die Antwort
+        q_llm = asked if backend_id == "extractive" else \
+            f"(Aktuell: {listmode.now_text()}. Vergangenes als vergangen behandeln.)\n{ctx_q}{asked}"
+        if backend_id != "extractive" and DEADLINE.search(asked):
             q_llm += ("\n(Die Quellen sind nach Datum sortiert, neueste zuerst. Werden mehrere Fristen genannt, gilt die "
                       "aus der neuesten Mail; ältere nur als verschoben erwähnen. Frist = Datum nach «spätestens», "
                       "«bis zum», «bis am». Ein Start- oder Einführungsdatum ist keine Frist.)")
+        elif backend_id != "extractive" and len(hits) > 1 and not (it and it.get("range")):
+            q_llm += ("\n(Die Quellen sind chronologisch sortiert, älteste zuerst. Erzähle den Ablauf in dieser Reihenfolge.)"
+                      if CHRONO.search(asked) else
+                      "\n(Die Quellen sind nach Datum sortiert, neueste zuerst. Beginne mit dem aktuellsten Stand, "
+                      "danach kurz die Vorgeschichte.)")
         lab = (dict((i, l) for i, l, _ in discover(MODELS)).get(backend_id, "") + " " + backend_id).lower()
         if backend_id != "extractive" and "qwen3" in lab and "instruct" not in lab:
             q_llm += " /no_think"        # Qwen3-Hybridmodelle (z.B. 8B): Denkteil abschalten, sonst frisst er llm_max_new
@@ -371,11 +416,14 @@ class Worker(threading.Thread):
         finally:
             tm = dict(be.timing or {})
             tm.update(search=t_search, load=t_gen - t_start - t_search, total=time.perf_counter() - t_start)
-            self.emit("sources", hits[:be.used] if be.used is not None else hits, tm)
+            used = hits[:be.used] if be.used is not None else hits
+            self.emit("sources", used, tm)
+            self.chat = {"qs": (prev + [asked])[-3:], "hits": [dict(h) for h in used if h.get("item_id")][:4],
+                         "t": time.time()}                               # v65
             self._llm_state()
         log.get().info(f"Antwort: {mode}, {len(hits)} Quellen, Modell {backend_id}, "
                        + ", ".join(f"{k} {v:.1f}" for k, v in tm.items() if isinstance(v, (int, float))))
-        self.progress(f"Fertig ({mode}, {len(hits)} Quellen)")
+        self.progress(f"Fertig ({mode}, {len(hits)} Quellen{', Folgefrage' if prev else ''})")
 
     # ---- v28: Wissenssammlungen
     def _wissen(self):

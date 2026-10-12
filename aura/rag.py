@@ -120,7 +120,22 @@ class Retriever:
                                "ts": r[5] or "", "author": r[6] or "", "score": 0.0})
         return hits
 
-    def search(self, conn, query, qvec=None, k=6, mode="hybrid", per_item=1, items=None, prefer=None):
+    @staticmethod
+    def _recency(conn, score, weight, half_days, today=None):
+        """v64: Aktualitaetsbonus auf RRF-Werte: weight * 0,5^(Alter/half_days). weight 0 = aus.
+        Platz 1 in beiden Listen ~0,033 - weight 0,01 hebt Neues, ohne Relevanz zu ueberstimmen."""
+        if weight <= 0 or not score: return
+        d0 = today or date.today(); ids = list(score)
+        for i in range(0, len(ids), 500):
+            part = ids[i:i + 500]
+            for cid, ts in conn.execute("SELECT c.id, i.ts FROM chunks c JOIN items i ON i.id = c.item_id "
+                                        f"WHERE c.id IN ({','.join('?' * len(part))})", part):
+                try: age = max(0, (d0 - date.fromisoformat((ts or "")[:10])).days)
+                except ValueError: continue
+                score[cid] += weight * 0.5 ** (age / half_days)
+
+    def search(self, conn, query, qvec=None, k=6, mode="hybrid", per_item=1, items=None, prefer=None,
+               recency=0.0, half_days=180):
         """mode: bm25 | vector | hybrid. items = nur in diesen Objekten suchen (z.B. Absender-Filter).
         Liefert Treffer-Dicts, pro Objekt hoechstens per_item Stuecke."""
         lists = []
@@ -133,6 +148,7 @@ class Retriever:
         score = {}
         for lst in lists:
             for rank, cid in enumerate(lst): score[cid] = score.get(cid, 0.0) + 1.0 / (RRF_K + rank + 1)
+        self._recency(conn, score, recency, max(1, half_days))
         hits, per = [], {}
         for cid in sorted(score, key=score.get, reverse=True):
             r = conn.execute("SELECT c.text, i.id, i.source, i.title, i.ts, i.author FROM chunks c "
