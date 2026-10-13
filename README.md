@@ -95,9 +95,9 @@ Die Datenordner `data\`, `models\`, `workflows\` und `wissen\` bleiben erhalten.
 ## Grenzen
 
 - Kleine lokale Modelle (4B/8B) machen Fehler. Workflow-Ergebnisse sind Entwürfe zur fachlichen Prüfung, keine Entscheide.
-- Gescannte PDFs ohne Textschicht werden nicht gelesen (keine Texterkennung).
+- Gescannte PDFs ohne Textschicht (OCR) werden nicht gelesen (keine Texterkennung).
 - Ein Workflow-Lauf dauert mit einem 4B-Modell auf integrierter Grafik je nach Vorlage 2–5 Minuten. Notebook während eines Laufs nicht zuklappen; Zeitplan-Läufe starten nur, wenn AURA offen ist.
-- Getestet auf einer einzigen Hardwareklasse.
+- Getestet auf Hardwareklasse der HP EliteBook mit AI-Features.
 
 ## Aufbau
 
