@@ -1,4 +1,6 @@
 # aura/rag.py — hybride Suche: BM25 (SQLite FTS5) + Vektoren (e5), kombiniert per Reciprocal Rank Fusion.
+# v76: Personenfilter nur bei Hinweis («von X», «X schrieb»); vorher filterte z.B. «RSIT» nach Absendern.
+# v73: Stuecke aus dem zitierten Mailverlauf zaehlen mit quote_weight (Standard 0,8) - das Original geht vor.
 import operator, re
 from datetime import date, timedelta
 from array import array
@@ -63,8 +65,14 @@ class Retriever:
     def author_items(self, conn, question):
         """Erkennt Personennamen in der Frage (Absender/Organisator). Liefert passende item-IDs oder None."""
         names = []
-        for w in re.findall(r"[^\W\d_]{3,}", question):
+        cue = re.compile(r"\b(von|vom|mit|an|bei|für|fuer|durch|schrieb|sagte|meinte|mailte)\s+(?:herrn?\s+|frau\s+)?$", re.I)   # v76: nur mit Personen-Hinweis
+        for m in re.finditer(r"[^\W\d_]{3,}", question):
+            w = m.group(0)
             if w.lower() in self.STOP: continue
+            after = question[m.end():m.end() + 25].lower()
+            if not (cue.search(question[:m.start()]) or re.match(r"\s+(schrieb|geschrieben|gesagt|meint|mailte)", after)
+                    or (names and question[m.start() - 1:m.start()] == " " and w[:1].isupper() and names[-1] in question[:m.start()][-30:])):
+                continue                                                 # Themenwort wie «RSIT» ist keine Person
             n = conn.execute("SELECT COUNT(DISTINCT author) FROM items WHERE author LIKE ?", (f"%{w}%",)).fetchone()[0]
             if 1 <= n <= 20: names.append(w)
         if not names: return None
@@ -113,7 +121,7 @@ class Retriever:
     def item_hits(self, conn, items, k):
         """Erstes Textstueck je Objekt, in der Reihenfolge von items."""
         hits = []
-        for iid in items[:k]:
+        for iid in (items or [])[:k]:                                   # v77: None = kein Filter
             r = conn.execute("SELECT c.id, c.text, i.id, i.source, i.title, i.ts, i.author FROM chunks c JOIN items i "
                              "ON i.id = c.item_id WHERE c.item_id = ? ORDER BY c.ord LIMIT 1", (iid,)).fetchone()
             if r: hits.append({"chunk_id": r[0], "text": r[1], "item_id": r[2], "source": r[3], "title": r[4] or "",
@@ -135,7 +143,7 @@ class Retriever:
                 score[cid] += weight * 0.5 ** (age / half_days)
 
     def search(self, conn, query, qvec=None, k=6, mode="hybrid", per_item=1, items=None, prefer=None,
-               recency=0.0, half_days=180):
+               recency=0.0, half_days=180, quote_weight=1.0):
         """mode: bm25 | vector | hybrid. items = nur in diesen Objekten suchen (z.B. Absender-Filter).
         Liefert Treffer-Dicts, pro Objekt hoechstens per_item Stuecke."""
         lists = []
@@ -149,6 +157,12 @@ class Retriever:
         for lst in lists:
             for rank, cid in enumerate(lst): score[cid] = score.get(cid, 0.0) + 1.0 / (RRF_K + rank + 1)
         self._recency(conn, score, recency, max(1, half_days))
+        if quote_weight < 1.0 and score:                                # v73
+            ids = list(score)
+            for i in range(0, len(ids), 500):
+                part = ids[i:i + 500]
+                for (cid,) in conn.execute(f"SELECT id FROM chunks WHERE zitat = 1 AND id IN ({','.join('?' * len(part))})", part):
+                    score[cid] *= quote_weight
         hits, per = [], {}
         for cid in sorted(score, key=score.get, reverse=True):
             r = conn.execute("SELECT c.text, i.id, i.source, i.title, i.ts, i.author FROM chunks c "

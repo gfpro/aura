@@ -8,6 +8,8 @@
 # v65: Folgefragen (Gespraechsgedaechtnis ueber die letzten 3 Fragen).
 # v67: Folgefrage nur per Knopf «Bezug zur letzten Frage» (follow=True); Worterkennung nur mit followup_auto.
 # v36: Workflow-Pakete, Neustart ab Schritt (job_workflow start_at).
+# v73: zitierter Mailverlauf wird durchsucht (nur Absaetze, die in keiner anderen Mail stehen); einmalige Nachbearbeitung
+#      aller Mails (job_verlauf, startet automatisch); Mails geplanter Workflows (Betreff = Workflow-Name) ausgeschlossen.
 import ctypes, json, queue, re, threading, time, traceback
 from array import array
 from . import db, listmode, log
@@ -17,7 +19,7 @@ from .connectors.base import SyncContext
 from .engine.embedder import Embedder
 from .llm import discover
 from .rag import Retriever
-from .text import clean, make_chunks
+from .text import clean, clean_mail, make_chunks, own_hashes, split_mail, verlauf_neu
 
 # v65: Folgefrage = kurz (<= 6 Woerter) und mit Rueckbezug, oder beginnt mit «und/und was/mehr dazu ...»
 FOLLOW_REF = re.compile(r"\b(dazu|davon|dafür|dafuer|dagegen|damit|darin|daran|darum|dahinter|hierzu|hierfür|dies|darüber|darueber|danach|davor|dabei|darauf|dort|deren|dessen|diese[nrms]?|jene[nrms]?|"
@@ -57,6 +59,8 @@ class Worker(threading.Thread):
         except Exception: pass
         self.conn = db.connect()
         self.emit("stats", db.stats(self.conn))
+        if not db.flag(self.conn, "verlauf_v73") and self.conn.execute("SELECT 1 FROM items WHERE source='outlook_mail' LIMIT 1").fetchone():
+            self.jobs.put(("verlauf", ()))                              # v73: einmalig, vor allen anderen Auftraegen
         while True:
             name, args = self.jobs.get(); self.current = name
             self.emit("busy", True, name)
@@ -91,15 +95,23 @@ class Worker(threading.Thread):
         try: ctx.seen = set()                                        # v18: vom Connector gesehene IDs (Kalender)
         except AttributeError: pass
         n = upd = 0; t0 = time.perf_counter()
+        skip = self._mail_ausschluss() if cid == "outlook_mail" else set()   # v73
         for it in con.sync(ctx):
             if it.get("update"):                                     # v21: bekanntes Objekt, nur Zeit/Meta nachfuehren
                 upd += self.conn.execute("UPDATE items SET ts = ?, meta = ? WHERE source = ? AND ext_id = ?",
                                          (it["ts"], json.dumps(it.get("meta") or {}, ensure_ascii=False), cid,
                                           it["ext_id"])).rowcount
                 continue
+            if skip and (it.get("title") or "").strip().lower() in skip: continue
             text = it.get("text") or clean(it.get("body", ""))
             prefix = it["prefix"] if "prefix" in it else f"{it.get('title', '')} ({it.get('author', '')}, {it.get('ts', '')[:10]}): "
-            if db.add_item(self.conn, cid, it, make_chunks(text, prefix)): n += 1
+            zit = []
+            if cid == "outlook_mail":                                   # v73: Verlauf, nur Neues
+                own = own_hashes(text); db.hashes_add(self.conn, own)
+                if it.get("zitat"):
+                    kept, new = verlauf_neu(it["zitat"], lambda hs: db.hashes_known(self.conn, hs))
+                    db.hashes_add(self.conn, new); zit = make_chunks(kept, self._vprefix(it)) if kept else []
+            if db.add_item(self.conn, cid, it, make_chunks(text, prefix), zit): n += 1
             if n and n % 200 == 0: self.conn.commit()
         removed = 0
         if cid == "outlook_calendar" and getattr(ctx, "seen", None) and not self.cancel.is_set() \
@@ -125,6 +137,54 @@ class Worker(threading.Thread):
             + (" (abgebrochen)" if stop() else "")
         db.set_sync(self.conn, cid, info); self.progress(f"{con.label}: {info}")
         return n
+
+    # ---- v73: zitierter Verlauf
+    @staticmethod
+    def _vprefix(it):
+        return f"{it.get('title', '')} ({it.get('author', '')}, {(it.get('ts') or '')[:10]}) – zitierter Verlauf: "
+
+    def _mail_ausschluss(self):
+        """Betreffe, die AURA selbst erzeugt: Namen geplanter Workflows + Einstellung mail_ausschluss (Liste)."""
+        out = {str(x).strip().lower() for x in (load_settings().get("mail_ausschluss") or []) if str(x).strip()}
+        try:
+            from .zeitplan import mit_zeitplan
+            from .workflow.app import WF_DIR
+            out |= {w["name"].strip().lower() for w in mit_zeitplan(WF_DIR) if w.get("name")}
+        except Exception as e: log.get().warning(f"Ausschluss Workflow-Mails: {e}")
+        return out
+
+    def job_verlauf(self):
+        """v73, einmalig: fuer alle eingelesenen Mails den zitierten Verlauf nachtragen (nur Absaetze, die in keiner
+        anderen Mail stehen). Bestehende Stuecke und Vektoren bleiben. Abbrechbar; ein Neustart macht weiter."""
+        c, t0 = self.conn, time.perf_counter()
+        skip = self._mail_ausschluss()
+        if skip:
+            ids = [i for i, t in c.execute("SELECT id, title FROM items WHERE source='outlook_mail'") if (t or "").strip().lower() in skip]
+            if ids: self._delete(ids); self.progress(f"Verlauf: {len(ids)} von AURA erzeugte Mails entfernt")
+        rows = c.execute("SELECT id, title, author, ts, body FROM items WHERE source='outlook_mail' ORDER BY ts").fetchall()
+        for k, (iid, ti, au, ts, body) in enumerate(rows):                # 1) eigene Texte aller Mails registrieren
+            db.hashes_add(c, own_hashes(clean_mail(body, ti)))
+            if k % 500 == 0: self.progress(f"Verlauf: eigene Texte {k}/{len(rows)}", k, len(rows)); c.commit()
+        c.commit(); added = mails = 0
+        for k, (iid, ti, au, ts, body) in enumerate(rows):                # 2) Verlauf, nur Neues
+            if self.cancel.is_set(): break
+            if k % 200 == 0: self.progress(f"Verlauf: Mails {k}/{len(rows)} · {added} neue Textstücke", k, len(rows)); c.commit()
+            if c.execute("SELECT 1 FROM chunks WHERE item_id = ? AND zitat = 1 LIMIT 1", (iid,)).fetchone(): continue
+            _, q = split_mail(body, ti)
+            if not q: continue
+            kept, new = verlauf_neu(q, lambda hs: db.hashes_known(c, hs))
+            db.hashes_add(c, new)
+            if not kept: continue
+            ch = make_chunks(kept, self._vprefix({"title": ti, "author": au, "ts": ts}))
+            o = c.execute("SELECT COALESCE(MAX(ord), -1) + 1 FROM chunks WHERE item_id = ?", (iid,)).fetchone()[0]
+            c.executemany("INSERT INTO chunks(item_id, ord, text, zitat) VALUES(?,?,?,1)", [(iid, o + j, t) for j, t in enumerate(ch)])
+            added += len(ch); mails += 1
+        c.commit(); db.rebuild_fts(c); self.retriever.invalidate()
+        done = not self.cancel.is_set()
+        if done: db.flag(c, "verlauf_v73", time.strftime("%Y-%m-%d %H:%M"))
+        log.get().info(f"Verlauf: {added} Stuecke aus {mails} Mails in {time.perf_counter() - t0:.0f} s, fertig={done}")
+        self.progress(f"Verlauf: {added} neue Textstücke aus {mails} Mails" + (" – jetzt «Vektoren berechnen»" if added and done else "")
+                      + ("" if done else " (unterbrochen, wird beim nächsten Start fortgesetzt)"))
 
     # ---- v23: Mails loeschen, die in keinem gewaehlten Ordner mehr liegen (abgewaehlt, verschoben, geloescht)
     def _mail_cleanup(self, seen, confirm):
@@ -367,11 +427,14 @@ class Worker(threading.Thread):
             self.emit("answer_start", asked, mode, ref)
             self.emit("token", f"Keine Objekte für diesen Filter gefunden ({', '.join(info)}).")
             self.emit("sources", []); return
-        if it and (it.get("recent") or (it.get("range") and items is not None and len(items) <= k)):
+        # v77: «neueste» ohne Filter (items None) ist eine Themenfrage -> Suche mit staerkerem Aktualitaetsbonus
+        if it and items is not None and (it.get("recent") or (it.get("range") and len(items) <= k)):
             hits = R.item_hits(self.conn, items, k)                 # Liste nach Datum statt nach Relevanz
         else:
+            rw = float(s.get("recency_weight", 0.01)) * (3 if it and it.get("recent") else 1)
             hits = R.search(self.conn, question, qvec, k=k, mode=mode, items=items, prefer=R.facet(question),
-                            recency=float(s.get("recency_weight", 0.01)), half_days=int(s.get("recency_half_days", 180)))
+                            recency=rw, half_days=int(s.get("recency_half_days", 180)),
+                            quote_weight=float(s.get("zitat_gewicht", 0.8)))     # v73
             hits = self._drop_weak(hits, mode, s)
             if DEADLINE.search(question):
                 self._add_newer_in_thread(hits)

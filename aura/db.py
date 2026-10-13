@@ -1,4 +1,5 @@
-# aura/db.py — eine SQLite-Datenbank fuer alle Quellen. Version 20261011v60
+# aura/db.py — eine SQLite-Datenbank fuer alle Quellen. Version 20261012v73
+# v73: chunks.zitat (1 = Stueck aus dem zitierten Mailverlauf), Tabellen para_hash und aura_flags.
 # v60: WAL-Datei auf 64 MB begrenzt (journal_size_limit); «Alles zurücksetzen» löscht die Datenbank beim nächsten Start.
 # items  = ein Objekt pro Mail/Termin/Webseite/Dokument;  chunks = Textstuecke mit Vektor (float32-BLOB)
 import json, sqlite3, time
@@ -18,6 +19,8 @@ CREATE TABLE IF NOT EXISTS chunks(
 CREATE INDEX IF NOT EXISTS ix_chunks_item ON chunks(item_id);
 CREATE INDEX IF NOT EXISTS ix_items_source ON items(source);
 CREATE TABLE IF NOT EXISTS sync_state(source TEXT PRIMARY KEY, last_sync TEXT, info TEXT);
+CREATE TABLE IF NOT EXISTS para_hash(h TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS aura_flags(k TEXT PRIMARY KEY, v TEXT);
 """
 
 def connect(path=None):
@@ -26,6 +29,8 @@ def connect(path=None):
     conn.execute("PRAGMA journal_mode=WAL"); conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA journal_size_limit=67108864")              # v60: WAL nach dem Zurückschreiben auf 64 MB kürzen
     conn.executescript(SCHEMA)
+    if "zitat" not in {r[1] for r in conn.execute("PRAGMA table_info(chunks)")}:          # v73
+        conn.execute("ALTER TABLE chunks ADD COLUMN zitat INTEGER NOT NULL DEFAULT 0"); conn.commit()
     fresh = not conn.execute("SELECT 1 FROM sqlite_master WHERE name='chunks_fts'").fetchone()
     conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(text, content='chunks', content_rowid='id')")
     if fresh: rebuild_fts(conn)
@@ -37,8 +42,9 @@ def rebuild_fts(conn):
 def known_ids(conn, source):
     return {r[0] for r in conn.execute("SELECT ext_id FROM items WHERE source=?", (source,))}
 
-def add_item(conn, source, it, chunks):
-    """Fuegt ein Objekt samt Textstuecken ein. Bereits vorhandene (source, ext_id) werden uebersprungen."""
+def add_item(conn, source, it, chunks, zitat=()):
+    """Fuegt ein Objekt samt Textstuecken ein. Bereits vorhandene (source, ext_id) werden uebersprungen.
+    v73: zitat = Stuecke aus dem zitierten Verlauf (hinter den eigenen, Markierung zitat = 1)."""
     cur = conn.execute(
         "INSERT OR IGNORE INTO items(source, ext_id, title, author, recipients, ts, location, body, meta, added) "
         "VALUES(?,?,?,?,?,?,?,?,?,?)",
@@ -48,6 +54,8 @@ def add_item(conn, source, it, chunks):
     if not cur.rowcount: return None
     iid = cur.lastrowid
     conn.executemany("INSERT INTO chunks(item_id, ord, text) VALUES(?,?,?)", [(iid, k, c) for k, c in enumerate(chunks)])
+    if zitat: conn.executemany("INSERT INTO chunks(item_id, ord, text, zitat) VALUES(?,?,?,1)",
+                               [(iid, len(chunks) + k, c) for k, c in enumerate(zitat)])
     return iid
 
 def set_sync(conn, source, info):
@@ -94,3 +102,19 @@ def vor_start_zuruecksetzen():
     try: RESET_FLAG.unlink()
     except Exception: pass
     return True
+
+# ----------------------------------------------------------------------------- v73: Absatz-Pruefsummen, Merker
+def hashes_known(conn, hs):
+    hs = list(hs); out = set()
+    for i in range(0, len(hs), 500):
+        part = hs[i:i + 500]
+        out |= {r[0] for r in conn.execute(f"SELECT h FROM para_hash WHERE h IN ({','.join('?' * len(part))})", part)}
+    return out
+
+def hashes_add(conn, hs):
+    if hs: conn.executemany("INSERT OR IGNORE INTO para_hash(h) VALUES(?)", [(h,) for h in hs])
+
+def flag(conn, k, v=None):
+    if v is None:
+        r = conn.execute("SELECT v FROM aura_flags WHERE k = ?", (k,)).fetchone(); return r[0] if r else None
+    conn.execute("INSERT OR REPLACE INTO aura_flags VALUES(?, ?)", (k, str(v))); conn.commit()

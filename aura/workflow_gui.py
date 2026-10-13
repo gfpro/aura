@@ -1,4 +1,5 @@
-# aura/workflow_gui.py — Ansicht «Workflows»: Pakete anlegen, ausfuehren, Wissen und Vorlagen pflegen. Version 20261011v64a
+# aura/workflow_gui.py — Ansicht «Workflows»: Pakete anlegen, ausfuehren, Wissen und Vorlagen pflegen. Version 20261013v78
+# (v78: «Exportieren …» / «Importieren …» – Übergabe als .aurawf.zip, austausch.py)
 # (v64a: Knopf «Feldplan …» im Reiter «Vorlage»)
 # (v53: «Workflow beschreiben», Meldungen, allgemeine Prüfregeln; v52: Reiter «Schritte» (workflow_editor.py); v51: Vorlage entfernen, Herkunft der Prüfpunkte; v50: Reiter «Prüfliste» – Prüfpunkte ohne JSON anlegen; v38: Infotexte, v40: Prüfhinweise nach dem Lauf, v46: Vollansicht im Hauptfenster statt eigenem Fenster)
 # Ausfuehren laeuft im Worker (job workflow); Ereignisse wf_step / wf_done / progress kommen ueber App._poll hierher.
@@ -32,7 +33,9 @@ class WorkflowWindow:
         ctk.CTkButton(left, text="+ Neuer Workflow", height=32, corner_radius=8, font=G.font(12, "bold"), fg_color=G.ACCENT,
                       hover_color=G.ACCENT_HI, command=self.new).grid(row=2, column=0, sticky="ew", padx=12, pady=(12, 4))
         ctk.CTkButton(left, text="Gemeinsame Sammlungen …", height=28, corner_radius=8, font=G.font(11), fg_color=G.BORDER,
-                      hover_color=G.MUTED, text_color=G.INK, command=self.app.open_wissen).grid(row=3, column=0, sticky="ew", padx=12, pady=(0, 12))
+                      hover_color=G.MUTED, text_color=G.INK, command=self.app.open_wissen).grid(row=3, column=0, sticky="ew", padx=12, pady=(0, 4))
+        ctk.CTkButton(left, text="Importieren …", height=28, corner_radius=8, font=G.font(11), fg_color=G.BORDER,
+                      hover_color=G.MUTED, text_color=G.INK, command=self.importieren).grid(row=4, column=0, sticky="ew", padx=12, pady=(0, 12))
         hilfe.auto(left, "workflow")
         self.right = ctk.CTkFrame(win, fg_color="transparent"); self.right.grid(row=0, column=1, sticky="nsew", padx=18, pady=12)
         self.right.grid_columnconfigure(0, weight=1); self.right.grid_rowconfigure(1, weight=1)
@@ -86,7 +89,7 @@ class WorkflowWindow:
         b("workflow.json bearbeiten", lambda: _open(path))
         b("Neu laden", lambda: self.show(path))
         if pkg:
-            b("Ordner öffnen", lambda: _open(Path(path).parent)); b("Löschen", self.delete)
+            b("Ordner öffnen", lambda: _open(Path(path).parent)); b("Exportieren …", self.exportieren); b("Löschen", self.delete)
         else: b("In Paket umwandeln", self.migrate)
         if self.wf and self.wf.get("description"):
             ctk.CTkLabel(hd, text=self.wf["description"], font=G.font(11), text_color=G.MUTED, anchor="w", justify="left",
@@ -570,6 +573,45 @@ class WorkflowWindow:
         except Exception as e: messagebox.showerror("Workflows", str(e), parent=self.win); return
         self.cur = None; self.refresh_list()
         for c in self.right.winfo_children(): c.destroy()
+
+    def exportieren(self):
+        """v78: Paket mit Wissen, Vorlagen und gemeinsamen Sammlungen als .aurawf.zip."""
+        from .workflow import austausch
+        pkg = Path(self.cur).parent
+        f = filedialog.asksaveasfilename(parent=self.win, title="Workflow exportieren", initialfile=f"{pkg.name}.aurawf.zip",
+                                         defaultextension=".zip", filetypes=[("AURA-Workflow", "*.aurawf.zip"), ("ZIP", "*.zip")])
+        if not f: return
+        laeufe = any((pkg / "laeufe").glob("*")) and messagebox.askyesno(
+            "Exportieren", "Auch die bisherigen Läufe (Eingaben, Ergebnisse) mitgeben?\n\nNur nötig zum Nachsehen beim Empfänger.",
+            default="no", parent=self.win)
+        try: z, hw = austausch.export(pkg, f, mit_laeufen=laeufe, progress=lambda m: None)
+        except Exception as e: messagebox.showerror("Exportieren", str(e), parent=self.win); return
+        messagebox.showinfo("Exportieren", f"Gespeichert: {z}\n\nEnthält Wissen und Vorlagen. Vor der Weitergabe Inhalt auf "
+                            "schutzwürdige Daten prüfen." + ("\n\nHinweise:\n- " + "\n- ".join(hw) if hw else ""), parent=self.win)
+
+    def importieren(self):
+        """v78: .aurawf.zip einlesen; bei Namenskonflikt neuen Namen erfragen."""
+        from .workflow import austausch
+        f = filedialog.askopenfilename(parent=self.win, title="Workflow importieren",
+                                       filetypes=[("AURA-Workflow", "*.aurawf.zip *.zip")])
+        if not f: return
+        try: m, _ = austausch.lesen(f)
+        except Exception as e: messagebox.showerror("Importieren", str(e), parent=self.win); return
+        from .wissen import WISSEN_DIR
+        vorhanden = [s for s in m.get("gemeinsam", []) if (WISSEN_DIR / s).is_dir()]
+        ersetzen = bool(vorhanden) and messagebox.askyesno(
+            "Importieren", f"Gemeinsame Sammlungen gibt es hier schon: {', '.join(vorhanden)}\n\n"
+            "Ja = durch die Fassung im Paket ersetzen (alte wird gesichert)\nNein = behalten, nur fehlende Dateien ergänzen",
+            default="no", parent=self.win)
+        name = None
+        while True:
+            try: d, ber = austausch.importieren(f, name=name, gemeinsam_ersetzen=ersetzen, progress=lambda x: None); break
+            except austausch.NameBesetzt as e:
+                name = ctk.CTkInputDialog(text=f"{e}.\nNeuer Name:", title="Importieren").get_input()
+                if not name: return
+            except Exception as e: messagebox.showerror("Importieren", str(e), parent=self.win); return
+        messagebox.showinfo("Importieren", f"Workflow «{m.get('titel', d.name)}» importiert.\n\n- " + "\n- ".join(ber), parent=self.win)
+        self.refresh_list(); self.show(str(d / "workflow.json"))
 
     def migrate(self):
         from .wissen import Wissen

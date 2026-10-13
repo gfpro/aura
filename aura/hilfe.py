@@ -1,4 +1,4 @@
-# aura/hilfe.py — Infotexte (Tooltips) fuer alle Fenster. Version 20261012v70 (v70: Text «8 Bit»; v68: Info-Leiste rechts; v60: Tooltip verschwindet beim Minimieren/Fensterwechsel, nicht mehr über anderen Programmen; v46: Slide-In, Vollansicht, Startfragen)
+# aura/hilfe.py — Infotexte (Tooltips) fuer alle Fenster. Version 20261012v74 (v75: Position korrigiert (Reihenfolge withdraw/topmost/geometry/deiconify); v74: Tooltip vor dem Hauptfenster; v70: Text «8 Bit»; v68: Info-Leiste rechts; v60: Tooltip verschwindet beim Minimieren/Fensterwechsel, nicht mehr über anderen Programmen; v46: Slide-In, Vollansicht, Startfragen)
 # Alle Texte stehen hier an einem Ort. Zuordnung:
 #   auto(fenster, ctx)  - findet Knoepfe/Schalter/Haekchen anhand ihrer Beschriftung (TEXTE[ctx], dann TEXTE["*"])
 #   tip(widget, key)    - fester Text fuer Felder ohne Beschriftung (key beginnt mit "#") oder freier Text
@@ -170,8 +170,9 @@ class Tooltip:
             if not txt or self.top or not self.w.winfo_viewable(): return
             dark = ctk.get_appearance_mode() == "Dark"
             sc = ctk.ScalingTracker.get_widget_scaling(self.w) or 1.0
-            top = self.top = tk.Toplevel(self.w); top.wm_overrideredirect(True)
-            try: top.transient(self.w.winfo_toplevel())                  # v60: gehört zu AURA, nicht «immer zuoberst»
+            top = self.top = tk.Toplevel(self.w); top.withdraw()           # v75: erst unsichtbar aufbauen und platzieren
+            top.wm_overrideredirect(True)
+            try: top.attributes("-topmost", True)                         # vor dem Platzieren setzen, sonst springt es nach 0,0
             except Exception: pass
             tk.Label(top, text=txt, justify="left", wraplength=int(380 * sc), padx=int(9 * sc), pady=int(6 * sc),
                      bg="#2A303B" if dark else "#FFFBE6", fg="#E8EAED" if dark else "#111827",
@@ -183,7 +184,10 @@ class Tooltip:
             tw, th = top.winfo_reqwidth(), top.winfo_reqheight()
             if px + tw > sw - 8: px = max(8, sw - tw - 8)
             if py + th > sh - 40: py = max(8, self.w.winfo_rooty() - th - 6)     # unten kein Platz -> oberhalb
-            top.wm_geometry(f"+{px}+{py}")
+            top.wm_geometry(f"+{px}+{py}"); top.deiconify(); top.lift()
+            top.wm_geometry(f"+{px}+{py}")                                 # Windows: nach dem Anzeigen nochmals setzen
+            # v74/v75: zuoberst statt transient (lag sonst hinter dem Hauptfenster). Unkritisch, weil _watch den Tooltip
+            # schliesst, sobald AURA nicht mehr im Vordergrund ist.
             self.w.after(WATCH_MS, self._watch)
         except Exception:
             self._hide()

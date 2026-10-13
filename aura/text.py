@@ -1,5 +1,7 @@
-# aura/text.py — Text aufbereiten und in Stuecke teilen (aus mail_import v03 uebernommen).
-import re
+# aura/text.py — Text aufbereiten und in Stuecke teilen (aus mail_import v03 uebernommen). Version 20261012v73
+# v73: split_mail() liefert zusaetzlich den zitierten Verlauf; verlauf_neu() behaelt daraus nur Absaetze, die noch in
+#      keiner anderen Mail stehen (Pruefsumme je Absatz, Tabelle para_hash).
+import hashlib, re
 
 CHUNK_TARGET, CHUNK_HARD, CHUNK_MIN = 500, 750, 15
 
@@ -43,3 +45,44 @@ def make_chunks(text, prefix=""):
         if len(cur) >= CHUNK_TARGET: out.append(cur); cur = ""
     if cur: out.append(cur)
     return [prefix + c for c in out if len(c) >= CHUNK_MIN]
+
+
+# ----------------------------------------------------------------------------- v73: zitierter Verlauf
+PARA_MIN = 40                      # kuerzere Absaetze (Gruss, Anrede) werden nicht verglichen
+_RX_SECTION = re.compile(r"(?=^-- (?:weitergeleitet/)?zitiert: )", re.M)
+
+def split_mail(body, subject=""):
+    """(eigener Text wie clean_mail, zitierter Verlauf). Weiterleitungen: alles ist eigener Text, Verlauf leer."""
+    own = clean_mail(body, subject)
+    if _RX_FWD.match(subject or ""): return own, ""
+    b = _RX_NOISE.sub("", (body or "").replace("\r\n", "\n").replace("\r", "\n"))
+    m = _RX_QUOTE.search(b)
+    if not m or m.start() <= 40: return own, ""
+    q = _RX_HDRBLOCK.sub(lambda m: "\n\n-- zitiert: %s, %s --\n\n" % (m.group("who").strip(" \"'"), m.group("when").strip()), b[m.start():])
+    return own, clean(q)
+
+def para_hash(p):
+    """Pruefsumme eines Absatzes (Kleinschreibung, nur Wortzeichen) oder None, wenn zu kurz."""
+    n = " ".join(re.sub(r"[\W_]+", " ", p.lower()).split())
+    return hashlib.sha1(n.encode("utf-8")).hexdigest()[:16] if len(n) >= PARA_MIN else None
+
+def paragraphs(text):
+    return [" ".join(p.split()) for p in re.split(r"\n\s*\n", text or "") if p.strip()]
+
+def own_hashes(text):
+    return {h for h in map(para_hash, paragraphs(text)) if h}
+
+def verlauf_neu(quoted, known):
+    """Behaelt aus dem Verlauf nur Absaetze, deren Pruefsumme nicht in known (Funktion: set -> bekannte) liegt.
+    Ein Abschnitt (eine zitierte Mail) bleibt nur, wenn mindestens ein laengerer Absatz neu ist; dann mit Kopfzeile
+    und kurzen Absaetzen. Rueckgabe: (Text, neue Pruefsummen)."""
+    out, new = [], set()
+    for sec in _RX_SECTION.split(quoted or ""):
+        ps = paragraphs(sec)
+        if not ps: continue
+        hs = [None if _RX_SECTION.match(p) else para_hash(p) for p in ps]     # Kopfzeile zaehlt nicht
+        kn = known({h for h in hs if h}) | new
+        keep = [p for p, h in zip(ps, hs) if h is None or h not in kn]
+        if not any(h and h not in kn for h in hs): continue
+        out.append("\n\n".join(keep)); new |= {h for h in hs if h and h not in kn}
+    return "\n\n".join(out), new

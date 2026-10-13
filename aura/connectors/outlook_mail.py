@@ -1,8 +1,9 @@
 # aura/connectors/outlook_mail.py — Mail-Ordner des Hauptpostfachs (klassisches Outlook, nur lesen).
 # v23: Ordnerauswahl (settings["mail_folders"] = {EntryID: true/false}); neue Unterordner erben vom Elternordner.
 #      Beim Sync werden alle EntryIDs der gewaehlten Ordner gesammelt (ctx.seen) -> Worker loescht Verschwundenes.
+# v73: zusaetzlich «zitat» = zitierter Verlauf (der Worker behaelt daraus nur Neues).
 from .base import Connector, outlook_namespace, outlook_available, iso
-from ..text import clean_mail
+from ..text import split_mail
 
 SKIP_DEFAULT = (3, 4, 16, 20, 23)   # Geloescht, Postausgang, Entwuerfe, Sync-Probleme, Junk
 SKIP_NAMES = {"aufgezeichnete unterhaltungen", "conversation history", "suchordner", "search folders",
@@ -82,9 +83,10 @@ class OutlookMail(Connector):
                         addr = it.Sender.GetExchangeUser().PrimarySmtpAddress if it.SenderEmailType == "EX" else it.SenderEmailAddress
                     except Exception: addr = ""
                     ts = iso(it.ReceivedTime) or iso(it.SentOn) or iso(it.CreationTime)
+                    own, zit = split_mail(body, subj)
                     yield {"ext_id": eid, "title": subj, "author": it.SenderName or "",
                            "recipients": "; ".join(x for x in (it.To or "", it.CC or "") if x), "ts": ts,
-                           "body": body, "text": clean_mail(body, subj),
+                           "body": body, "text": own, "zitat": zit,
                            "meta": {"folder": fname, "folder_id": f["eid"], "sender_addr": addr or "",
                                     "conversation_id": getattr(it, "ConversationID", "") or ""}}
                 except Exception as e:
