@@ -1,4 +1,4 @@
-# aura/hilfe.py — Infotexte (Tooltips) fuer alle Fenster. Version 20261012v74 (v75: Position korrigiert (Reihenfolge withdraw/topmost/geometry/deiconify); v74: Tooltip vor dem Hauptfenster; v70: Text «8 Bit»; v68: Info-Leiste rechts; v60: Tooltip verschwindet beim Minimieren/Fensterwechsel, nicht mehr über anderen Programmen; v46: Slide-In, Vollansicht, Startfragen)
+# aura/hilfe.py — Infotexte (Tooltips) fuer alle Fenster. Version 20261013v81 (v81: Widgets-Ansicht; v80: «▶», Widgets; v79: «⌂», Ablaufband; v75: Position korrigiert (Reihenfolge withdraw/topmost/geometry/deiconify); v74: Tooltip vor dem Hauptfenster; v70: Text «8 Bit»; v68: Info-Leiste rechts; v60: Tooltip verschwindet beim Minimieren/Fensterwechsel, nicht mehr über anderen Programmen; v46: Slide-In, Vollansicht, Startfragen)
 # Alle Texte stehen hier an einem Ort. Zuordnung:
 #   auto(fenster, ctx)  - findet Knoepfe/Schalter/Haekchen anhand ihrer Beschriftung (TEXTE[ctx], dann TEXTE["*"])
 #   tip(widget, key)    - fester Text fuer Felder ohne Beschriftung (key beginnt mit "#") oder freier Text
@@ -21,18 +21,24 @@ TEXTE = {
         "Pause": "Unterbricht die laufende Arbeit (Vektoren, Abgleich). Bereits Erledigtes bleibt erhalten; später einfach neu starten.",
         "Workflows öffnen": "Öffnet die Workflows: Unterlagen nach festem Ablauf prüfen und eine Vorlage ausfüllen lassen (z.B. Verfahrensentscheid).",
         "➤": "Frage senden (Enter). Shift+Enter fügt eine neue Zeile ein.",
-        "Kopieren": "Kopiert die Antwort in die Zwischenablage.",
+        "Kopieren": "Kopiert den Text in die Zwischenablage.",
+        "Alle Ergebnisse": "Öffnet die Ansicht «Ergebnisse» mit allen Läufen.",
+        "Workflow": "Öffnet diesen Workflow.",
         "8 Bit (schneller)": "Ein: Das Sprachmodell wird beim Laden auf 8 Bit umgerechnet. Braucht halb so viel Grafikspeicher und "
                              "schreibt schneller; die Antworten können minimal abweichen. Gilt beim nächsten «Laden».",
         "Info-Leiste rechts": "Zeigt rechts Sprachmodell, Wissensdatenbank und die letzten Workflow-Läufe. Blendet sich bei "
                               "schmalem Fenster automatisch aus – Fenster breiter ziehen, dann erscheint sie wieder.",
         "alle anzeigen →": "Öffnet die Ansicht «Ergebnisse» mit allen Läufen, Dokumenten und Prüfhinweisen.",
+        "⌂": "Zu den Fragen (Startseite mit Kacheln). Der Chatverlauf wird dabei geleert.",
+        "▶": "Workflow-Ergebnisse: die angehefteten Widgets in voller Breite. «⌂» führt zurück zu den Fragen.",
         "Kontext": "Zeigt die Textstücke, die das Sprachmodell für diese Antwort gelesen hat. Hilfreich, wenn eine Antwort falsch wirkt: Stand die Information überhaupt drin?",
     },
     "quellen": {
         "Ordner": "Outlook-Ordner wählen, die AURA einlesen soll. Mails aus abgewählten Ordnern werden nach Rückfrage aus AURA entfernt – in Outlook bleibt alles.",
         "…": "Dokumentordner auf diesem Rechner wählen (PDF mit Text, Word, Text, Markdown). Danach «Sync».",
         "✕": "Dokumentordner abwählen: Die eingelesenen Dokumente werden aus AURA entfernt, die Dateien im Ordner bleiben unberührt. Erneutes Einlesen ist jederzeit möglich.",
+        "Links": "Confluence-Links verwalten: Seite (mit allen Unterseiten) oder ganzen Bereich einfügen. Ohne Anmeldung, nur öffentlich sichtbare Seiten.",
+        "+ Link einfügen": "Fügt den Link hinzu. Danach in «Quellen» bei Confluence «Sync».",
         "Sync": "Liest neue Einträge dieser Quelle ein (Bekanntes wird übersprungen). Danach links «Vektoren berechnen».",
         "Schliessen": "Bereich schliessen. Ein laufender Abgleich geht im Hintergrund weiter.",
         "Alles zurücksetzen …": "Löscht alles Eingelesene (Mails, Termine, Verlauf, Dokumente, Vektoren), wählt alle Quellen ab und "
@@ -59,6 +65,9 @@ TEXTE = {
         "Ordner öffnen": "Öffnet den Paketordner im Explorer (workflow.json, wissen, vorlagen, laeufe).",
         "Löschen": "Löscht den Workflow mit Wissen, Vorlagen und allen Läufen. Der Ordner wird nach «workflows\\_geloescht» verschoben und lässt sich von dort zurückholen.",
         "In Paket umwandeln": "Wandelt die alte Einzeldatei in ein Paket mit eigenem Wissen, Vorlagen und Läufen um. Einmalig nötig für Workflows aus Versionen vor v36.",
+        "☆ Als Widget": "Zeigt das Ergebnis des letzten Laufs als Widget unter «▶» (nur bei Ausgabe «Anzeige in AURA» sinnvoll).",
+        "★ Als Widget": "Ist als Widget unter «▶» angeheftet. Klick entfernt das Widget wieder (der Workflow bleibt).",
+        "Ablauf": "Schritte des Workflows als Band mit dem Ergebnis des letzten Laufs. Klick auf einen Schritt zeigt sein Ergebnis.",
         "Ausführen": "Workflow mit eigenen Unterlagen starten und den Fortschritt verfolgen.",
         "Wissen": "Fachdokumente, die nur dieser Workflow verwendet.",
         "Vorlage": "Felder der Word-Vorlage, ihre Zuordnung und der Wert aus dem letzten Lauf – zum Prüfen der Abfüllung.",

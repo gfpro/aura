@@ -47,7 +47,7 @@ def _open_doc(ext_id, meta):
     os.startfile(p)
 
 HANDLERS = {"outlook_mail": _open_mail, "outlook_calendar": _open_event,
-            "edge_history": _open_web, "folder_docs": _open_doc}
+            "edge_history": _open_web, "folder_docs": _open_doc, "confluence": _open_web}
 
 def open_item(item_id, report):
     """report(text) meldet Erfolg/Fehler an die Oberflaeche (thread-sicher ueber die Event-Queue)."""

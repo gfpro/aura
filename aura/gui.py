@@ -1,4 +1,7 @@
-# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261012v71
+# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261013v81
+# v81: «▶» öffnet die Ansicht «Workflow-Ergebnisse» (Widgets, volle Breite); Startseite nur Fragen; Wahl der ersten Seite (Einstellung startseite).
+# v80: Knopf «▶» (Workflows) neben «⌂»; Startseite zeigt angeheftete Workflow-Ergebnisse (Widgets) statt Ablaufband.
+# v79: Knopf «⌂» (Startseite) in der Seitenleiste; Ablaufband des gewählten Workflows auf der Startseite (dashboard.py).
 # v71: Logo (aura\assets: logo_*.png in der Seitenleiste, aura.ico für Fenster und Taskleiste).
 # v70: Schalter «8 Bit (schneller)» unter dem Sprachmodell (Einstellung llm_int8).
 # v69: Darstellung Hell/Dunkel/System umschaltbar (unten links, gespeichert); Untertitel ausgeschrieben; Modellname kürzer.
@@ -91,6 +94,7 @@ class App:
         self.fvars = {}; self.flist = []; self.confirm_open = False; self.decline_until = 0.0
         self.next_auto = time.time() + 120; root.after(30000, self.autotick)
         root.after(1500, self._erg_badge)                              # v54
+        if self.s.get("startseite") == "widgets": root.after(300, self.open_widgets)   # v81
         root.bind("<Configure>", self._on_resize, add="+"); root.after(400, self._rb_apply)   # v68
 
     # ------------------------------------------------------------------ Seitenleiste
@@ -109,6 +113,10 @@ class App:
         ctk.CTkLabel(tt, text=APP_NAME, font=font(20, "bold"), text_color=INK, height=22).pack(anchor="w")
         ctk.CTkLabel(tt, text="Artificial Understanding &\nRetrieval Assistant", font=font(11), text_color=MUTED,
                      justify="left", anchor="w").pack(anchor="w")                     # v69
+        ctk.CTkButton(hd, text="⌂", width=34, height=34, corner_radius=10, font=font(18, "bold"), fg_color=CARD,
+                      hover_color=BORDER, text_color=ACCENT, command=self.go_home).grid(row=0, column=2, sticky="e")   # v79
+        ctk.CTkButton(hd, text="▶", width=34, height=34, corner_radius=10, font=font(15, "bold"), fg_color=CARD,
+                      hover_color=BORDER, text_color=ACCENT, command=self.open_widgets).grid(row=0, column=3, sticky="e", padx=(6, 0))   # v80
         r = 1
 
         # ---- Sprachmodell
@@ -190,10 +198,16 @@ class App:
                                               selected_color=ACCENT, selected_hover_color=ACCENT_HI, unselected_color=CARD,
                                               unselected_hover_color=BORDER, fg_color=CARD, text_color=INK)
         self.sb_mode.set(next((k for k, v in MODI.items() if v == self.s.get("darstellung", "system")), "System"))
-        self.sb_mode.grid(row=r + 1, column=0, sticky="ew", padx=16, pady=(0, 2))
+        self.sb_start = ctk.CTkSegmentedButton(side, values=["Fragen", "Widgets"], height=26, font=font(11), command=self.set_start,  # v81
+                                               selected_color=ACCENT, selected_hover_color=ACCENT_HI, unselected_color=CARD,
+                                               unselected_hover_color=BORDER, fg_color=CARD, text_color=INK)
+        self.sb_start.set("Widgets" if self.s.get("startseite") == "widgets" else "Fragen")
+        self.sb_start.grid(row=r + 1, column=0, sticky="ew", padx=16, pady=(0, 4))
+        hilfe.tip(self.sb_start, "Startseite: Was AURA beim Öffnen zuerst zeigt – «Fragen» (Chat, ⌂) oder «Widgets» (Workflow-Ergebnisse, ▶). Wird gespeichert.")
+        self.sb_mode.grid(row=r + 2, column=0, sticky="ew", padx=16, pady=(0, 2))
         hilfe.tip(self.sb_mode, "Darstellung: Hell, Dunkel oder wie Windows (System). Wird gespeichert.")
         vl.grid(
-            row=r + 2, column=0, sticky="sw", padx=20, pady=(6, 12))
+            row=r + 3, column=0, sticky="sw", padx=20, pady=(6, 12))
 
     def _title(self, parent, text, r):
         ctk.CTkLabel(parent, text=text.upper(), font=font(10, "bold"), text_color=MUTED, anchor="w").grid(
@@ -473,6 +487,9 @@ class App:
                               hover_color=MUTED, text_color=INK, command=self.pick_folder).pack(side="left", padx=(0, 4))
                 ctk.CTkButton(btns, text="✕", width=26, height=24, corner_radius=7, fg_color=BORDER,      # v37: Ordner entfernen
                               hover_color=MUTED, text_color=INK, command=self.remove_folder).pack(side="left", padx=(0, 4))
+            if c.id == "confluence":                                # v78: Links verwalten
+                ctk.CTkButton(btns, text="Links", width=52, height=24, corner_radius=7, font=font(11), fg_color=BORDER,
+                              hover_color=MUTED, text_color=INK, command=self.open_confluence).pack(side="left", padx=(0, 4))
             b = ctk.CTkButton(btns, text="Sync", width=48, height=24, corner_radius=7, font=font(11, "bold"),
                               fg_color=ACCENT, hover_color=ACCENT_HI, command=lambda c=c: self.sync(c)); b.pack(side="left")
             self.src_btns.append(b); self.rows[c.id] = (dot, info)
@@ -498,7 +515,7 @@ class App:
                                    icon="warning", default="no", parent=self.root): return
         try:
             self.s = load_settings()
-            self.s.update(mail_folders={}, docs_folder="", autosync=False, autosync_last=""); save_settings(self.s)
+            self.s.update(mail_folders={}, docs_folder="", confluence_links=[], autosync=False, autosync_last=""); save_settings(self.s)
             zuruecksetzen_vormerken()
         except Exception as e: messagebox.showerror(APP_NAME, f"Nicht zurückgesetzt: {e}", parent=self.root); return
         log.get().info("Alles zurücksetzen: vorgemerkt, Neustart")
@@ -570,6 +587,34 @@ class App:
         for i, t in enumerate(TILES): self._tile(grid, *t).grid(row=i // 2, column=i % 2, padx=6, pady=6, sticky="nsew")
         self.welcome = f
 
+    def open_widgets(self):
+        """v81: Ansicht «Workflow-Ergebnisse» – angeheftete Workflows als Widgets in voller Breite."""
+        d = getattr(self, "dash", None)
+        if "widgets" in self.views and self.views["widgets"].winfo_exists() and d is not None and d.alive():
+            self.show_view("widgets"); d.draw(); return
+        body = self.view("widgets", "Workflow-Ergebnisse"); body.grid_columnconfigure(0, weight=1); body.grid_rowconfigure(0, weight=1)
+        sf = ctk.CTkScrollableFrame(body, fg_color="transparent"); sf.grid(row=0, column=0, sticky="nsew", padx=20, pady=8)
+        sf.grid_columnconfigure(0, weight=1)
+        try:
+            from .dashboard import Widgets
+            self.dash = Widgets(self, sf); self.dash.frame.grid(row=0, column=0, sticky="ew")
+        except Exception as e:
+            log.get().exception("Widgets"); self.dash = None
+            ctk.CTkLabel(sf, text=f"Widgets nicht verfügbar: {e}", text_color=ERR).grid(row=0, column=0, sticky="w")
+
+    def set_start(self, label):
+        """v81: Welche Seite AURA beim Start zeigt (Fragen oder Widgets)."""
+        self.s = load_settings(); self.s["startseite"] = "widgets" if label == "Widgets" else "chat"; save_settings(self.s)
+
+    def go_home(self):
+        """v79: zurück zur Startseite (Kacheln + Ablaufband); der Chatverlauf wird geleert."""
+        if self.cur: self.status.configure(text="Bitte warten, bis die Antwort fertig ist."); return
+        self.close_panel(anim=False); self.show_chat()
+        for c in self.chat.winfo_children(): c.destroy()
+        self.msgs = []; self.welcome = None; self._welcome()
+        try: self.chat._parent_canvas.yview_moveto(0)
+        except Exception: pass
+
     def _logo(self, size):
         """v71: Logo als PNG passend zur Windows-Skalierung (Tk kann PNG ohne Zusatzpaket). None = Datei fehlt."""
         import warnings
@@ -604,6 +649,8 @@ class App:
     def _welcome_erg(self):
         """v68: «Letzte Ergebnisse» steht jetzt in der Info-Leiste rechts (Name bleibt, wird von mehreren Stellen gerufen)."""
         self._rb_runs()
+        d = getattr(self, "dash", None)                                  # v79
+        if d is not None and d.alive(): d.draw()
 
     def _fill(self, s):
         """v46: ohne «XY» sofort fragen; mit «XY» nur einsetzen und XY markieren (Tippen ersetzt es)."""
@@ -738,6 +785,41 @@ class App:
                                    "entfernen?\n\nDie Dateien im Ordner bleiben unberührt.", parent=self.root): return
         self.s["docs_folder"] = ""; save_settings(self.s)
         self.w.submit("delete_source", "folder_docs")
+
+    # ---- v78: Confluence-Links (Seite = inkl. Unterseiten, Bereich = alles)
+    def open_confluence(self):
+        from .connectors.confluence import parse_link
+        body = self.view("confluence", "Confluence-Links")
+        w = ctk.CTkFrame(body, fg_color="transparent"); w.grid(row=0, column=0, sticky="nw", padx=24, pady=12)
+        w.grid_columnconfigure(0, weight=1, minsize=520)
+        ctk.CTkLabel(w, text="Link einer Seite (holt alle Unterseiten) oder eines Bereichs einfügen. Abgleich einmal täglich "
+                             "im Auto-Abgleich oder per «Sync». Ohne Anmeldung – nur öffentlich sichtbare Seiten.",
+                     font=font(11), text_color=MUTED, anchor="w", justify="left", wraplength=500).grid(row=0, column=0, sticky="w", pady=(0, 8))
+        links = list(self.s.get("confluence_links") or [])
+        for i, l in enumerate(links):
+            r = ctk.CTkFrame(w, fg_color=CARD, corner_radius=8); r.grid(row=1 + i, column=0, sticky="ew", pady=2)
+            try: d = parse_link(l)[2]
+            except ValueError as e: d = f"⚠ {e}"
+            ctk.CTkLabel(r, text=f"{d}\n{l[:80]}", font=font(10), text_color=INK, anchor="w", justify="left").pack(side="left", padx=10, pady=4)
+            ctk.CTkButton(r, text="✕", width=26, height=24, corner_radius=7, fg_color=BORDER, hover_color=MUTED, text_color=INK,
+                          command=lambda l=l: self._conf_remove(l)).pack(side="right", padx=8)
+        e = ctk.CTkEntry(w, placeholder_text="https://confluence.bit.admin.ch/spaces/…", height=28)
+        e.grid(row=2 + len(links), column=0, sticky="ew", pady=(10, 0))
+        def add():
+            l = e.get().strip()
+            try: parse_link(l)
+            except ValueError as x: messagebox.showerror(APP_NAME, str(x), parent=self.root); return
+            if l not in links: self.s["confluence_links"] = links + [l]; save_settings(self.s)
+            self.open_confluence()
+        ctk.CTkButton(w, text="+ Link einfügen", height=28, corner_radius=8, font=font(11, "bold"), fg_color=ACCENT,
+                      hover_color=ACCENT_HI, command=add).grid(row=3 + len(links), column=0, sticky="w", pady=6)
+
+    def _conf_remove(self, l):
+        if not messagebox.askyesno(APP_NAME, f"Link entfernen?\n{l}\n\nSeiten, die nur über diesen Link kamen, werden beim "
+                                   "nächsten «Sync» aus AURA entfernt.", parent=self.root): return
+        self.s["confluence_links"] = [x for x in (self.s.get("confluence_links") or []) if x != l]; save_settings(self.s)
+        if not self.s["confluence_links"]: self.w.submit("delete_source", "confluence")
+        self.open_confluence()
 
     def pick_folder(self):
         d = filedialog.askdirectory(title="Dokumentordner waehlen", parent=self.root)

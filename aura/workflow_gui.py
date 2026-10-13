@@ -1,4 +1,6 @@
-# aura/workflow_gui.py — Ansicht «Workflows»: Pakete anlegen, ausfuehren, Wissen und Vorlagen pflegen. Version 20261013v78
+# aura/workflow_gui.py — Ansicht «Workflows»: Pakete anlegen, ausfuehren, Wissen und Vorlagen pflegen. Version 20261013v81
+# (v81: Knopf heisst «☆ Als Widget»)
+# (v80: «☆ Auf Startseite» (Widget), Reiter «Ablauf» mit Ablaufband aus dashboard.py)
 # (v78: «Exportieren …» / «Importieren …» – Übergabe als .aurawf.zip, austausch.py)
 # (v64a: Knopf «Feldplan …» im Reiter «Vorlage»)
 # (v53: «Workflow beschreiben», Meldungen, allgemeine Prüfregeln; v52: Reiter «Schritte» (workflow_editor.py); v51: Vorlage entfernen, Herkunft der Prüfpunkte; v50: Reiter «Prüfliste» – Prüfpunkte ohne JSON anlegen; v38: Infotexte, v40: Prüfhinweise nach dem Lauf, v46: Vollansicht im Hauptfenster statt eigenem Fenster)
@@ -90,6 +92,11 @@ class WorkflowWindow:
         b("Neu laden", lambda: self.show(path))
         if pkg:
             b("Ordner öffnen", lambda: _open(Path(path).parent)); b("Exportieren …", self.exportieren); b("Löschen", self.delete)
+            from .dashboard import ist_angeheftet                        # v80
+            pin = ist_angeheftet(self.app, path)
+            ctk.CTkButton(bar, text="★ Als Widget" if pin else "☆ Als Widget", height=28, width=0, corner_radius=8,
+                          font=G.font(11, "bold"), fg_color=G.ACCENT if pin else G.CARD, hover_color=G.ACCENT_HI if pin else G.BORDER,
+                          text_color="white" if pin else G.INK, command=self.pin_toggle).pack(side="left", padx=(0, 6))
         else: b("In Paket umwandeln", self.migrate)
         if self.wf and self.wf.get("description"):
             ctk.CTkLabel(hd, text=self.wf["description"], font=G.font(11), text_color=G.MUTED, anchor="w", justify="left",
@@ -100,6 +107,12 @@ class WorkflowWindow:
         tabs = self.tabs = ctk.CTkTabview(self.right, fg_color=G.CARD, segmented_button_selected_color=G.ACCENT)
         tabs.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
         self._tab_run(tabs.add("Ausführen"))
+        try:                                                             # v80: Ablaufband
+            from .dashboard import FlowBand
+            t = tabs.add("Ablauf"); t.grid_columnconfigure(0, weight=1)
+            self.band = FlowBand(self.app, t, path); self.band.frame.grid(row=0, column=0, sticky="ew", padx=4, pady=4)
+        except Exception as e:
+            self.band = None; ctk.CTkLabel(tabs.tab("Ablauf"), text=f"Ablauf nicht verfügbar: {e}", text_color=G.ERR).pack(anchor="w")
         try:                                                             # v52: Schritte ohne JSON
             from .workflow_editor import SchrittEditor
             self.editor = SchrittEditor(self, tabs.add("Schritte"))
@@ -211,6 +224,17 @@ class WorkflowWindow:
         sym, col = ("▶", self.G.ACCENT) if status == "läuft" else ("–", self.G.MUTED) if status == "übersprungen" else ("✓", self.G.OK)
         l.configure(text=f"{sym}  {txt}   {'' if status == 'läuft' else status}", text_color=col)
 
+    def pin_toggle(self):
+        """v80: Workflow als Widget auf der Startseite anheften / entfernen."""
+        from .dashboard import ist_angeheftet, anheften, hat_anzeige
+        an = not ist_angeheftet(self.app, self.cur)
+        if an and not hat_anzeige(self.wf):
+            if not messagebox.askyesno("Widget", "Dieser Workflow hat keine Ausgabe «Anzeige in AURA» – das Widget bliebe leer.\n\n"
+                                       "Trotzdem anheften? (Ausgabe im Reiter «Schritte» ergänzen)", parent=self.win): return
+        anheften(self.app, self.cur, an); self.show(self.cur)
+        try: self.app._welcome_erg()
+        except Exception: pass
+
     def on_progress(self, text):
         if self.alive() and self.running: self.lbl_prog.configure(text=text)
 
@@ -223,6 +247,8 @@ class WorkflowWindow:
     def on_done(self, res):
         if not self.alive(): return
         G = self.G; self.running = False; self.b_start.configure(state="normal")
+        b = getattr(self, "band", None)                                  # v80
+        if b is not None and b.alive(): b.draw()
         ok = res.get("status") == "ok"
         self.lbl_prog.configure(text=f"{'Fertig' if ok else res.get('status', '').capitalize()} nach {res.get('seconds', 0):.0f} s"
                                 + (f"\n{res['error']}" if res.get("error") else ""), text_color=G.OK if ok else G.ERR)

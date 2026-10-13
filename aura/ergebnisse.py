@@ -1,4 +1,4 @@
-# aura/ergebnisse.py — Daten für die Ansicht «Ergebnisse» (Startseite). Version 20261011v54
+# aura/ergebnisse.py — Daten für die Ansicht «Ergebnisse» (Startseite). Version 20261013v80 (v79: letzter_lauf, DIAG)
 # Liest nur, was jeder Lauf ohnehin schreibt: workflows\<name>\laeufe\<Zeit>\protokoll.json. Keine eigene Datenhaltung
 # ausser data\ergebnisse.json (Zeitpunkt «zuletzt angesehen» für die Anzeige «n neu»).
 import json
@@ -37,6 +37,18 @@ def laeufe(wf_dir, limit=30):
                     "zeit": zeit, "stamp": stamp, "ordner": str(p.parent), "status": d.get("status", "?"), "error": d.get("error"),
                     "seconds": d.get("seconds", 0), "meldungen": d.get("meldungen") or [], "files": files,
                     "pruefungen": d.get("pruefungen") or [], "neu": stamp > seen})
+    try:
+        from . import log
+        log.diag("ergebnisse", ordner=str(wf_dir), gefunden=len(out), gelesen=len(res))
+    except Exception: pass
     return res
+
+def letzter_lauf(wf_path):
+    """v79: protokoll.json des neuesten Laufs eines Workflow-Pakets (oder None) und sein Zeitstempel."""
+    ps = sorted((Path(wf_path).parent / "laeufe").glob("*/protokoll.json"), key=lambda p: p.parent.name)
+    for p in reversed(ps):
+        try: return json.loads(p.read_text(encoding="utf-8")), p.parent.name
+        except Exception: continue
+    return None, None
 
 def anzahl_neu(wf_dir): return sum(1 for r in laeufe(wf_dir, 50) if r["neu"])

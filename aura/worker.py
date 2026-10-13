@@ -129,6 +129,16 @@ class Worker(threading.Thread):
         ask = 0
         if cid == "outlook_mail" and getattr(ctx, "complete", False) and not stop():
             removed, ask = self._mail_cleanup(ctx.seen, confirm)
+        if cid == "confluence" and getattr(ctx, "complete", False) and not stop():   # v78: alte Versionen/verschwundene Seiten
+            rows = self.conn.execute("SELECT id, ext_id FROM items WHERE source = 'confluence'").fetchall()
+            gone = [i for i, e in rows if e not in ctx.seen]
+            cur = {e.split("|")[0] for e in ctx.seen}
+            weg = [i for i, e in rows if e not in ctx.seen and e.split("|")[0] not in cur]   # wirklich verschwunden
+            if len(weg) > max(20, len(rows) * 0.3):
+                self.progress(f"Confluence: {len(weg)} Seiten nicht mehr gesehen - nicht geloescht (zu viele)")
+                gone = [i for i in gone if i not in set(weg)]                   # alte Versionen trotzdem ersetzen
+            if gone: self._delete(gone); removed = len(gone)
+        if cid == "confluence" and not stop(): db.flag(self.conn, "confluence_tag", time.strftime("%Y-%m-%d"))
         self.conn.commit()
         if n or upd or removed:                                      # v23: nur bei Aenderungen neu aufbauen
             db.rebuild_fts(self.conn); self.retriever.invalidate()
@@ -253,6 +263,8 @@ class Worker(threading.Thread):
         every = max(1, int(s.get("autosync_calendar_every", 4)))
         if self.conn.execute("SELECT 1 FROM items WHERE source='outlook_calendar' LIMIT 1").fetchone() \
                 and (self.auto_runs - 1) % every == 0: cids.append("outlook_calendar")
+        if (s.get("confluence_links") and s.get("confluence_auto", True)            # v78: Confluence einmal pro Tag
+                and db.flag(self.conn, "confluence_tag") != time.strftime("%Y-%m-%d")): cids.append("confluence")
         new = 0
         for cid in cids:
             try: new += self.job_sync(cid, auto=True) or 0
