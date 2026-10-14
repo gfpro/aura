@@ -1,4 +1,5 @@
-# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261013v81
+# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261013v82
+# v82: Startseiten-Wahl als Schalter «Beim Start Widgets zeigen» (statt Segmentknopf Fragen|Widgets).
 # v81: «▶» öffnet die Ansicht «Workflow-Ergebnisse» (Widgets, volle Breite); Startseite nur Fragen; Wahl der ersten Seite (Einstellung startseite).
 # v80: Knopf «▶» (Workflows) neben «⌂»; Startseite zeigt angeheftete Workflow-Ergebnisse (Widgets) statt Ablaufband.
 # v79: Knopf «⌂» (Startseite) in der Seitenleiste; Ablaufband des gewählten Workflows auf der Startseite (dashboard.py).
@@ -186,6 +187,10 @@ class App:
         ctk.CTkSwitch(side, text="Info-Leiste rechts", variable=self.rb_var, font=font(11), text_color=INK,
                       progress_color=ACCENT, switch_width=32, switch_height=16, command=self.toggle_rb).grid(
             row=r, column=0, sticky="w", padx=18, pady=(10, 0)); r += 1
+        self.start_var = tk.BooleanVar(value=self.s.get("startseite") == "widgets")              # v82
+        ctk.CTkSwitch(side, text="Beim Start Widgets zeigen", variable=self.start_var, font=font(11), text_color=INK,
+                      progress_color=ACCENT, switch_width=32, switch_height=16, command=self.set_start).grid(
+            row=r, column=0, sticky="w", padx=18, pady=(6, 0)); r += 1
         self.pb = ctk.CTkProgressBar(side, height=6, corner_radius=3, progress_color=ACCENT, fg_color=BORDER)
         self.pb.grid(row=r, column=0, sticky="ew", padx=16, pady=(10, 4)); self.pb.set(0); r += 1
         self.prog = ctk.CTkLabel(side, text="", font=font(11), text_color=MUTED, wraplength=270, justify="left", anchor="w")
@@ -198,16 +203,10 @@ class App:
                                               selected_color=ACCENT, selected_hover_color=ACCENT_HI, unselected_color=CARD,
                                               unselected_hover_color=BORDER, fg_color=CARD, text_color=INK)
         self.sb_mode.set(next((k for k, v in MODI.items() if v == self.s.get("darstellung", "system")), "System"))
-        self.sb_start = ctk.CTkSegmentedButton(side, values=["Fragen", "Widgets"], height=26, font=font(11), command=self.set_start,  # v81
-                                               selected_color=ACCENT, selected_hover_color=ACCENT_HI, unselected_color=CARD,
-                                               unselected_hover_color=BORDER, fg_color=CARD, text_color=INK)
-        self.sb_start.set("Widgets" if self.s.get("startseite") == "widgets" else "Fragen")
-        self.sb_start.grid(row=r + 1, column=0, sticky="ew", padx=16, pady=(0, 4))
-        hilfe.tip(self.sb_start, "Startseite: Was AURA beim Öffnen zuerst zeigt – «Fragen» (Chat, ⌂) oder «Widgets» (Workflow-Ergebnisse, ▶). Wird gespeichert.")
-        self.sb_mode.grid(row=r + 2, column=0, sticky="ew", padx=16, pady=(0, 2))
+        self.sb_mode.grid(row=r + 1, column=0, sticky="ew", padx=16, pady=(0, 2))
         hilfe.tip(self.sb_mode, "Darstellung: Hell, Dunkel oder wie Windows (System). Wird gespeichert.")
         vl.grid(
-            row=r + 3, column=0, sticky="sw", padx=20, pady=(6, 12))
+            row=r + 2, column=0, sticky="sw", padx=20, pady=(6, 12))
 
     def _title(self, parent, text, r):
         ctk.CTkLabel(parent, text=text.upper(), font=font(10, "bold"), text_color=MUTED, anchor="w").grid(
@@ -602,9 +601,10 @@ class App:
             log.get().exception("Widgets"); self.dash = None
             ctk.CTkLabel(sf, text=f"Widgets nicht verfügbar: {e}", text_color=ERR).grid(row=0, column=0, sticky="w")
 
-    def set_start(self, label):
-        """v81: Welche Seite AURA beim Start zeigt (Fragen oder Widgets)."""
-        self.s = load_settings(); self.s["startseite"] = "widgets" if label == "Widgets" else "chat"; save_settings(self.s)
+    def set_start(self, _=None):
+        """v82: Welche Seite AURA beim Start zeigt (Schalter ein = Widgets, aus = Fragen). Wirkt beim nächsten Start."""
+        self.s = load_settings(); self.s["startseite"] = "widgets" if self.start_var.get() else "chat"; save_settings(self.s)
+        self.status.configure(text="Beim nächsten Start: " + ("Widgets (▶)" if self.start_var.get() else "Fragen (⌂)"))
 
     def go_home(self):
         """v79: zurück zur Startseite (Kacheln + Ablaufband); der Chatverlauf wird geleert."""

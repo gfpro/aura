@@ -1,4 +1,4 @@
-# aura/hilfe.py — Infotexte (Tooltips) fuer alle Fenster. Version 20261013v81 (v81: Widgets-Ansicht; v80: «▶», Widgets; v79: «⌂», Ablaufband; v75: Position korrigiert (Reihenfolge withdraw/topmost/geometry/deiconify); v74: Tooltip vor dem Hauptfenster; v70: Text «8 Bit»; v68: Info-Leiste rechts; v60: Tooltip verschwindet beim Minimieren/Fensterwechsel, nicht mehr über anderen Programmen; v46: Slide-In, Vollansicht, Startfragen)
+# aura/hilfe.py — Infotexte (Tooltips) fuer alle Fenster. Version 20261013v82 (v82: «Beim Start Widgets zeigen»; v81: Widgets-Ansicht; v80: «▶», Widgets; v79: «⌂», Ablaufband; v75: Position korrigiert (Reihenfolge withdraw/topmost/geometry/deiconify); v74: Tooltip vor dem Hauptfenster; v70: Text «8 Bit»; v68: Info-Leiste rechts; v60: Tooltip verschwindet beim Minimieren/Fensterwechsel, nicht mehr über anderen Programmen; v46: Slide-In, Vollansicht, Startfragen)
 # Alle Texte stehen hier an einem Ort. Zuordnung:
 #   auto(fenster, ctx)  - findet Knoepfe/Schalter/Haekchen anhand ihrer Beschriftung (TEXTE[ctx], dann TEXTE["*"])
 #   tip(widget, key)    - fester Text fuer Felder ohne Beschriftung (key beginnt mit "#") oder freier Text
@@ -29,6 +29,7 @@ TEXTE = {
         "Info-Leiste rechts": "Zeigt rechts Sprachmodell, Wissensdatenbank und die letzten Workflow-Läufe. Blendet sich bei "
                               "schmalem Fenster automatisch aus – Fenster breiter ziehen, dann erscheint sie wieder.",
         "alle anzeigen →": "Öffnet die Ansicht «Ergebnisse» mit allen Läufen, Dokumenten und Prüfhinweisen.",
+        "Beim Start Widgets zeigen": "Ein: AURA öffnet beim Start die Widgets (▶). Aus: AURA öffnet mit den Fragen (⌂). Wirkt beim nächsten Start.",
         "⌂": "Zu den Fragen (Startseite mit Kacheln). Der Chatverlauf wird dabei geleert.",
         "▶": "Workflow-Ergebnisse: die angehefteten Widgets in voller Breite. «⌂» führt zurück zu den Fragen.",
         "Kontext": "Zeigt die Textstücke, die das Sprachmodell für diese Antwort gelesen hat. Hilfreich, wenn eine Antwort falsch wirkt: Stand die Information überhaupt drin?",
