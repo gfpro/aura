@@ -1,4 +1,14 @@
-# aura/llm/qwen.py — Version 20261012v70  (AURA)  v28: Kontext bis 32k, Attention v1 nur bis 4k
+# aura/llm/qwen.py — Version 20261014v86  (AURA)
+#   v86: Einlesen mit fp16-KV: eigener gemm-Kernel liest je uint 2 Werte (statt je Wert ein uint), wie K_LINEAR2.
+#  
+#   v85: KV-Cache in 16 Bit (fp16, 2 Werte je uint), Einstellung llm_kv16 (Standard an). Halber Speicher fuer den
+#        KV-Cache; alle Attention-Kernels lesen ueber LD_K/LD_V. Alte .kv-Dateien (fp32) werden verworfen.
+#  
+#   v84: Split-K «splitr»: Block-Maximum per gemeinsamer Reduktion statt 128-mal je Thread. Varianten splitr_128/_64.
+#  
+#   v83: Split-K mit mehr Parallelitaet: Varianten split (256 Pos., max. 64 Teile), split_128 (128/128), split_64 (64/128).
+#        Selbsttest misst alle und waehlt die schnellste gleiche (v82 split2 verworfen: 3,4x langsamer).
+#    v28: Kontext bis 32k, Attention v1 nur bis 4k
 #   v70: 8-Bit-Gewichte (int8 + 1 Skala je 128 Werte, symmetrisch). Umrechnung beim Laden auf der GPU (kein zweiter
 #        Modellordner). Eigene Kernels fuer Schreiben (K_MV8), kleine Bloecke (K_MVT8) und Einlesen (k_linear8).
 #        Selbsttest: int8 gegen bf16 (Genauigkeit) und die int8-Varianten untereinander (Tempo). Ohne Erfolg -> bf16.
@@ -25,7 +35,9 @@ MAXT = 32768         # Obergrenze Kontext (Prompt + Antwort); tatsaechlich: maxT
 ATTN1_MAX = 4096     # alter Attention-Kernel v1: groupshared-Puffer begrenzt auf 4096 Positionen
 CHUNK = 512          # Prefill-Blockgroesse (Tokens pro Durchgang)
 LMH_ROWS = 16384     # lm_head in Bloecke teilen (D3D11: max. 128 MB pro Puffer garantiert)
-NSPLIT_MAX = 64      # v42: hoechstens so viele Teilstuecke je KV-Kopf beim Schreiben
+NSPLIT_MAX = 128     # v83: hoechstens so viele Teilstuecke je KV-Kopf (v42: 64)
+SPLITS = {"split": (256, 64), "split_128": (128, 128), "split_64": (64, 128),
+          "splitr_128": (128, 128), "splitr_64": (64, 128)}                 # v84: splitr = Kernel mit Reduktion   # v83: (min. Positionen je Teil, max. Teile)
 SPLIT_MIN = 512      # v42: darunter lohnt Split-K nicht (Kontext kurz)
 SPLIT_T = 16         # v44e: Split-K fuer bis zu so vielen Tokens je Durchgang
 SMALL_MAX = 64       # v44d: bis so viele Tokens je Durchgang -> K_MATVEC_T (in Teilen zu 16)
@@ -295,6 +307,41 @@ void main(uint3 g:SV_GroupID, uint3 l:SV_GroupThreadID){
     if(i==0){ ML[(so+qh)*2]=m[h]; ML[(so+qh)*2+1]=ls[h]; } }
 }""" % dict(NS=NSPLIT_MAX)
 
+# v84: wie K_ATTN_SPLIT, aber das Block-Maximum je Q-Kopf wird gemeinsam bestimmt (Baum-Reduktion ueber 128 Threads)
+# statt von jedem Thread einzeln ueber alle 128 Werte. Gleiche Ablage (PO, ML), gleicher Merge.
+K_ATTN_SPLITR = r"""
+cbuffer C:register(b0){ uint POS0; uint L; uint NH; uint NKV; };
+RWStructuredBuffer<float> Q:register(u0); RWStructuredBuffer<float> K:register(u1);
+RWStructuredBuffer<float> V:register(u2); RWStructuredBuffer<float> PO:register(u3);
+RWStructuredBuffer<float> ML:register(u4);
+groupshared float q[4][128]; groupshared float sc[4][128]; groupshared float red[4][128];
+[numthreads(128,1,1)]
+void main(uint3 g:SV_GroupID, uint3 l:SV_GroupThreadID){
+  uint s=g.x, kvh=g.y, t=g.z, i=l.x, G=NH/NKV, KD=NKV*128, P=POS0+t, kb=kvh*128, h, j, k, a;
+  uint jb=s*L, je=min(jb+L, P+1), so=(t*%(NS)d+s)*NH;
+  for(h=0;h<G;h++) q[h][i]=Q[t*NH*128+(kvh*G+h)*128+i];
+  GroupMemoryBarrierWithGroupSync();
+  float m[4], ls[4], acc[4];
+  [unroll] for(h=0;h<4;h++){ m[h]=-1e30; ls[h]=0; acc[h]=0; }
+  for(uint b0=jb;b0<je;b0+=128){
+    uint j0=b0+i, n=min(128,je-b0);
+    float d[4]; [unroll] for(h=0;h<4;h++) d[h]=0;
+    if(i<n){ for(k=0;k<128;k++){ float kv=K[j0*KD+kb+k]; [unroll] for(h=0;h<4;h++) if(h<G) d[h]+=q[h][k]*kv; } }
+    [unroll] for(h=0;h<4;h++){ float v=(i<n)?d[h]*0.08838834764831845:-1e30; sc[h][i]=v; red[h][i]=v; }
+    GroupMemoryBarrierWithGroupSync();
+    for(a=64;a>0;a>>=1){ if(i<a){ [unroll] for(h=0;h<4;h++) red[h][i]=max(red[h][i],red[h][i+a]); }
+      GroupMemoryBarrierWithGroupSync(); }
+    [unroll] for(h=0;h<4;h++) if(h<G){ float bm=max(m[h],red[h][0]); float f=exp(m[h]-bm); acc[h]*=f; ls[h]*=f; m[h]=bm; }
+    [unroll] for(h=0;h<4;h++) sc[h][i]=(i<n&&h<G)?exp(sc[h][i]-m[h]):0;
+    GroupMemoryBarrierWithGroupSync();
+    for(j=0;j<n;j++){ float v=V[(b0+j)*KD+kb+i];
+      [unroll] for(h=0;h<4;h++) if(h<G){ float pr=sc[h][j]; ls[h]+=pr; acc[h]+=pr*v; } }
+    GroupMemoryBarrierWithGroupSync();
+  }
+  for(h=0;h<G;h++){ uint qh=kvh*G+h; PO[(so+qh)*128+i]=acc[h];
+    if(i==0){ ML[(so+qh)*2]=m[h]; ML[(so+qh)*2+1]=ls[h]; } }
+}""" % dict(NS=NSPLIT_MAX)
+
 K_ATTN_MERGE = r"""
 cbuffer C:register(b0){ uint NS; uint NH; uint P1; uint P2; };
 RWStructuredBuffer<float> PO:register(u0); RWStructuredBuffer<float> ML:register(u1);
@@ -347,6 +394,27 @@ void main(uint3 g:SV_GroupID, uint3 l:SV_GroupThreadID, uint li:SV_GroupIndex){
     [unroll] for(c=0;c<4;c++){ uint o=o0+l.x*4+c; if(o<N) Y[cb+t*LDC+o]=acc[i][c]; } } }
 }"""
 
+def k_gemm16(nn):
+    """v86: k_gemm mit B im fp16-KV-Cache (uint = 2 Werte). Je Lesezugriff 2 Werte, kein Verschnitt."""
+    src = k_gemm(nn).replace("RWStructuredBuffer<float> B:register(u1)", "RWStructuredBuffer<uint> B:register(u1)")
+    if nn:   # V: Zeile k, Spalten o..o+3 liegen nebeneinander -> 2 uint
+        old = k_gemm(True).split("Bs[kk][oq]=v; }")[0].split("float4 As[16][32]; groupshared float4 Bs[16][16];")[1]
+        new = """
+  """
+        body = """{ uint kk=li>>4, oq=li&15; uint o=o0+4*oq, k=k0+kk, bs=(bb+k*LDB+o)>>1; float4 v=0;
+      if(k<KK&&o<N){ uint u0=B[bs], u1=(o+2<N)?B[bs+1]:0; v=float4(h0(u0),h1(u0),h0(u1),h1(u1)); }
+      Bs[kk][oq]=v; }"""
+        a = src.index("{ uint kk=li>>4, oq=li&15;"); b = src.index("Bs[kk][oq]=v; }", a) + len("Bs[kk][oq]=v; }")
+    else:    # K: Zeile o, Werte k..k+1 nebeneinander -> wie Gewichte in K_LINEAR2
+        body = """if(li<128){ uint kp=li&7, oq=li>>3; uint o=o0+4*oq, k=k0+2*kp; uint u0=0,u1=0,u2=0,u3=0;
+      if(k<KK){ u0=(o  <N)?B[(bb+(o  )*LDB+k)>>1]:0; u1=(o+1<N)?B[(bb+(o+1)*LDB+k)>>1]:0;
+                u2=(o+2<N)?B[(bb+(o+2)*LDB+k)>>1]:0; u3=(o+3<N)?B[(bb+(o+3)*LDB+k)>>1]:0; }
+      Bs[2*kp][oq]=float4(h0(u0),h0(u1),h0(u2),h0(u3)); Bs[2*kp+1][oq]=float4(h1(u0),h1(u1),h1(u2),h1(u3)); }"""
+        a = src.index("{ uint kk=li&15, oq=li>>4;"); b = src.index("Bs[kk][oq]=v; }", a) + len("Bs[kk][oq]=v; }")
+    src = src[:a] + body + src[b:]
+    fn = "float h0(uint u){ return f16tof32(u&0xffff); } float h1(uint u){ return f16tof32(u>>16); }\n"
+    return src.replace("[numthreads", fn + "[numthreads", 1)
+
 K_SOFTMAX = r"""
 cbuffer C:register(b0){ uint M; uint N; uint LD; uint POS0; };
 RWStructuredBuffer<float> S:register(u0);
@@ -372,6 +440,30 @@ cbuffer C:register(b0){ uint N; uint DOFF; uint STRIDE; uint P; };
 RWStructuredBuffer<float> S:register(u0); RWStructuredBuffer<float> D:register(u1);
 [numthreads(256,1,1)]
 void main(uint3 d:SV_DispatchThreadID){ for(uint i=d.x;i<N;i+=STRIDE) D[DOFF+i]=S[i]; }"""
+
+# v85: KV-Cache in fp16. kv16() baut aus einem Kernel die 16-Bit-Fassung: Puffer als uint, Lesen X[i] -> LD_X(i).
+K_COPY16 = r"""
+cbuffer C:register(b0){ uint N; uint DOFF; uint STRIDE; uint P; };
+RWStructuredBuffer<float> S:register(u0); RWStructuredBuffer<uint> D:register(u1);
+[numthreads(256,1,1)]
+void main(uint3 d:SV_DispatchThreadID){ for(uint i=d.x;i<N;i+=STRIDE) D[DOFF+i]=f32tof16(S[2*i])|(f32tof16(S[2*i+1])<<16); }"""
+
+def kv16(src, names):
+    import re
+    for nm in names:
+        src = src.replace(f"RWStructuredBuffer<float> {nm}:register", f"RWStructuredBuffer<uint> {nm}:register")
+        out, pos, pat = [], 0, re.compile(r"(?<![A-Za-z0-9_])" + nm + r"\[")
+        while True:
+            m = pat.search(src, pos)
+            if not m: out.append(src[pos:]); break
+            out.append(src[pos:m.start()] + f"LD_{nm}("); i, depth = m.end(), 1
+            while depth:
+                c = src[i]; depth += (c == "[") - (c == "]"); i += 1
+            out.append(src[m.end():i - 1] + ")"); pos = i
+        src = "".join(out)
+        fn = f"float LD_{nm}(uint i){{ uint u={nm}[i>>1]; return f16tof32((i&1)?(u>>16):(u&0xffff)); }}\n"
+        src = src.replace("[numthreads", fn + "[numthreads", 1)
+    return src
 
 K_SILUMUL = r"""
 cbuffer C:register(b0){ uint N; uint STRIDE; uint P1; uint P2; };
@@ -524,7 +616,7 @@ class ShardedSafeTensors:
 
 # ----------------------------------------------------------------------------- Engine
 class Qwen3Engine:
-    def __init__(self, model_dir, progress=lambda *a: None, layers=None, maxT=MAXT, int8=False):
+    def __init__(self, model_dir, progress=lambda *a: None, layers=None, maxT=MAXT, int8=False, kv16_on=True):
         self.dir = Path(model_dir)
         c = self.cfg = json.loads((self.dir / "config.json").read_text(encoding="utf-8"))
         self.H, self.I, self.L = c["hidden_size"], c["intermediate_size"], c["num_hidden_layers"]
@@ -535,17 +627,23 @@ class Qwen3Engine:
         self.maxT = min(maxT, MAXT)
         self.st = ShardedSafeTensors(self.dir)
         g = self.g = GPU()
+        self.kv16 = bool(kv16_on); h = (lambda s, n="KV": kv16(s, n)) if self.kv16 else (lambda s, n="KV": s)   # v85
+        self.k_copy16 = g._shader(K_COPY16) if self.kv16 else None
         self.k_lin, self.k_mv, self.k_rms = g._shader(K_LINEAR), g._shader(K_MATVEC), g._shader(K_RMS)
-        self.k_rope, self.k_attn, self.k_silu = g._shader(K_QKROPE), g._shader(K_ATTN), g._shader(K_SILUMUL)
+        self.k_rope, self.k_attn, self.k_silu = g._shader(K_QKROPE), g._shader(h(K_ATTN)), g._shader(K_SILUMUL)
         self.k_copy = g._shader(K_COPY)
-        self.k_lin2, self.k_attn2 = g._shader(K_LINEAR2), g._shader(K_ATTN2)
-        try: self.k_split, self.k_merge = g._shader(K_ATTN_SPLIT), g._shader(K_ATTN_MERGE)      # v42
+        self.k_lin2, self.k_attn2 = g._shader(K_LINEAR2), g._shader(h(K_ATTN2))
+        try: self.k_split, self.k_merge = g._shader(h(K_ATTN_SPLIT)), g._shader(K_ATTN_MERGE)      # v42
         except Exception as e: self.k_split = None; progress(f"Split-K-Attention nicht verfuegbar: {e}")
+        self.k_splitr = None                                                                  # v84
+        if self.k_split:
+            try: self.k_splitr = g._shader(h(K_ATTN_SPLITR))
+            except Exception as e: progress(f"Split-K mit Reduktion nicht verfuegbar: {e}")
         self.k_mt = None; self.small_kernel = "v2"                                         # v44d
         try: self.k_mt = g._shader(K_MATVEC_T)
         except Exception as e: progress(f"Kernel fuer kleine Bloecke nicht verfuegbar: {e}")
         self.k_gemm = None; self.pre_kernel = "v2"                                         # v44
-        try: self.k_gemm = (g._shader(k_gemm(False)), g._shader(k_gemm(True)), g._shader(K_SOFTMAX))
+        try: self.k_gemm = ((g._shader(k_gemm16(False)), g._shader(k_gemm16(True))) if self.kv16 else (g._shader(k_gemm(False)), g._shader(k_gemm(True)))) + (g._shader(K_SOFTMAX),)
         except Exception as e: progress(f"Attention gemm nicht verfuegbar: {e}")
         self.dec_kernel = "v2"
         self.k_lins = {}
@@ -562,7 +660,7 @@ class Qwen3Engine:
                 nmax = max(LMH_ROWS * self.H, self.I * self.H, self.NH * 128 * self.H)
                 self.stg = g.buffer(nmax // 2); self.q8 = True; self.lin_kernel = "q44"
             except Exception as e: progress(f"8-Bit-Kernels nicht verfuegbar ({e}) - lade mit bf16")
-        self.tag = self.dir.name + ("-int8" if self.q8 else "")          # v70: KV-Cache-Dateien nicht vermischen
+        self.tag = self.dir.name + ("-int8" if self.q8 else "") + ("-kv16" if self.kv16 else "")          # v70: KV-Cache-Dateien nicht vermischen
         P = "model.layers.%d."; up_bf = lambda k: g.buffer(len(self.st.raw(k)) // 4, self.st.raw(k))
         up = (lambda k: self._quant(self.st.raw(k), *self.st.shape(k))) if self.q8 else up_bf
         upf = lambda k: (lambda b: g.buffer(len(b) // 4, b))(self.st.f32(k))
@@ -593,8 +691,9 @@ class Qwen3Engine:
         self.R, self.X, self.O = g.buffer(C * H), g.buffer(C * H), g.buffer(C * H)
         self.Q, self.A, self.K, self.Vb = g.buffer(C * QD), g.buffer(C * QD), g.buffer(C * KD), g.buffer(C * KD)
         self.Gt, self.Up = g.buffer(C * I), g.buffer(C * I)
-        self.kc = [g.buffer(self.maxT * KD) for _ in range(self.L)]
-        self.vc = [g.buffer(self.maxT * KD) for _ in range(self.L)]
+        kvn = self.maxT * KD // (2 if self.kv16 else 1)                  # v85: fp16 = 2 Werte je Element
+        self.kc = [g.buffer(kvn) for _ in range(self.L)]
+        self.vc = [g.buffer(kvn) for _ in range(self.L)]
         self.logits = g.buffer(self.V)
         self.kv_ids, self.reused = [], 0                                 # v43: Inhalt des KV-Caches (Token je Position)
         self.small_attn = "v2"                                           # v44e
@@ -639,10 +738,11 @@ class Qwen3Engine:
         self._tick("linear")
 
     def _attn(self, l, T, pos0):
-        if pos0 + T >= SPLIT_MIN and ((T == 1 and self.dec_kernel == "split")            # v42: Schreiben mit Split-K
-                                      or (1 < T <= SPLIT_T and self.small_attn == "split")):  # v44e: kleine Bloecke
-            n = pos0 + T; L = max(256, (-(-n // NSPLIT_MAX) + 127) // 128 * 128); ns = -(-n // L)
-            self.g._run(self.k_split, struct.pack("<4I", pos0, L, self.NH, self.NKV),
+        kern = self.dec_kernel if T == 1 else (self.small_attn if T <= SPLIT_T else "v2")
+        if pos0 + T >= SPLIT_MIN and kern in SPLITS:                                          # v42/v44e/v83: Split-K
+            lm, mx = SPLITS[kern]; n = pos0 + T
+            L = max(lm, (-(-n // mx) + lm - 1) // lm * lm); ns = -(-n // L)
+            self.g._run(self.k_splitr if kern.startswith("splitr") else self.k_split, struct.pack("<4I", pos0, L, self.NH, self.NKV),
                         [self.Q, self.kc[l], self.vc[l], self.PO, self.ML], (ns, self.NKV, T))
             self.g._run(self.k_merge, struct.pack("<4I", ns, self.NH, 0, 0), [self.PO, self.ML, self.A], (self.NH, T, 1))
         elif T >= PRE_MIN and self.pre_kernel == "gemm":                              # v44: Einlesen als Matrixprodukt
@@ -673,6 +773,17 @@ class Qwen3Engine:
         self.prof[name] = self.prof.get(name, 0.0) + now - self.prof["_t"]; self.prof["_t"] = now
     def _rms(self, a, r, gw, y, T, add):
         self.g._run(self.k_rms, struct.pack("<IIfI", T, self.H, self.eps, 1 if add else 0), [a, r, gw, y], (T, 1, 1))
+    def _copykv(self, src, dst, nfloats, dst_off):
+        """v85: Werte in den KV-Cache schreiben (fp16: 2 Werte je uint)."""
+        if not self.kv16: return self._copy(src, dst, nfloats, dst_off)
+        n = nfloats // 2; groups = min((n + 255) // 256, 65535)
+        self.g._run(self.k_copy16, struct.pack("<4I", n, dst_off // 2, groups * 256, 0), [src, dst], (groups, 1, 1))
+    def _kvw(self, dst, data):
+        """v85: float-Bytes (Selbsttest) in den KV-Cache schreiben, ueber den Puffer K in Stuecken."""
+        if not self.kv16: return self.g.write(dst, data)
+        step = CHUNK * self.NKV * 128 * 4
+        for o in range(0, len(data), step):
+            part = data[o:o + step]; self.g.write(self.K, part); self._copykv(self.K, dst, len(part) // 4, o // 4)
     def _copy(self, src, dst, nfloats, dst_off):
         groups = min((nfloats + 255) // 256, 65535)
         self.g._run(self.k_copy, struct.pack("<4I", nfloats, dst_off, groups * 256, 0), [src, dst], (groups, 1, 1))
@@ -686,7 +797,7 @@ class Qwen3Engine:
         self._lin(self.X, w["self_attn.v_proj"], self.Vb, T, H, KD)
         self.g._run(self.k_rope, struct.pack("<IIIf", T, self.NH, pos0, self.eps), [self.Q, w["self_attn.q_norm"], self.cs], (T, self.NH, 1))
         self.g._run(self.k_rope, struct.pack("<IIIf", T, self.NKV, pos0, self.eps), [self.K, w["self_attn.k_norm"], self.cs], (T, self.NKV, 1))
-        self._copy(self.K, self.kc[l], T * KD, pos0 * KD); self._copy(self.Vb, self.vc[l], T * KD, pos0 * KD)
+        self._copykv(self.K, self.kc[l], T * KD, pos0 * KD); self._copykv(self.Vb, self.vc[l], T * KD, pos0 * KD)
         self._tick("andere"); self._attn(l, T, pos0)
         self._lin(self.A, w["self_attn.o_proj"], self.O, T, QD, H)
         self._rms(self.O, self.R, w["post_attention_layernorm"], self.X, T, add=True)
@@ -731,7 +842,7 @@ class Qwen3Engine:
             hd = _j.dumps({"modell": self.tag, "L": self.L, "kd": KD, "ids": self.kv_ids[:n]}).encode()
             f.write(struct.pack("<I", len(hd)) + hd)
             for l in range(self.L):
-                for b in (self.kc[l], self.vc[l]): f.write(self.g.read(b, n * KD).tobytes())
+                for b in (self.kc[l], self.vc[l]): f.write(self.g.read(b, n * KD // (2 if self.kv16 else 1)).tobytes())
         tmp.replace(p)
 
     def load_kv(self, path):
@@ -741,9 +852,15 @@ class Qwen3Engine:
         with open(path, "rb") as f:
             hd = _j.loads(f.read(struct.unpack("<I", f.read(4))[0]))
             n = len(hd["ids"])
-            if hd["modell"] != self.tag or hd["L"] != self.L or hd["kd"] != KD or n >= self.maxT: return 0
-            for l in range(self.L):
-                for b in (self.kc[l], self.vc[l]): self.g.write(b, f.read(n * KD * 4))
+            if hd["modell"] != self.tag or hd["L"] != self.L or hd["kd"] != KD or n >= self.maxT: bad = True
+            else:
+                bad = False
+                for l in range(self.L):
+                    for b in (self.kc[l], self.vc[l]): self.g.write(b, f.read(n * KD * (2 if self.kv16 else 4)))
+        if bad:                                                          # v85: alte Datei (z.B. fp32) loeschen -> neu erstellen
+            try: Path(path).unlink()
+            except Exception: pass
+            return 0
         self.kv_ids = list(hd["ids"]); return n
 
     def self_check(self, progress=lambda *a: None):
@@ -788,7 +905,7 @@ class Qwen3Engine:
             progress(f"Matrix fuer {ts} Tokens: {self.lin_kernel} {res['small_v2'] * 1000:.1f} ms, mt {res['small_mt'] * 1000:.1f} ms, "
                      f"Abweichung {res['small_diff']:.1e} -> {self.small_kernel}")
             out = {}
-        self.g.write(self.Q, rand(T * QD)); self.g.write(self.kc[0], rand(T * KD)); self.g.write(self.vc[0], rand(T * KD))
+        self.g.write(self.Q, rand(T * QD)); self._kvw(self.kc[0], rand(T * KD)); self._kvw(self.vc[0], rand(T * KD))
         for v in ("v1", "v2"):
             self.attn_kernel = v; res["attn_" + v] = timed(lambda: self._attn(0, T, 0))
             out[v] = self.g.read(self.A, T * QD)
@@ -800,32 +917,37 @@ class Qwen3Engine:
         if self.k_split and self.maxT > SPLIT_MIN:
             P = min(self.maxT, 8192) - 1; blk = rand(KD * 512)
             full = (blk * ((P + 1) // 512 + 1))[:(P + 1) * KD * 4]
-            self.g.write(self.kc[0], full); self.g.write(self.vc[0], full)
+            self._kvw(self.kc[0], full); self._kvw(self.vc[0], full)
             self.g.write(self.Q, rand(QD))
-            for v in ("v2", "split"):
+            vs = ["v2"] + [v for v in SPLITS if self.k_splitr or not v.startswith("splitr")]   # v83/v84
+            for v in vs:
                 self.dec_kernel = v; res["dec_" + v] = timed(lambda: self._attn(0, 1, P), 3)
                 out[v] = self.g.read(self.A, QD)
-            res["dec_diff"] = rel(out["v2"], out["split"]); res["dec_pos"] = P + 1
-            ok = res["dec_diff"] < 1e-3 and res["dec_split"] < res["dec_v2"]
-            self.dec_kernel = "split" if ok else "v2"
-            progress(f"Attention beim Schreiben ({P + 1} Positionen): v2 {res['dec_v2'] * 1000:.1f} ms, Split-K "
-                     f"{res['dec_split'] * 1000:.1f} ms, Abweichung {res['dec_diff']:.1e} -> {self.dec_kernel}")
+            res["dec_pos"] = P + 1; best = "v2"
+            for v in vs[1:]:
+                res["dec_diff_" + v] = rel(out["v2"], out[v])
+                if res["dec_diff_" + v] < 1e-3 and res["dec_" + v] < res["dec_" + best]: best = v
+            res["dec_diff"] = res["dec_diff_split"]; self.dec_kernel = best
+            progress(f"Attention beim Schreiben ({P + 1} Positionen): " + ", ".join(f"{v} {res['dec_' + v] * 1000:.2f} ms" for v in vs)
+                     + f" -> {self.dec_kernel}")
             # v44e: 10 Tokens am Ende desselben Kontexts (wie das JSON-Geruest) - Split-K gegen den bisherigen Weg
             ts = 10; p0 = P + 1 - ts; self.g.write(self.Q, rand(ts * QD)); self.small_attn = "v2"
-            for v in ("v2", "split"):
+            for v in vs:
                 self.small_attn = v; res["sattn_" + v] = timed(lambda: self._attn(0, ts, p0), 3)
                 out["sattn_" + v] = self.g.read(self.A, ts * QD)
-            res["sattn_diff"] = rel(out["sattn_v2"], out["sattn_split"])
-            ok = res["sattn_diff"] < 1e-3 and res["sattn_split"] < res["sattn_v2"]
-            self.small_attn = "split" if ok else "v2"
-            progress(f"Attention fuer {ts} Tokens: v2 {res['sattn_v2'] * 1000:.1f} ms, Split-K {res['sattn_split'] * 1000:.1f} ms, "
-                     f"Abweichung {res['sattn_diff']:.1e} -> {self.small_attn}")
+            best = "v2"
+            for v in vs[1:]:
+                res["sattn_diff_" + v] = rel(out["sattn_v2"], out["sattn_" + v])
+                if res["sattn_diff_" + v] < 1e-3 and res["sattn_" + v] < res["sattn_" + best]: best = v
+            res["sattn_diff"] = res["sattn_diff_split"]; self.small_attn = best
+            progress(f"Attention fuer {ts} Tokens: " + ", ".join(f"{v} {res['sattn_' + v] * 1000:.1f} ms" for v in vs)
+                     + f" -> {self.small_attn}")
         # v44: Einlesen (T Tokens) bei langem Kontext - Attention gemm gegen den bisherigen Kernel
         self.pre_kernel = "v2"
         if self.k_gemm and T >= PRE_MIN:
             pos = max(0, min(4096, self.maxT - T)); need = (pos + T) * KD; blk = rand(KD * 512)
             full = (blk * (need // (KD * 512) + 1))[:need * 4]
-            self.g.write(self.kc[0], full); self.g.write(self.vc[0], full); self.g.write(self.Q, rand(T * QD))
+            self._kvw(self.kc[0], full); self._kvw(self.vc[0], full); self.g.write(self.Q, rand(T * QD))
             for v in ("v2", "gemm"):
                 self.pre_kernel = v; res["pre_" + v] = timed(lambda: self._attn(0, T, pos), 1)
                 out["pre_" + v] = self.g.read(self.A, T * QD)

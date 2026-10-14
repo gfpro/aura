@@ -1,4 +1,4 @@
-# aura/llm/native.py — Hugging-Face-Sprachmodelle auf der nativen GPU-Engine. Version 20261012v70 (v28: Kontextlaenge aus Einstellungen; v44: Kernel-Wahl ins Log; v70: 8-Bit-Gewichte, Einstellung llm_int8;
+# aura/llm/native.py — Hugging-Face-Sprachmodelle auf der nativen GPU-Engine. Version 20261014v86 (v86: gemm fp16; v85: KV-Cache fp16, Einstellung llm_kv16; v84: splitr im Log; v83: Split-K-Varianten im Log; v28: Kontextlaenge aus Einstellungen; v44: Kernel-Wahl ins Log; v70: 8-Bit-Gewichte, Einstellung llm_int8;
 #   v72: Schweizer Rechtschreibung (ß -> ss) und ohne Vorspann «Antwort:»)
 # Unterstuetzt: Qwen3ForCausalLM (z.B. Qwen3-0.6B ... Qwen3-4B-Instruct-2507), Gewichte bf16.
 import json, time
@@ -30,7 +30,7 @@ class NativeCausalLM(LLMBackend):
         from .qwen import Qwen3Engine
         t0 = time.perf_counter()
         self.tok = BPETokenizer(self.dir / "tokenizer.json")
-        self.eng = Qwen3Engine(self.dir, progress=self.progress, maxT=self.context_len(), int8=self.int8())
+        self.eng = Qwen3Engine(self.dir, progress=self.progress, maxT=self.context_len(), int8=self.int8(), kv16_on=self.kv16())
         self.stop_ids = {self.tok.added[s] for s in STOP if s in self.tok.added}
         try: b = self.eng.self_check(self.progress)
         except Exception:
@@ -41,16 +41,20 @@ class NativeCausalLM(LLMBackend):
         self.progress("Sprachmodell: Probelauf ..."); self.eng.forward(self.tok.encode("Hallo"), 0); self.eng.g.sync()
         self.load_s = time.perf_counter() - t0
         from ..log import diag                                       # v44: Kernel-Wahl und Selbsttest ins Log
-        diag("kernel", modell=self.name, kontext=e.maxT, gewichte="int8" if e.q8 else "bf16",
+        diag("kernel", modell=self.name, kontext=e.maxT, gewichte="int8" if e.q8 else "bf16", kv="fp16" if e.kv16 else "fp32",
              q8_diff=f"{b.get('q8_diff', 0):.1e}", q8_bf16_ms=b.get("q8_bf16", 0) * 1000, q8_int8_ms=b.get("q8_int8", 0) * 1000, laden_s=self.load_s, matrix=e.lin_kernel,
              gflops=b["gflops_" + e.lin_kernel], attention=e.attn_kernel, einlesen=e.pre_kernel, schreiben=e.dec_kernel,
              pre_v2_ms=b.get("pre_v2", 0) * 1000, pre_gemm_ms=b.get("pre_gemm", 0) * 1000, pre_diff=f"{b.get('pre_diff', 0):.1e}",
-             dec_v2_ms=b.get("dec_v2", 0) * 1000, dec_split_ms=b.get("dec_split", 0) * 1000,
+             dec_v2_ms=b.get("dec_v2", 0) * 1000, dec_split_ms=b.get("dec_split", 0) * 1000, dec_s128_ms=b.get("dec_split_128", 0) * 1000, dec_s64_ms=b.get("dec_split_64", 0) * 1000, dec_r128_ms=b.get("dec_splitr_128", 0) * 1000, dec_r64_ms=b.get("dec_splitr_64", 0) * 1000,
              klein=e.small_kernel, small_v2_ms=b.get("small_v2", 0) * 1000, small_mt_ms=b.get("small_mt", 0) * 1000,
              small_diff=f"{b.get('small_diff', 0):.1e}", klein_attn=e.small_attn,
-             sattn_v2_ms=b.get("sattn_v2", 0) * 1000, sattn_split_ms=b.get("sattn_split", 0) * 1000,
+             sattn_v2_ms=b.get("sattn_v2", 0) * 1000, sattn_split_ms=b.get("sattn_split", 0) * 1000, sattn_s128_ms=b.get("sattn_split_128", 0) * 1000, sattn_s64_ms=b.get("sattn_split_64", 0) * 1000, sattn_r128_ms=b.get("sattn_splitr_128", 0) * 1000, sattn_r64_ms=b.get("sattn_splitr_64", 0) * 1000,
              sattn_diff=f"{b.get('sattn_diff', 0):.1e}")
         self.progress(f"Sprachmodell bereit ({'8 Bit, ' if e.q8 else ''}geladen in {self.load_s:.0f} s)")
+
+    def kv16(self):
+        from ..config import load_settings
+        return bool(load_settings().get("llm_kv16", True))           # v85: Standard an
 
     def int8(self):
         from ..config import load_settings
@@ -60,7 +64,7 @@ class NativeCausalLM(LLMBackend):
         """llm_context (Standard 16384), aber so begrenzt, dass Gewichte + KV-Cache in llm_mem_gb passen."""
         from ..config import load_settings
         s = load_settings(); want = int(s.get("llm_context", 16384)); mem = float(s.get("llm_mem_gb", 14)) * 1e9
-        c = self.cfg; per_tok = c["num_hidden_layers"] * 2 * c["num_key_value_heads"] * c.get("head_dim", 128) * 4
+        c = self.cfg; per_tok = c["num_hidden_layers"] * 2 * c["num_key_value_heads"] * c.get("head_dim", 128) * (2 if self.kv16() else 4)
         weights = sum(p.stat().st_size for p in self.dir.glob("*.safetensors"))
         if self.int8(): weights = int(weights * 0.52)                # v70: int8 = halbe Groesse + 1 Skala je 128 Werte
         fit = int((mem - weights) / per_tok) // 512 * 512

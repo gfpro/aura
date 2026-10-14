@@ -1,4 +1,4 @@
-# tools/prof_test.py - misst, wohin die Rechenzeit beim Einlesen, beim Geruest und beim Schreiben geht. Version 20261010v44e
+# tools/prof_test.py - misst, wohin die Rechenzeit beim Einlesen, beim Geruest und beim Schreiben geht. Version 20261014v86 (v86: 8 Bit und KV fp16 aus den Einstellungen, neue Split-Varianten)
 # Aendert nichts. AURA vorher schliessen (sonst teilen sich zwei Programme die GPU).
 # Aufruf:  py tools\prof_test.py            (Qwen3-4B)
 #          py tools\prof_test.py Qwen3-8B   (spaeter, sobald 8B laeuft)
@@ -7,6 +7,7 @@ import sys, time
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]; sys.path.insert(0, str(ROOT))
 from aura.llm.qwen import Qwen3Engine
+from aura.config import load_settings
 
 MODELL = sys.argv[1] if len(sys.argv) > 1 else "Qwen3-4B"
 OUT = ROOT / "tools" / "prof_test.txt"
@@ -14,17 +15,19 @@ L = []
 def log(s): print(s, flush=True); L.append(s)
 
 t0 = time.perf_counter()
-e = Qwen3Engine(ROOT / "models" / MODELL, progress=lambda *a: None, maxT=12288)
+S = load_settings(); INT8, KV16 = bool(S.get("llm_int8", False)), bool(S.get("llm_kv16", True))
+e = Qwen3Engine(ROOT / "models" / MODELL, progress=lambda *a: None, maxT=12288, int8=INT8, kv16_on=KV16)
 b = e.self_check(lambda m: None)
-log(f"Modell {MODELL}, geladen in {time.perf_counter() - t0:.0f} s")
+log(f"Modell {MODELL}, Gewichte {'int8' if e.q8 else 'bf16'}, KV {'fp16' if e.kv16 else 'fp32'}, geladen in {time.perf_counter() - t0:.0f} s")
 log(f"Kernel: Matrix {e.lin_kernel} ({b['gflops_' + e.lin_kernel]:.0f} GFLOPS), Attention Einlesen "
     f"{getattr(e, 'pre_kernel', e.attn_kernel)}, Attention Schreiben {e.dec_kernel}")
 if "pre_gemm" in b: log(f"Selbsttest Einlesen ab Position {b['pre_pos']}: v2 {b['pre_v2'] * 1000:.0f} ms, gemm {b['pre_gemm'] * 1000:.0f} ms, "
                       f"Abweichung {b['pre_diff']:.1e}")
 if "small_mt" in b: log(f"Selbsttest 10 Tokens: {e.lin_kernel} {b['small_v2'] * 1000:.1f} ms, mt {b['small_mt'] * 1000:.1f} ms, "
                         f"Abweichung {b['small_diff']:.1e} -> {e.small_kernel}")
-if "sattn_split" in b: log(f"Selbsttest Attention 10 Tokens: v2 {b['sattn_v2'] * 1000:.1f} ms, Split-K {b['sattn_split'] * 1000:.1f} ms, "
-                          f"Abweichung {b['sattn_diff']:.1e} -> {e.small_attn}")
+for was, key, wahl in (("Schreiben", "dec_", e.dec_kernel), ("Attention 10 Tokens", "sattn_", e.small_attn)):
+    vs = [k[len(key):] for k in b if k.startswith(key) and not k.startswith(key + "diff") and k != key + "pos"]
+    if vs: log(f"Selbsttest {was}: " + ", ".join(f"{v} {b[key + v] * 1000:.1f} ms" for v in vs) + f" -> {wahl}")
 log("Spalten: Zeit je Aufruf, Tokens/s, Anteil linear (Gewichte) / attention / andere")
 
 def mess(name, T, pos, reps):
