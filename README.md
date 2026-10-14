@@ -43,9 +43,10 @@ Stand: v64 (Oktober 2026) · Änderungen: [CHANGELOG.md](CHANGELOG.md)
 
 ## Installation
 
-1. Die Release-ZIP von der Seite *Releases* herunterladen (nicht «Code → Download ZIP»).
-2. In einen lokalen Ordner entpacken, z.B. `C:\aura`. **Nicht** in OneDrive oder auf Netzlaufwerke – die Datenbank verträgt keine Synchronisation.
-3. Modelle von Hugging Face herunterladen und in `models\` ablegen (Details: `models/README.md`):
+1. Zuerst sicherstellen, dass Python (min. 3.11) installiert ist. Für BV-MA im BIT-Store in Schale 3B bestellbar.
+2. Die Release-ZIP von der Seite *Releases* herunterladen (Source code (zip)).
+3. In einen lokalen Ordner entpacken, z.B. `C:\aura`. **Nicht** in OneDrive oder auf Netzlaufwerke – die Datenbank verträgt keine Synchronisation.
+4. Modelle von Hugging Face herunterladen und in `C:\aura\models\` ablegen (Details: `C:\aura\models\README.md`):
 
    | Modell | Zweck | Ordner |
    | --- | --- | --- |
@@ -53,18 +54,25 @@ Stand: v64 (Oktober 2026) · Änderungen: [CHANGELOG.md](CHANGELOG.md)
    | [Qwen/Qwen3-4B-Instruct-2507](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507) | Antworten und Workflows (empfohlen) | `models\Qwen3-4B\` |
 
    Jeder Modellordner braucht `config.json`, `tokenizer.json` und die `*.safetensors`-Dateien.
-4. Doppelklick auf `AURA.pyw`. Beim ersten Start legt AURA Datenbank und Einstellungen an.
+5. Doppelklick auf `AURA.pyw`. Beim ersten Start legt AURA Datenbank und Einstellungen an.
 
 Ohne Sprachmodell funktioniert AURA ebenfalls und zeigt statt ausformulierter Antworten die besten Fundstellen.
 
 ## Erste Schritte
-
-1. «Quellen» öffnen, Quellen verbinden und **Sync** drücken. Bei Outlook zuerst **Ordner** wählen.
-2. **Vektoren berechnen** – einmalig, je nach Datenmenge Minuten bis Stunden; danach nur noch neue Einträge.
-3. Sprachmodell wählen und **Laden** (ca. 1 Minute).
+**Chat**:
+1. Im linken Seitenmenu «Quellen» öffnen, Quellen verbinden und **Sync** drücken. Bei Outlook zuerst **Ordner** wählen.
+2. Danach im linken Seitenmenu **Vektoren berechnen** – einmalig, je nach Datenmenge Minuten bis Stunden; danach nur noch neue Einträge.
+3. Im linken Seitenmenu Sprachmodell wählen und **Laden** (ca. 1 Minute).
 4. Frage stellen.
 
-Workflow ausführen: «Workflows öffnen» → Workflow wählen → «Dateien wählen …» → «▶ Starten». Ergebnis und Prüfbericht erscheinen nach dem Lauf als Knöpfe und unter «Ergebnisse».
+**Workflow**:
+1. Neuer Workflow im linken Seitenmenu unter **«Workflows öffnen»** → **«+Neuer Workflow»** starten.
+2. Im neuen Fenster kann der Workflow entweder beschrieben oder zusammengebaut werden. Sobald die Beschreibung erstellt wurde, kann mit **«Mit Sprachmodell verstehen und Workflow bauen** der Workflow automatisiert erstellt werden. Sollte das Sprachmodell noch nicht geladen sein, braucht AURA zirka eine Minute für das Laden des Sprachmodells.
+3. Im unteren Fenster kann der Workflow angepasst werden. Danach Klick auf **«Workflows bauen»**.
+4. Im Hauptfenster erscheint danach der Workflow mit verschiedene Tabs. Unter dem Tab **«Ausführen»** kann der Workflow über «Starten» gestartet werden.
+5. Der Output wird im gewählten Stil angezeigt (Mail an mich, oder im Dashboard AURA etc.).
+ 
+Komplexere Workflows können mit Dokumenten (unter dem Tab «Ausführen»), mit immer wieder benötigten Hilfsdokumenten (unter dem Tab «Wissen») und mit vordefinierten Vorlagen (unter dem Tab «Vorlagen») konfiguriert werden. Eine separate Anleitung ist in Bearbeitung, welche die Nutzung von komplexeren Workflows beschreibt.
 
 ## Daten verwalten
 
