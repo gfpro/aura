@@ -24,7 +24,6 @@ Stand: v64 (Oktober 2026) · Änderungen: [CHANGELOG.md](CHANGELOG.md)
 - Neue Workflows entstehen mit «Workflow beschreiben» und einer Word-Vorlage. AURA erstellt daraus einen **Feldplan**: Für jedes Feld wird festgelegt, ob der Wert aus den Unterlagen stammt (*Fakt*), sich aus einer Regel ergibt (*Abgeleitet*), immer gleich ist (*Fest*) oder von Hand ergänzt wird (*Manuell*).
 - Grundsatz: **Fakten liest das Sprachmodell, Entscheide trifft eine Regel.** Regeln werden ohne Programmierung im Feldplan erfasst («Wenn Betrag > 5000 → Zweite Unterschrift») und laufen ohne Sprachmodell.
 - Jeder Lauf erzeugt das Ergebnisdokument und einen getrennten Prüfbericht (Hinweise, Platzhalter, welche Regel gegriffen hat).
-- Anleitung für Gestalter: [docs/WORKFLOWS.md](docs/WORKFLOWS.md)
 
 **Wissen**
 - Wissenssammlungen (z.B. Gesetzestexte) für Workflows und optional für den Chat; Rechtstexte werden nach Artikeln zerlegt und zitierbar («BöB Art. 21»).
@@ -51,10 +50,11 @@ Stand: v64 (Oktober 2026) · Änderungen: [CHANGELOG.md](CHANGELOG.md)
    | Modell | Zweck | Ordner |
    | --- | --- | --- |
    | [intfloat/multilingual-e5-large](https://huggingface.co/intfloat/multilingual-e5-large) | Suche nach Bedeutung (Pflicht) | `models\multilingual-e5-large\` |
-   | [Qwen/Qwen3-4B-Instruct-2507](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507) | Antworten und Workflows (empfohlen) | `models\Qwen3-4B\` |
+   | [Qwen/Qwen3-4B-Instruct-2507](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507) | Besser für kurze Antworten | `models\Qwen3-4B\` |
+   | [Qwen/Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) | Besser für lange Antworten | `models\Qwen3.5-4B\` |
 
    Jeder Modellordner braucht `config.json`, `tokenizer.json` und die `*.safetensors`-Dateien.
-5. Doppelklick auf `AURA.pyw`. Beim ersten Start legt AURA Datenbank und Einstellungen an.
+6. Doppelklick auf `AURA.pyw`. Beim ersten Start legt AURA Datenbank und Einstellungen an.
 
 Ohne Sprachmodell funktioniert AURA ebenfalls und zeigt statt ausformulierter Antworten die besten Fundstellen.
 
@@ -72,7 +72,7 @@ Ohne Sprachmodell funktioniert AURA ebenfalls und zeigt statt ausformulierter An
 4. Im Hauptfenster erscheint danach der Workflow mit verschiedene Tabs. Unter dem Tab **«Ausführen»** kann der Workflow über «Starten» gestartet werden.
 5. Der Output wird im gewählten Stil angezeigt (Mail an mich, oder im Dashboard AURA etc.).
  
-Komplexere Workflows können mit Dokumenten (unter dem Tab «Ausführen»), mit immer wieder benötigten Hilfsdokumenten (unter dem Tab «Wissen») und mit vordefinierten Vorlagen (unter dem Tab «Vorlagen») konfiguriert werden. Eine separate Anleitung ist in Bearbeitung, welche die Nutzung von komplexeren Workflows beschreibt.
+Komplexere Workflows können mit Dokumenten (unter dem Tab «Ausführen»), mit immer wieder benötigten Hilfsdokumenten (unter dem Tab «Wissen») und mit vordefinierten Vorlagen (unter dem Tab «Vorlagen») konfiguriert werden. Anleitung für Gestalter: [anleitung/AURA_Workflows_Anleitung.pdf](anleitung/AURA_Workflows_Anleitung.pdf)
 
 ## Daten verwalten
 
