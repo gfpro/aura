@@ -1,4 +1,4 @@
-# aura/workflow/feldplan_bau.py — Workflow-Schritte aus dem Feldplan bauen. Version 20261011v64f (v64f: «keiner» = leer; Platzhalter in Begleitfeldern nur bei gewähltem Kästchen; v64e: Regeln dürfen bei Gruppen mehrere Kästchen ankreuzen; v64d: Regeln «Wenn … dann …» -> Schritt «regel», ohne Modell; v64c2: Begleitfelder nur abfragen, wenn ihr Kästchen gewählt ist)
+# aura/workflow/feldplan_bau.py — Workflow-Schritte aus dem Feldplan bauen. Version 20261015v95 (v95: «Dokumente lesen» liest alle Datei-Eingaben, je mit Dokumentname; v64f: «keiner» = leer; Platzhalter in Begleitfeldern nur bei gewähltem Kästchen; v64e: Regeln dürfen bei Gruppen mehrere Kästchen ankreuzen; v64d: Regeln «Wenn … dann …» -> Schritt «regel», ohne Modell; v64c2: Begleitfelder nur abfragen, wenn ihr Kästchen gewählt ist)
 #
 # Nur Fakten (und noch offene Felder) gehen ans Sprachmodell; eine Kästchen-Gruppe ist EINE Auswahlfrage,
 # die Kästchen setzt AURA danach selbst (eq). Fest -> Wert direkt, Manuell -> Platzhalter, Leer -> nichts,
@@ -256,6 +256,7 @@ def anwenden(wf, plan, vorlage_rel):
                                                                    "ext": [".pdf", ".docx", ".txt", ".md"]})
         ex = {"id": "dateien", "type": "extract", "label": "Dokumente lesen", "files": "{{input." + fin + "}}"}
         steps.insert(0, ex)
+    if sum(1 for i in wf.get("inputs", []) if i.get("type") == "files") > 1: ex["alle_eingaben"] = True    # v95
     ex["max_chars"] = min(int(ex.get("max_chars", DOK_ZEICHEN) or DOK_ZEICHEN), DOK_ZEICHEN)
     alt = [i for i, s in enumerate(steps) if (s.get("type") == "word_vorlage" and s.get("vorlage") == vorlage_rel)
            or (s.get("type") == "llm" and re.fullmatch(r"werte(_\d+)?", str(s.get("id", ""))))

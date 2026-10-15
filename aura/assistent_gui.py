@@ -1,4 +1,4 @@
-# aura/assistent_gui.py — Fenster «Workflow beschreiben». Version 20261011v64c (v64c: Feldplan beim Bauen)
+# aura/assistent_gui.py — Fenster «Workflow beschreiben». Version 20261015v90 (v90: nach dem Bauen Reiter «Übersicht»; v64c: Feldplan beim Bauen)
 # Links: Beschreibung in eigenen Worten; Bausteine von rechts per Klick oder Ziehen einfügen («[…]», farbig).
 # «Verstehen»: AURA liest die Bausteine selbst, das Sprachmodell ergänzt Lücken (falls geladen/gewählt).
 # Danach ein Formular «Ich habe verstanden», in dem alles korrigierbar ist; fehlende Angaben sind rot markiert.
@@ -252,12 +252,12 @@ class Assistent:
         wf = A.bauen(p, name, rel, felder, fp)
         (d / "workflow.json").write_text(json.dumps(wf, ensure_ascii=False, indent=1), encoding="utf-8")
         try: load_workflow(d / "workflow.json")
-        except Exception as e: messagebox.showwarning("Workflow beschreiben", f"Erstellt, aber noch fehlerhaft:\n{e}\n\nBitte im Reiter «Schritte» korrigieren.", parent=self.win)
-        self.win.destroy(); self.ww.refresh_list(); self.ww.show(str(d / "workflow.json")); self.ww.tabs.set("Schritte")
-        fpt = ("\n\nVorlage: Feldplan im Reiter «Vorlage» → «Feldplan …» prüfen (woher kommt jeder Wert?), "
-               "dann dort «Workflow aus Feldplan bauen»." if fp else "")
-        messagebox.showinfo("Workflow gebaut", "So hat AURA die Beschreibung verstanden:\n\n" + "\n".join(A.zusammenfassung(p))
-                            + fpt + "\n\nKorrekturen im Reiter «Schritte». Testen im Reiter «Ausführen».", parent=self.ww.win)
-        if p["wissen"]:
-            messagebox.showinfo("Workflow beschreiben", "Erstellt. Lege jetzt im Reiter «Wissen» die Dokumente ab (Richtlinien, Vorlagen …) "
-                                "und klicke «Speichern & abgleichen».", parent=self.ww.win)
+        except Exception as e: messagebox.showwarning("Workflow beschreiben", f"Erstellt, aber noch fehlerhaft:\n{e}\n\nBitte in der Expertenansicht, Reiter «Schritte», korrigieren.", parent=self.win)
+        self.win.destroy(); self.ww.refresh_list(); self.ww.show(str(d / "workflow.json")); self.ww.tabs.set("Übersicht")   # v90
+        tipps = []
+        if fp: tipps.append("Bei «③ Was kommt raus?» → «Felder zuordnen …»: für jedes Feld festlegen, woher der Wert kommt, "
+                            "dann «Workflow aus Feldplan bauen».")
+        if p["wissen"]: tipps.append("Bei «② Was soll AURA wissen und tun?» → «Hilfsdokumente …»: Richtlinien, Vorlagen usw. ablegen "
+                                     "und «Speichern & abgleichen».")
+        messagebox.showinfo("Workflow gebaut", "Die Übersicht zeigt, was AURA verstanden hat. Rot markierte Punkte bitte ergänzen."
+                            + ("\n\n- " + "\n- ".join(tipps) if tipps else "") + "\n\nDanach «Weiter: Ausführen ▶».", parent=self.ww.win)

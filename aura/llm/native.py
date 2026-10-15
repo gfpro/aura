@@ -1,11 +1,13 @@
-# aura/llm/native.py — Hugging-Face-Sprachmodelle auf der nativen GPU-Engine. Version 20261014v86 (v86: gemm fp16; v85: KV-Cache fp16, Einstellung llm_kv16; v84: splitr im Log; v83: Split-K-Varianten im Log; v28: Kontextlaenge aus Einstellungen; v44: Kernel-Wahl ins Log; v70: 8-Bit-Gewichte, Einstellung llm_int8;
+# aura/llm/native.py — Hugging-Face-Sprachmodelle auf der nativen GPU-Engine. Version 20261015v88 (v88: Qwen3.5 ueber qwen35.py, Denkmodus aus; v86: gemm fp16; v85: KV-Cache fp16, Einstellung llm_kv16; v84: splitr im Log; v83: Split-K-Varianten im Log; v28: Kontextlaenge aus Einstellungen; v44: Kernel-Wahl ins Log; v70: 8-Bit-Gewichte, Einstellung llm_int8;
 #   v72: Schweizer Rechtschreibung (ß -> ss) und ohne Vorspann «Antwort:»)
 # Unterstuetzt: Qwen3ForCausalLM (z.B. Qwen3-0.6B ... Qwen3-4B-Instruct-2507), Gewichte bf16.
 import json, time
 from pathlib import Path
 from .base import LLMBackend, build_prompt
 
-SUPPORTED = {"Qwen3ForCausalLM"}
+SUPPORTED = {"Qwen3ForCausalLM", "Qwen3_5ForConditionalGeneration", "Qwen3_5ForCausalLM"}
+Q35 = {"Qwen3_5ForConditionalGeneration", "Qwen3_5ForCausalLM"}
+NO_THINK = "<think>\n\n</think>\n\n"                                # v88: Qwen3.5 ohne Denkmodus
 SYSTEM = ("Du bist AURA, ein lokaler Assistent. Antworte auf Deutsch, sachlich und knapp: hoechstens 4 Saetze, "
           "einfacher Text ohne Markdown (keine Sternchen, keine Rauten). Nenne zuerst die direkte Antwort. "
           "Stuetze dich ausschliesslich auf die Quellen und belege Aussagen mit der Quellennummer, z.B. [1]. "
@@ -19,6 +21,7 @@ class NativeCausalLM(LLMBackend):
         self.dir = Path(model_dir)
         self.cfg = json.loads((self.dir / "config.json").read_text(encoding="utf-8"))
         self.arch = (self.cfg.get("architectures") or ["?"])[0]
+        self.q35 = self.arch in Q35                                     # v88
         self.name = self.dir.name; self.eng = self.tok = None
         self.progress = lambda *a: None; self.settings = {}
 
@@ -27,15 +30,17 @@ class NativeCausalLM(LLMBackend):
             raise RuntimeError(f"{self.arch} wird von der nativen Engine noch nicht unterstuetzt.")
         if self.eng: return
         from .bpe_tokenizer import BPETokenizer
-        from .qwen import Qwen3Engine
+        if self.q35: from .qwen35 import Qwen35Engine as Engine        # v88
+        else: from .qwen import Qwen3Engine as Engine
         t0 = time.perf_counter()
         self.tok = BPETokenizer(self.dir / "tokenizer.json")
-        self.eng = Qwen3Engine(self.dir, progress=self.progress, maxT=self.context_len(), int8=self.int8(), kv16_on=self.kv16())
+        self.eng = Engine(self.dir, progress=self.progress, maxT=self.context_len(), int8=self.int8(), kv16_on=self.kv16())
         self.stop_ids = {self.tok.added[s] for s in STOP if s in self.tok.added}
         try: b = self.eng.self_check(self.progress)
         except Exception:
             self.unload(); raise                                       # v70: GPU-Speicher nicht belegt lassen
         e = self.eng
+        if self.q35: return self._ready_q35(b, t0)                      # v88
         self.kernels = (f"Gewichte {'int8' if e.q8 else 'bf16'}, Matrix {e.lin_kernel} ({b['gflops_' + e.lin_kernel]:.0f} GFLOPS), "
                         f"Attention {e.attn_kernel}, Einlesen {e.pre_kernel}, Schreiben {e.dec_kernel}, kleine Bloecke {e.small_kernel}")
         self.progress("Sprachmodell: Probelauf ..."); self.eng.forward(self.tok.encode("Hallo"), 0); self.eng.g.sync()
@@ -52,6 +57,24 @@ class NativeCausalLM(LLMBackend):
              sattn_diff=f"{b.get('sattn_diff', 0):.1e}")
         self.progress(f"Sprachmodell bereit ({'8 Bit, ' if e.q8 else ''}geladen in {self.load_s:.0f} s)")
 
+    def _ready_q35(self, b, t0):
+        e = self.eng
+        self.kernels = (f"Qwen3.5, Gewichte {'int8' if e.q8 else 'bf16'}, Matrix {e.lin_kernel}, Einlesen {e.pre_kernel}, "
+                        f"Schreiben {e.dec_kernel}")
+        self.progress("Sprachmodell: Probelauf ..."); self.eng.forward(self.tok.encode("Hallo"), 0); self.eng.g.sync()
+        self.eng.kv_ids = []; self.eng._reset_state()
+        self.load_s = time.perf_counter() - t0
+        from ..log import diag
+        diag("kernel", modell=self.name, engine="qwen35", kontext=e.maxT, gewichte="int8" if e.q8 else "bf16",
+             kv="fp16" if e.kv16 else "fp32", laden_s=self.load_s, matrix=e.lin_kernel, einlesen=e.pre_kernel, schreiben=e.dec_kernel,
+             **{k: (f"{v:.1e}" if k.endswith("diff") or k.startswith("attn") else v * 1000) for k, v in b.items()
+                if isinstance(v, float) and not k.startswith("gflops")})
+        self.progress(f"Sprachmodell bereit (Qwen3.5, {'8 Bit, ' if e.q8 else ''}geladen in {self.load_s:.0f} s)")
+
+    def chat_suffix(self):
+        """v88: Text direkt nach '<|im_start|>assistant\\n' (Qwen3.5: leerer Denkblock)."""
+        return NO_THINK if self.q35 else ""
+
     def kv16(self):
         from ..config import load_settings
         return bool(load_settings().get("llm_kv16", True))           # v85: Standard an
@@ -64,7 +87,9 @@ class NativeCausalLM(LLMBackend):
         """llm_context (Standard 16384), aber so begrenzt, dass Gewichte + KV-Cache in llm_mem_gb passen."""
         from ..config import load_settings
         s = load_settings(); want = int(s.get("llm_context", 16384)); mem = float(s.get("llm_mem_gb", 14)) * 1e9
-        c = self.cfg; per_tok = c["num_hidden_layers"] * 2 * c["num_key_value_heads"] * c.get("head_dim", 128) * (2 if self.kv16() else 4)
+        c = self.cfg.get("text_config", self.cfg)                       # v88: Qwen3.5 verschachtelt
+        nkv = sum(1 for t in c.get("layer_types", []) if t == "full_attention") if self.q35 else c["num_hidden_layers"]
+        per_tok = nkv * 2 * c["num_key_value_heads"] * c.get("head_dim", 128) * (2 if self.kv16() else 4)
         weights = sum(p.stat().st_size for p in self.dir.glob("*.safetensors"))
         if self.int8(): weights = int(weights * 0.52)                # v70: int8 = halbe Groesse + 1 Skala je 128 Werte
         fit = int((mem - weights) / per_tok) // 512 * 512
@@ -85,7 +110,7 @@ class NativeCausalLM(LLMBackend):
         hits = list(hits)
         while True:
             user = build_prompt(question, hits)
-            text = f"<|im_start|>system\n{SYSTEM}<|im_end|>\n<|im_start|>user\n{user}<|im_end|>\n<|im_start|>assistant\n"
+            text = f"<|im_start|>system\n{SYSTEM}<|im_end|>\n<|im_start|>user\n{user}<|im_end|>\n<|im_start|>assistant\n{self.chat_suffix()}"
             ids = self.tok.encode(text)
             if len(ids) <= budget or not hits: return ids, len(hits)
             hits = hits[:-1]

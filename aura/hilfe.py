@@ -1,4 +1,4 @@
-# aura/hilfe.py — Infotexte (Tooltips) fuer alle Fenster. Version 20261013v82 (v82: «Beim Start Widgets zeigen»; v81: Widgets-Ansicht; v80: «▶», Widgets; v79: «⌂», Ablaufband; v75: Position korrigiert (Reihenfolge withdraw/topmost/geometry/deiconify); v74: Tooltip vor dem Hauptfenster; v70: Text «8 Bit»; v68: Info-Leiste rechts; v60: Tooltip verschwindet beim Minimieren/Fensterwechsel, nicht mehr über anderen Programmen; v46: Slide-In, Vollansicht, Startfragen)
+# aura/hilfe.py — Infotexte (Tooltips) fuer alle Fenster. Version 20261015v90 (v90: Übersicht, Expertenansicht; v82: «Beim Start Widgets zeigen»; v81: Widgets-Ansicht; v80: «▶», Widgets; v79: «⌂», Ablaufband; v75: Position korrigiert (Reihenfolge withdraw/topmost/geometry/deiconify); v74: Tooltip vor dem Hauptfenster; v70: Text «8 Bit»; v68: Info-Leiste rechts; v60: Tooltip verschwindet beim Minimieren/Fensterwechsel, nicht mehr über anderen Programmen; v46: Slide-In, Vollansicht, Startfragen)
 # Alle Texte stehen hier an einem Ort. Zuordnung:
 #   auto(fenster, ctx)  - findet Knoepfe/Schalter/Haekchen anhand ihrer Beschriftung (TEXTE[ctx], dann TEXTE["*"])
 #   tip(widget, key)    - fester Text fuer Felder ohne Beschriftung (key beginnt mit "#") oder freier Text
@@ -80,6 +80,22 @@ TEXTE = {
         "+ Vorlage hinzufügen …": "Word-Vorlage (.docx) ins Paket kopieren. Danach in der workflow.json einen Schritt «word_vorlage» darauf verweisen lassen.",
         "Laufordner öffnen": "Öffnet den Ordner dieses Laufs: Eingaben, Ergebnis, Zwischenstand und Protokoll.",
         "Öffnen: *": "Öffnet das erzeugte Dokument. Es ist ein Entwurf – bitte fachlich prüfen.",
+        "Expertenansicht": "Aus: Übersicht, Ausführen und Wissen – für die tägliche Arbeit.\nEin: zusätzlich Ablauf, Schritte, Prüfliste, "
+                           "Vorlage und «workflow.json bearbeiten» (für KI-Spezialisten).",
+        "+ Eingabe …": "Neue Eingabe beim Start: Dateien (z.B. Unterlagen) oder ein Textfeld.",
+        "Zeitplan …": "Workflow automatisch ausführen lassen, z.B. werktags um 08:00 (läuft, solange AURA offen ist).",
+        "Hilfsdokumente …": "Richtlinien, Erlasse und Vorlagen, die AURA bei diesem Workflow beizieht (Reiter «Wissen»).",
+        "Schritte im Detail …": "Öffnet die Expertenansicht mit allen Schritten und ihren Einstellungen.",
+        "Felder zuordnen …": "Für jedes Feld der Vorlage festlegen, woher der Wert kommt: aus den Unterlagen, aus einer Regel, fester Wert "
+                             "oder Bedarfsstelle trägt nach. Danach «Workflow aus Feldplan bauen».",
+        "+ Vorlage hochladen …": "Word-Vorlage (.docx) wählen. AURA kopiert sie in den Workflow, liest alle Felder aus und öffnet "
+                                 "«Felder zuordnen»: pro Feld festlegen, woher der Wert kommt, dann «Workflow aus Feldplan bauen».",
+        "Bearbeiten": "Bezeichnung, Art (Dateien/Text), Dateitypen und «freiwillig» ändern.",
+        "✕ Entfernen": "Eingabe entfernen. Wird sie von einem Schritt verwendet, warnt AURA vorher; ein Workflow, der danach nicht mehr "
+                       "läuft, wird nicht gespeichert.",
+        "Mitlesen": "«Dokumente lesen» liest danach alle Datei-Eingaben – jedes Dokument mit seinem Namen, damit das Sprachmodell "
+                    "z.B. Leistungsbeschrieb und Checkliste auseinanderhält.",
+        "Weiter: Ausführen ▶": "Zum Reiter «Ausführen»: Unterlagen wählen und starten.",
     },
     "*": {
         "#modell": "Sprachmodell wählen. Ohne Sprachmodell zeigt AURA nur die besten Fundstellen. Qwen-Modelle formulieren Antworten, müssen aber zuerst geladen werden («Laden»).",

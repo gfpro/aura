@@ -1,5 +1,6 @@
 # aura/workflow/llmio.py — Sprachmodell fuer Workflows: eigener Chat-Prompt, freie Antwort und erzwungenes JSON.
-# Version 20261010v44 (v40: Feldgrenzen bis Satzende; v43: Vorspann mit Festplatten-Cache des KV-Caches;
+# Version 20261015v89 (v89: Qwen3.5 – Denkblock immer aus, Vorspann-Schnappschuss fuer den rekurrenten Zustand;
+#                     v40: Feldgrenzen bis Satzende; v43: Vorspann mit Festplatten-Cache des KV-Caches;
 #                     v44: Kennzahlen ins Log logs\aura.log – Cache-Treffer, Einlesen, Schreiben je Feld, Geruest;
 #                     v44a2: Auswahlfelder mit «wann» enden, sobald ein erlaubter Wert steht – der Abgrenzungstext
 #                     wird nicht mehr mitgeschrieben (spart Zeit, keine falsche Kuerzungswarnung))
@@ -55,6 +56,7 @@ def chat_ids(P, system, user, think_off, vorspann=""):
     """Qwen3-Chatvorlage. think_off: leerer Denkteil (wie enable_thinking=False) fuer Hybrid-Modelle.
     v43: vorspann = fester Anfang der Benutzernachricht; wird getrennt kodiert, damit der Anfang immer gleich bleibt.
     Rueckgabe: ids (und P.head = Anzahl Tokens von System + Vorspann)."""
+    think_off = think_off or bool(getattr(P.be, "chat_suffix", lambda: "")())   # v89: Qwen3.5 verlangt leeren Denkblock
     head = f"<|im_start|>system\n{system.strip()}<|im_end|>\n" if system else ""
     head += "<|im_start|>user\n" + (vorspann.strip() + "\n\n" if vorspann and vorspann.strip() else "")
     tail = f"{user.strip()}<|im_end|>\n<|im_start|>assistant\n" + ("<think>\n\n</think>\n\n" if think_off else "")
@@ -119,6 +121,7 @@ class Gen:
                                f"{P.maxT}. Dokumenttext kuerzen (extract: max_chars) oder max_tokens senken.")
         t0 = time.perf_counter()
         kv_disk(P, ids, progress)                                    # v43: Vorspann von der Festplatte
+        if hasattr(self.e, "snap_at"): self.e.snap_at = getattr(P, "head", 0)   # v89: Qwen3.5 merkt Zustand am Vorspann-Ende
         self.logits = self.e.prefill(ids, progress, cancelled)
         if self.logits is None: raise Cancelled()
         self.cached = int(getattr(self.e, "reused", 0))

@@ -46,7 +46,11 @@ def _open_doc(ext_id, meta):
     if not os.path.exists(p): raise RuntimeError(f"Datei nicht gefunden: {p}")
     os.startfile(p)
 
-HANDLERS = {"outlook_mail": _open_mail, "outlook_calendar": _open_event,
+def _open_onenote(ext_id, meta):                              # v87
+    from .connectors.onenote import app
+    app().NavigateTo(meta.get("page_id") or ext_id.split("|")[0], "", False)
+
+HANDLERS = {"onenote": _open_onenote, "outlook_mail": _open_mail, "outlook_calendar": _open_event,
             "edge_history": _open_web, "folder_docs": _open_doc, "confluence": _open_web}
 
 def open_item(item_id, report):

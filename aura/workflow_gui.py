@@ -1,4 +1,9 @@
-# aura/workflow_gui.py — Ansicht «Workflows»: Pakete anlegen, ausfuehren, Wissen und Vorlagen pflegen. Version 20261013v81
+# aura/workflow_gui.py — Ansicht «Workflows»: Pakete anlegen, ausfuehren, Wissen und Vorlagen pflegen. Version 20261015v92
+# (v93: Start gesperrt, wenn ein Schritt eine fehlende Eingabe liest; Rückfrage bei Datei-Eingaben, die kein Schritt liest)
+# (v92: Schalter «Expertenansicht» fest rechts ausserhalb der Knopfleiste, «Löschen» zuletzt, Neuaufbau verzögert –
+#  vorher lag nach dem Umschalten «Löschen» unter dem Mauszeiger und wurde beim Loslassen ausgelöst)
+# (v90: Reiter «Übersicht» mit drei Bereichen (zonen_gui.py) als Standard; Schalter «Expertenansicht» blendet Ablauf, Schritte,
+#  Prüfliste, Vorlage und «workflow.json bearbeiten» ein; ein Sprung auf einen ausgeblendeten Reiter schaltet sie selbst ein)
 # (v81: Knopf heisst «☆ Als Widget»)
 # (v80: «☆ Auf Startseite» (Widget), Reiter «Ablauf» mit Ablaufband aus dashboard.py)
 # (v78: «Exportieren …» / «Importieren …» – Übergabe als .aurawf.zip, austausch.py)
@@ -88,16 +93,20 @@ class WorkflowWindow:
         b = lambda t, c: ctk.CTkButton(bar, text=t, height=28, width=0, corner_radius=8, font=G.font(11), fg_color=G.CARD,
                                        hover_color=G.BORDER, text_color=G.INK, command=c).pack(side="left", padx=(0, 6))
         pkg = path.endswith("workflow.json")
-        b("workflow.json bearbeiten", lambda: _open(path))
+        self.experte = bool(self.app.s.get("wf_experte"))                   # v90
         b("Neu laden", lambda: self.show(path))
         if pkg:
-            b("Ordner öffnen", lambda: _open(Path(path).parent)); b("Exportieren …", self.exportieren); b("Löschen", self.delete)
+            b("Ordner öffnen", lambda: _open(Path(path).parent)); b("Exportieren …", self.exportieren)
             from .dashboard import ist_angeheftet                        # v80
             pin = ist_angeheftet(self.app, path)
             ctk.CTkButton(bar, text="★ Als Widget" if pin else "☆ Als Widget", height=28, width=0, corner_radius=8,
                           font=G.font(11, "bold"), fg_color=G.ACCENT if pin else G.CARD, hover_color=G.ACCENT_HI if pin else G.BORDER,
                           text_color="white" if pin else G.INK, command=self.pin_toggle).pack(side="left", padx=(0, 6))
         else: b("In Paket umwandeln", self.migrate)
+        if self.experte: b("workflow.json bearbeiten", lambda: _open(path))      # v92: hinten, verschiebt nichts davor
+        if pkg: b("Löschen", self.delete)                                      # v92: zuletzt
+        self.sw_exp = ctk.CTkSwitch(hd, text="Expertenansicht", font=G.font(11), command=self._experte_umschalten)   # v92: fester Platz
+        (self.sw_exp.select() if self.experte else self.sw_exp.deselect()); self.sw_exp.grid(row=0, column=1, sticky="ne", padx=(8, 0))
         if self.wf and self.wf.get("description"):
             ctk.CTkLabel(hd, text=self.wf["description"], font=G.font(11), text_color=G.MUTED, anchor="w", justify="left",
                          wraplength=700).grid(row=2, column=0, sticky="w", pady=(4, 0))
@@ -106,21 +115,35 @@ class WorkflowWindow:
                          anchor="nw").grid(row=1, column=0, sticky="nw", pady=20); hilfe.auto(self.right, "workflow"); return
         tabs = self.tabs = ctk.CTkTabview(self.right, fg_color=G.CARD, segmented_button_selected_color=G.ACCENT)
         tabs.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
-        self._tab_run(tabs.add("Ausführen"))
-        try:                                                             # v80: Ablaufband
-            from .dashboard import FlowBand
-            t = tabs.add("Ablauf"); t.grid_columnconfigure(0, weight=1)
-            self.band = FlowBand(self.app, t, path); self.band.frame.grid(row=0, column=0, sticky="ew", padx=4, pady=4)
+        self._tabnamen = []; _set = tabs.set                                 # v90: nur angezeigte Reiter; Rest = Expertenansicht
+        def add(n): self._tabnamen.append(n); return tabs.add(n)
+        def sicher(n):
+            if n in self._tabnamen: _set(n)
+            else: self._experte_an(n)
+        tabs.set = sicher
+        try:                                                             # v90: drei Bereiche
+            from .zonen_gui import ZonenAnsicht
+            self.zonen = ZonenAnsicht(self, add("Übersicht"))
         except Exception as e:
-            self.band = None; ctk.CTkLabel(tabs.tab("Ablauf"), text=f"Ablauf nicht verfügbar: {e}", text_color=G.ERR).pack(anchor="w")
-        try:                                                             # v52: Schritte ohne JSON
-            from .workflow_editor import SchrittEditor
-            self.editor = SchrittEditor(self, tabs.add("Schritte"))
-        except Exception as e:
-            ctk.CTkLabel(tabs.tab("Schritte"), text=f"Schritt-Editor nicht verfügbar: {e}", text_color=G.ERR).pack(anchor="w")
-        if pkg: self._tab_pruefliste(tabs.add("Prüfliste"))           # v50
-        if pkg: self._tab_wissen(tabs.add("Wissen"))
-        self._tab_vorlage(tabs.add("Vorlage"))
+            ctk.CTkLabel(tabs.tab("Übersicht"), text=f"Übersicht nicht verfügbar: {e}", text_color=G.ERR).pack(anchor="w")
+        self._tab_run(add("Ausführen"))
+        self.band = None
+        if self.experte:
+            try:                                                         # v80: Ablaufband
+                from .dashboard import FlowBand
+                t = add("Ablauf"); t.grid_columnconfigure(0, weight=1)
+                self.band = FlowBand(self.app, t, path); self.band.frame.grid(row=0, column=0, sticky="ew", padx=4, pady=4)
+            except Exception as e:
+                self.band = None; ctk.CTkLabel(tabs.tab("Ablauf"), text=f"Ablauf nicht verfügbar: {e}", text_color=G.ERR).pack(anchor="w")
+            try:                                                         # v52: Schritte ohne JSON
+                from .workflow_editor import SchrittEditor
+                self.editor = SchrittEditor(self, add("Schritte"))
+            except Exception as e:
+                ctk.CTkLabel(tabs.tab("Schritte"), text=f"Schritt-Editor nicht verfügbar: {e}", text_color=G.ERR).pack(anchor="w")
+            if pkg: self._tab_pruefliste(add("Prüfliste"))               # v50
+        if pkg: self._tab_wissen(add("Wissen"))
+        if self.experte: self._tab_vorlage(add("Vorlage"))
+        _set("Übersicht")
         hilfe.SCHRITTE.setdefault("pruefliste", "Prüft die Eingabedateien gegen die Punkte im Reiter «Prüfliste».")
         hilfe.auto(self.right, "workflow")              # Wissen-Reiter hat seine Texte schon (Kontext «wissen»)
 
@@ -207,6 +230,15 @@ class WorkflowWindow:
         if not start_at:
             miss = [i.get("label", i["id"]) for i in self.wf["inputs"] if not i.get("optional") and not inputs.get(i["id"])]
             if miss: messagebox.showwarning("Workflows", "Bitte ausfüllen:\n- " + "\n- ".join(miss), parent=self.win); return
+            from .workflow.zonen import verweise                               # v93
+            fehlend, ungelesen = verweise(self.wf)
+            if fehlend:
+                messagebox.showerror("Workflows", "Nicht gestartet: Ein Schritt liest eine Eingabe, die es nicht mehr gibt ("
+                                     + ", ".join(fehlend) + "). Das Sprachmodell bekäme keine Unterlagen.\n\nIm Reiter «Übersicht» "
+                                     "bei «① Was kommt rein?» → «Reparieren …».", parent=self.win); self.tabs.set("Übersicht"); return
+            leer = [i.get("label", i["id"]) for i in self.wf["inputs"] if i["id"] in ungelesen and inputs.get(i["id"])]
+            if leer and not messagebox.askyesno("Workflows", "Diese Dateien liest kein Schritt – sie werden nicht verwendet:\n- "
+                                                + "\n- ".join(leer) + "\n\nTrotzdem starten?", default="no", parent=self.win): return
         self._reset_steps(); self.running = True; self.b_start.configure(state="disabled")
         self.lbl_prog.configure(text="Gestartet …" + (" (wartet, bis der laufende Auftrag fertig ist)" if self.app.busy else ""))
         self.pending_stop = None
@@ -223,6 +255,24 @@ class WorkflowWindow:
         l, txt = self.step_lbl[sid]
         sym, col = ("▶", self.G.ACCENT) if status == "läuft" else ("–", self.G.MUTED) if status == "übersprungen" else ("✓", self.G.OK)
         l.configure(text=f"{sym}  {txt}   {'' if status == 'läuft' else status}", text_color=col)
+
+    # ---- v90: Expertenansicht
+    def _set_experte(self, an):
+        from .config import load_settings, save_settings
+        st = load_settings(); st["wf_experte"] = bool(an); save_settings(st); self.app.s["wf_experte"] = bool(an); self.experte = bool(an)
+
+    def _experte_umschalten(self):
+        if self.running:
+            messagebox.showinfo("Workflows", "Während eines Laufs bitte nicht umschalten.", parent=self.win)
+            (self.sw_exp.select() if self.experte else self.sw_exp.deselect()); return
+        self._set_experte(not self.experte)
+        self.win.after(150, lambda: self.show(self.cur))                       # v92: erst nach dem Loslassen der Maus neu aufbauen
+
+    def _experte_an(self, ziel=None):
+        """Sprung auf einen Reiter der Expertenansicht (z.B. aus dem Feldplan oder «Schritte im Detail …»)."""
+        if self.running: messagebox.showinfo("Workflows", "Während eines Laufs bitte nicht wechseln.", parent=self.win); return
+        self._set_experte(True); self.show(self.cur)
+        if ziel in self._tabnamen: self.tabs.set(ziel)
 
     def pin_toggle(self):
         """v80: Workflow als Widget auf der Startseite anheften / entfernen."""

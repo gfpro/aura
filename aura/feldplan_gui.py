@@ -1,4 +1,4 @@
-# aura/feldplan_gui.py — Fenster «Feldplan»: woher kommt jeder Wert der Vorlage? Version 20261011v64e (v64e: «dann» mit Mehrfachauswahl bei Gruppen; v64d: Regel-Editor «Wenn … dann …»; v64c: «Workflow aus Feldplan bauen»; v64a2: Doppelklick = woher genau / Regel / fester Wert)
+# aura/feldplan_gui.py — Fenster «Feldplan»: woher kommt jeder Wert der Vorlage? Version 20261015v94 (v94: «In welchem Dokument?» ohne doppelte/fest eingebaute Namen; v64e: «dann» mit Mehrfachauswahl bei Gruppen; v64d: Regel-Editor «Wenn … dann …»; v64c: «Workflow aus Feldplan bauen»; v64a2: Doppelklick = woher genau / Regel / fester Wert)
 # Öffnet aus dem Reiter «Vorlage». Zeigt Gruppen (aufklappbar mit ihren Optionen) und Einzelfelder mit Herkunft.
 # Herkunft per Knopf ändern (mehrere Zeilen markierbar); jede Änderung wird sofort in <vorlage>.feldplan.json gespeichert.
 # Noch ohne Bauen und ohne Sprachmodell (kommt in v64b/c).
@@ -184,7 +184,7 @@ class FeldplanFenster:
             w.clear(); k = next(k for k, t in FP.HERKUNFT.items() if t == v)
             if k == "fakt":
                 feld(0, "In welchem Dokument?", "quelle", "z.B. «Leistungsbeschrieb», «Checkliste» oder «alle Unterlagen».",
-                     (["alle Unterlagen"] + quellen + ["Leistungsbeschrieb", "Checkliste"]))
+                     list(dict.fromkeys(["alle Unterlagen"] + quellen)))          # v94: nur die Eingaben des Workflows, ohne Doppel
                 feld(2, "Wo / wie erkennbar?", "hinweis", "Überschrift, Stichwort oder Formulierung, z.B. «unter ‹Auftraggeber›» "
                      "oder «Betrag in CHF bei ‹Kostendach›». Wird zum Hinweis ans Sprachmodell.", hoch=True)
                 if gruppe: ctk.CTkLabel(teil, text="Bei einer Gruppe wählt das Sprachmodell EINE der Optionen (bzw. mehrere bei «Mehrfach»).",

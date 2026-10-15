@@ -7,6 +7,7 @@
 # v49: Auto-Abgleich wird verworfen, solange ein Workflow laeuft oder wartet (verfaelschte Laufzeiten).
 # v65: Folgefragen (Gespraechsgedaechtnis ueber die letzten 3 Fragen).
 # v67: Folgefrage nur per Knopf «Bezug zur letzten Frage» (follow=True); Worterkennung nur mit followup_auto.
+# v87: OneNote (job_onenote_tree = Abschnittsbaum; alte Seitenversionen/abgewaehlte Abschnitte werden entfernt).
 # v36: Workflow-Pakete, Neustart ab Schritt (job_workflow start_at).
 # v73: zitierter Mailverlauf wird durchsucht (nur Absaetze, die in keiner anderen Mail stehen); einmalige Nachbearbeitung
 #      aller Mails (job_verlauf, startet automatisch); Mails geplanter Workflows (Betreff = Workflow-Name) ausgeschlossen.
@@ -138,6 +139,15 @@ class Worker(threading.Thread):
                 self.progress(f"Confluence: {len(weg)} Seiten nicht mehr gesehen - nicht geloescht (zu viele)")
                 gone = [i for i in gone if i not in set(weg)]                   # alte Versionen trotzdem ersetzen
             if gone: self._delete(gone); removed = len(gone)
+        if cid == "onenote" and getattr(ctx, "complete", False) and not stop():      # v87
+            rows = self.conn.execute("SELECT id, ext_id FROM items WHERE source = 'onenote'").fetchall()
+            gone = [i for i, e in rows if e not in ctx.seen]
+            cur = {e.split("|")[0] for e in ctx.seen}
+            weg = [i for i, e in rows if e.split("|")[0] not in cur]              # Seite bzw. Abschnitt weg
+            if not confirm and len(weg) > max(20, len(rows) * 0.3):              # Sicherung (ohne bewusste Abwahl)
+                self.progress(f"OneNote: {len(weg)} Seiten nicht mehr gesehen - nicht geloescht (zu viele)")
+                gone = [i for i in gone if i not in set(weg)]
+            if gone: self._delete(gone); removed = len(gone)
         if cid == "confluence" and not stop(): db.flag(self.conn, "confluence_tag", time.strftime("%Y-%m-%d"))
         self.conn.commit()
         if n or upd or removed:                                      # v23: nur bei Aenderungen neu aufbauen
@@ -254,6 +264,15 @@ class Worker(threading.Thread):
         self.emit("folders", fl)
         self.progress(f"{sum('eid' in f for f in fl)} Ordner gelesen in {time.perf_counter() - t0:.1f} s")
 
+    def job_onenote_tree(self):                                       # v87
+        from .connectors.onenote import app, tree, resolve
+        self.progress("Lese OneNote-Notizbücher ...")
+        nodes, _ = tree(app())
+        st = resolve(nodes, load_settings().get("onenote_sections") or {})
+        for n in nodes: n["on"] = st[n["eid"]]
+        self.emit("folders", nodes, "onenote")
+        self.progress(f"{sum(n['kind'] == 'section' for n in nodes)} Abschnitte gelesen")
+
     def job_autosync(self):
         """Alle autosync_min Minuten (von der Oberflaeche ausgeloest): neue Mails, ab und zu Kalender, dann nur die neuen
         Textstuecke einbetten. Weicht sofort, wenn die Oberflaeche einen Auftrag schickt. Fehler nur als Statuszeile."""
@@ -263,6 +282,8 @@ class Worker(threading.Thread):
         every = max(1, int(s.get("autosync_calendar_every", 4)))
         if self.conn.execute("SELECT 1 FROM items WHERE source='outlook_calendar' LIMIT 1").fetchone() \
                 and (self.auto_runs - 1) % every == 0: cids.append("outlook_calendar")
+        if any((s.get("onenote_sections") or {}).values()) and s.get("onenote_auto", True) \
+                and (self.auto_runs - 1) % every == 0: cids.append("onenote")      # v87
         if (s.get("confluence_links") and s.get("confluence_auto", True)            # v78: Confluence einmal pro Tag
                 and db.flag(self.conn, "confluence_tag") != time.strftime("%Y-%m-%d")): cids.append("confluence")
         new = 0

@@ -1,4 +1,7 @@
-# aura/workflow/engine.py — Workflows laden, pruefen und Schritt fuer Schritt ausfuehren. Version 20261010v44 (v42: Standby waehrend des Laufs verhindern)
+# aura/workflow/engine.py — Workflows laden, pruefen und Schritt fuer Schritt ausfuehren. Version 20261015v95 (v42: Standby waehrend des Laufs verhindern)
+# v95: extract mit "alle_eingaben": true liest JEDE Datei-Eingabe einzeln und setzt die Texte mit Kopfzeile «##### EINGABE «<Bezeichnung>» #####»
+#      zusammen (max_chars gerecht verteilt). Liefert «Dokumente lesen» keinen Text, bricht der Lauf ab (statt das Modell
+#      auf leere Unterlagen anzusetzen); Ausnahme: "leer_erlaubt": true.
 #
 # v40: "pruefungen": [{"name", "wenn": Ausdruck (wahr = Problem), "meldung": Text mit {{...}}}] laufen nach jedem
 #      Lauf. Zusammen mit den _warnungen der Schritte stehen sie in res["pruefungen"] (Protokoll und Fenster).
@@ -277,6 +280,28 @@ class Runner:
                 return True
         return False
 
+    def _extract_alle(self, params):
+        """v95: Jede Datei-Eingabe einzeln lesen; Texte mit Kopfzeile, Zeichenbudget gerecht verteilt (kurze geben ab)."""
+        mx = int(params.get("max_chars") or 16000)
+        base = {k: v for k, v in params.items() if k not in ("files", "alle_eingaben", "leer_erlaubt")}
+        teile = []
+        for i in self.wf["inputs"]:
+            fs = self.state["input"].get(i["id"]) if i.get("type") == "files" else None
+            if not fs: continue
+            o = NODES["extract"](dict(base, files=fs, max_chars=mx), self.state, self.ctx) or {}
+            teile.append((i.get("label") or i["id"], o, str(o.get("text") or "")))
+        if not teile: return {"text": "", "files": [], "chars": 0, "truncated": False, "teile": {}}
+        # Kopf je Eingabe; darunter steht wie bisher «=== Dokument: <Datei> ===» (n_extract) – so kennt das Modell beides
+        kopf = [f"##### EINGABE «{lab}» #####\n" for lab, _, _ in teile]
+        MARKE = "\n[... gekürzt]"
+        rest = max(0, mx - sum(len(k) + 2 + len(MARKE) for k in kopf)); quote = [0] * len(teile)
+        for n, j in enumerate(sorted(range(len(teile)), key=lambda j: len(teile[j][2]))):
+            quote[j] = min(len(teile[j][2]), rest // (len(teile) - n)); rest -= quote[j]
+        text = "\n\n".join(k + t[:q].rstrip() + (MARKE if len(t) > q else "") for k, (_, _, t), q in zip(kopf, teile, quote))
+        return {"text": text, "chars": len(text), "files": [f for _, o, _ in teile for f in (o.get("files") or [])],
+                "truncated": any(o.get("truncated") or len(t) > q for (_, o, t), q in zip(teile, quote)),
+                "teile": {lab: min(len(t), q) for (lab, _, t), q in zip(teile, quote)}}
+
     def execute(self):
         _wach(True)
         try: return self._execute()
@@ -302,10 +327,17 @@ class Runner:
                 skip = {"template": ("text",), "regel": ("regeln", "sonst"), "fuer_jedes": ("schritt",)}.get(typ, ())
                 params = resolve(params, self.state, skip=skip)
                 t0 = time.perf_counter()
-                try: out = NODES[typ](params, self.state, ctx)
+                try:
+                    if typ == "extract" and st.get("alle_eingaben"): out = self._extract_alle(params)     # v95
+                    else: out = NODES[typ](params, self.state, ctx)
                 except (Cancelled, KeyboardInterrupt): raise
                 except ExprError as e: raise WorkflowError(f"Schritt «{sid}»: {e}")
                 except Exception as e: raise WorkflowError(f"Schritt «{sid}» ({typ}): {type(e).__name__}: {e}") from e
+                if typ == "extract" and not st.get("leer_erlaubt") and not (isinstance(out, dict) and str(out.get("text") or "").strip()):
+                    n = len(out.get("files") or []) if isinstance(out, dict) else 0                     # v95
+                    raise WorkflowError(f"Schritt «{st.get('label', sid)}»: " + (
+                        "keine Dateien erhalten – liest der Schritt die richtige Eingabe? (Workflow → Übersicht)" if not n else
+                        f"aus {n} Datei(en) kein Text lesbar – gescanntes PDF ohne Textschicht?"))
                 self.state[sid] = out
                 dt = time.perf_counter() - t0
                 self.log.append({"id": sid, "type": typ, "seconds": round(dt, 1), "out": _short(out)})

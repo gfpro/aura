@@ -1,4 +1,5 @@
-# aura/llm/bpe_tokenizer.py — Version 20261006v01  (AURA)
+# aura/llm/bpe_tokenizer.py — Version 20261015v88  (AURA)
+#   v88: \p{X} allgemein uebersetzt (auch \p{M} fuer Qwen3.5), innerhalb und ausserhalb von [...]
 # Reiner-Python-Tokenizer fuer Byte-Level-BPE-Modelle (Qwen2/Qwen3, Llama-3-Stil).
 # Liest tokenizer.json. Keine Abhaengigkeiten.
 
@@ -31,11 +32,19 @@ def _unicode_class(prefix):
     return s
 
 def _translate_regex(pat):
-    L, N = _unicode_class("L"), _unicode_class("N")
-    pat = pat.replace("[^\\r\\n\\p{L}\\p{N}]", f"[^\\r\\n{L}{N}]")
-    pat = pat.replace("[^\\s\\p{L}\\p{N}]", f"[^\\s{L}{N}]")
-    pat = pat.replace("\\p{L}", f"[{L}]").replace("\\p{N}", f"[{N}]")
-    return re.compile(pat)
+    """Ersetzt \\p{L}, \\p{N}, \\p{M} ... durch Bereichslisten (Pythons re kennt \\p nicht)."""
+    out, i, inside = [], 0, False
+    while i < len(pat):
+        ch = pat[i]
+        if ch == "\\":
+            if pat[i + 1:i + 3] == "p{":
+                j = pat.index("}", i); r = _unicode_class(pat[i + 3:j])
+                out.append(r if inside else f"[{r}]"); i = j + 1; continue
+            out.append(pat[i:i + 2]); i += 2; continue
+        if ch == "[" and not inside: inside = True
+        elif ch == "]" and inside: inside = False
+        out.append(ch); i += 1
+    return re.compile("".join(out))
 
 class BPETokenizer:
     def __init__(self, path):

@@ -1,4 +1,5 @@
-# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261013v82
+# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261015v87
+# v87: OneNote – Abschnittsauswahl (gleiche Baumansicht wie Outlook-Ordner).
 # v82: Startseiten-Wahl als Schalter «Beim Start Widgets zeigen» (statt Segmentknopf Fragen|Widgets).
 # v81: «▶» öffnet die Ansicht «Workflow-Ergebnisse» (Widgets, volle Breite); Startseite nur Fragen; Wahl der ersten Seite (Einstellung startseite).
 # v80: Knopf «▶» (Workflows) neben «⌂»; Startseite zeigt angeheftete Workflow-Ergebnisse (Widgets) statt Ablaufband.
@@ -486,6 +487,9 @@ class App:
                               hover_color=MUTED, text_color=INK, command=self.pick_folder).pack(side="left", padx=(0, 4))
                 ctk.CTkButton(btns, text="✕", width=26, height=24, corner_radius=7, fg_color=BORDER,      # v37: Ordner entfernen
                               hover_color=MUTED, text_color=INK, command=self.remove_folder).pack(side="left", padx=(0, 4))
+            if c.id == "onenote":                                   # v87: Abschnittsauswahl
+                ctk.CTkButton(btns, text="Abschnitte", width=76, height=24, corner_radius=7, font=font(11), fg_color=BORDER,
+                              hover_color=MUTED, text_color=INK, command=lambda: self.open_folders("onenote")).pack(side="left", padx=(0, 4))
             if c.id == "confluence":                                # v78: Links verwalten
                 ctk.CTkButton(btns, text="Links", width=52, height=24, corner_radius=7, font=font(11), fg_color=BORDER,
                               hover_color=MUTED, text_color=INK, command=self.open_confluence).pack(side="left", padx=(0, 4))
@@ -514,7 +518,7 @@ class App:
                                    icon="warning", default="no", parent=self.root): return
         try:
             self.s = load_settings()
-            self.s.update(mail_folders={}, docs_folder="", confluence_links=[], autosync=False, autosync_last=""); save_settings(self.s)
+            self.s.update(mail_folders={}, onenote_sections={}, docs_folder="", confluence_links=[], autosync=False, autosync_last=""); save_settings(self.s)
             zuruecksetzen_vormerken()
         except Exception as e: messagebox.showerror(APP_NAME, f"Nicht zurückgesetzt: {e}", parent=self.root); return
         log.get().info("Alles zurücksetzen: vorgemerkt, Neustart")
@@ -1087,19 +1091,22 @@ class App:
             self.status.configure(text="Nicht gelöscht. Nächste Rückfrage frühestens in 24 h.")
 
     # ------------------------------------------------------------------ v23: Outlook-Ordnerauswahl (v46: Slide-In)
-    def open_folders(self):
+    def open_folders(self, kind="outlook"):
         if self.busy or not self.w.jobs.empty():
             self.status.configure(text="Bitte warten, bis der laufende Auftrag fertig ist (oder Pause)."); return
-        self.w.submit("folders")
+        self.w.submit("onenote_tree" if kind == "onenote" else "folders")
 
-    def _show_folders(self, fl):
-        self.flist = [f for f in fl if "eid" in f]
-        body = self.view("ordner", "Outlook-Ordner")                  # v47: Vollansicht, «← Zurück» = Quellen
+    def _show_folders(self, fl, kind="outlook"):
+        self.flist = [f for f in fl if "eid" in f]; self.fkind = kind
+        body = self.view("ordner", "OneNote-Abschnitte" if kind == "onenote" else "Outlook-Ordner")   # v47/v87
         w = ctk.CTkFrame(body, fg_color="transparent", width=600); w.grid(row=0, column=0, sticky="nsw", padx=24, pady=12)
         body.grid_rowconfigure(0, weight=1); w.grid_propagate(False); w.grid_columnconfigure(0, weight=1); w.grid_rowconfigure(1, weight=1)
         errs = sum("error" in f for f in fl)
-        ctk.CTkLabel(w, text="Nur angehakte Ordner werden synchronisiert. Neue Unterordner übernehmen die Wahl des "
-                             "Elternordners. Abgewählte Ordner werden nach Rückfrage aus AURA gelöscht."
+        ctk.CTkLabel(w, text=("Nur angehakte Abschnitte werden synchronisiert. Neue Abschnitte übernehmen die Wahl des "
+                              "Notizbuchs bzw. der Gruppe. Abgewählte Abschnitte werden aus AURA entfernt (OneNote bleibt unberührt). "
+                              "Achtung: geteilte Notizbücher enthalten auch Inhalte anderer Personen.") if kind == "onenote" else
+                             ("Nur angehakte Ordner werden synchronisiert. Neue Unterordner übernehmen die Wahl des "
+                              "Elternordners. Abgewählte Ordner werden nach Rückfrage aus AURA gelöscht.")
                              + (f"\n⚠ {errs} Ordner nicht lesbar – Löschen ist bis dahin gesperrt." if errs else ""),
                      font=font(11), text_color=MUTED, anchor="w", justify="left", wraplength=480).grid(
             row=0, column=0, sticky="w", padx=20, pady=(0, 8))
@@ -1109,7 +1116,9 @@ class App:
         for i, f in enumerate(self.flist):
             v = tk.BooleanVar(value=f.get("on", True)); self.fvars[f["eid"]] = v
             cnt = f" ({fmt(f['count'])})" if f.get("count", -1) >= 0 else ""
-            ctk.CTkCheckBox(box, text=f"{f['name'] or '(Postfach)'}{cnt}", variable=v, font=font(12), text_color=INK,
+            nm = f["name"] or "(Postfach)"
+            if kind == "onenote": nm = {"notebook": "📓 ", "group": "📁 "}.get(f.get("kind"), "") + nm + (" 🔒" if f.get("locked") else "")
+            ctk.CTkCheckBox(box, text=f"{nm}{cnt}", variable=v, font=font(12), text_color=INK,
                             checkbox_width=18, checkbox_height=18, fg_color=ACCENT, hover_color=ACCENT_HI,
                             command=lambda e=f["eid"]: self._cascade(e)).grid(
                 row=i, column=0, sticky="w", padx=(10 + 18 * f["depth"], 10), pady=2)
@@ -1132,15 +1141,20 @@ class App:
         self._fsum()
 
     def _fsum(self):
+        if getattr(self, "fkind", "outlook") == "onenote":                 # v87: nur Abschnitte zaehlen
+            al = [f for f in self.flist if f.get("kind") == "section"]
+            on = [f for f in al if self.fvars[f["eid"]].get()]
+            self.fsum.configure(text=f"{len(on)} von {len(al)} Abschnitten gewählt · {fmt(sum(f.get('count', 0) for f in on))} Seiten"); return
         on = [f for f in self.flist if self.fvars[f["eid"]].get()]
         n = sum(max(0, f.get("count", 0)) for f in on)
         self.fsum.configure(text=f"{len(on)} von {len(self.flist)} Ordnern gewählt · ~{fmt(n)} Einträge")
 
     def _save_folders(self):
-        self.s["mail_folders"] = {e: bool(v.get()) for e, v in self.fvars.items()}; save_settings(self.s)
+        on = getattr(self, "fkind", "outlook") == "onenote"            # v87
+        self.s["onenote_sections" if on else "mail_folders"] = {e: bool(v.get()) for e, v in self.fvars.items()}; save_settings(self.s)
         self.open_sources()                                          # zurueck zu den Quellen (Fortschritt sichtbar)
         self.views.pop("ordner").destroy()
-        self.w.submit("sync", "outlook_mail", True)                  # True: Loeschen immer bestaetigen
+        self.w.submit("sync", "onenote" if on else "outlook_mail", True)   # True: Abwahl = bewusstes Loeschen
 
     # ------------------------------------------------------------------ Ereignisse aus dem Worker
     def poll(self):
@@ -1186,7 +1200,7 @@ class App:
                     self.sources(self.cur, d[0], vis, d[1] if len(d) > 1 else None)
                     self.cur = None; self._scroll()
                 elif kind == "llm_state": self._llm_view(d[0], d[1])
-                elif kind == "folders": self._show_folders(d[0])
+                elif kind == "folders": self._show_folders(*d)
                 elif kind == "confirm_delete": self._confirm_delete(*d)
                 elif kind == "wf_step": self._wf("on_step", *d)
                 elif kind == "wf_done":
