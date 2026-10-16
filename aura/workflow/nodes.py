@@ -1,4 +1,4 @@
-# aura/workflow/nodes.py — Bausteine (Schritt-Typen). Version 20261010v45 (v41: leer_werte, v43: vorspann; rag liefert text_pin/text_suche)
+# aura/workflow/nodes.py — Bausteine (Schritt-Typen). Version 20261016v96 (v96: unsichere Auswahlfelder -> Hinweis im Pruefbericht; v41: leer_werte, v43: vorspann; rag liefert text_pin/text_suche)
 # v45: word_vorlage sucht nach dem Ausfuellen verbliebene Platzhalter (Parameter platzhalter) -> Warnungen/Pruefbericht.
 # v49: Option beleg_nach (Zitat nach dem Wert, neutral -> «keiner» ohne Modell), Standard aus.
 # v44: Feldoption vorschlag – Text geht NUR in den Pruefbericht (_vorschlaege), nie in das Ergebnis des Schritts.
@@ -195,7 +195,12 @@ def _llm(p, state, ctx):
             leerw = {"", LEER.lower()} | {str(x).lower() for x in f.get("leer_werte", [])}
             if f.get("wenn_leer") and res.get(n, "").strip().lower().rstrip(".") in {x.rstrip(".") for x in leerw}:
                 res[n] = f["wenn_leer"]
-        for h in hinweise: ctx.progress("Beleg: " + h)
+        lab = {f["name"]: f.get("label", f["name"]) for f in fields}       # v96: Auswahl mit geringer Sicherheit
+        for n, v, c in st.get("unsicher", []):
+            if str(res.get(n, v)).strip().lower() != "unklar":
+                hinweise.append(f"{lab.get(n, n)}: «{res.get(n, v)}» gewählt, aber das Modell war unsicher "
+                                f"({c:.0%}) – bitte prüfen.")
+        for h in hinweise: ctx.progress("Hinweis: " + h)
         return dict(res, _stats=st, _forced=True, _hinweise=hinweise, _warnungen=warn, _vorschlaege=vorschlaege)
     txt, st = llmio.generate(be, system, prompt, int(p.get("max_new", s.get("llm_max_new", 400))), temp, pen,
                              on_text=ctx.on_text, progress=ctx.progress, cancelled=ctx.cancelled, think_off=think_off,

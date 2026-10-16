@@ -1,4 +1,6 @@
-# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261015v87
+# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261016v98
+# v98: Eingabezeile wieder kompakt (leerer Anhang-Rahmen hatte 200 px Hoehe), «Bezug» wieder sichtbar.
+# v97: Anhang im Chat (📎): Datei nur fuer diesen Chat, sichtbar ueber dem Eingabefeld; «⌂» = neuer Chat leert ihn.
 # v87: OneNote – Abschnittsauswahl (gleiche Baumansicht wie Outlook-Ordner).
 # v82: Startseiten-Wahl als Schalter «Beim Start Widgets zeigen» (statt Segmentknopf Fragen|Widgets).
 # v81: «▶» öffnet die Ansicht «Workflow-Ergebnisse» (Widgets, volle Breite); Startseite nur Fragen; Wahl der ersten Seite (Einstellung startseite).
@@ -573,10 +575,17 @@ class App:
                                    fg_color=ACCENT, hover_color=ACCENT_HI, command=self.ask)
         self.b_ask.grid(row=0, column=1, padx=(0, 12), pady=10, sticky="se"); self.buttons.append(self.b_ask)
         self.follow = False                                              # v67: Bezug zur letzten Frage (einmalig)
-        self.b_follow = ctk.CTkButton(bar, text="↳ Bezug zur letzten Frage", height=24, corner_radius=12, font=font(11),
+        tools = ctk.CTkFrame(bar, fg_color="transparent", height=24)     # v98: Werkzeugzeile (Bezug, Anhang) links unten
+        tools.grid(row=1, column=0, columnspan=2, sticky="w", padx=(14, 12), pady=(0, 10))
+        self.b_follow = ctk.CTkButton(tools, text="↳ Bezug zur letzten Frage", height=24, corner_radius=12, font=font(11),
                                       fg_color="transparent", hover_color=BORDER, text_color=MUTED, border_width=1,
                                       border_color=BORDER, command=self.toggle_follow)
-        self.b_follow.grid(row=1, column=0, sticky="w", padx=(14, 6), pady=(0, 10))
+        self.b_follow.pack(side="left")
+        self.b_anhang = ctk.CTkButton(tools, text="📎 Datei anhängen", height=24, corner_radius=12, font=font(11),
+                                      fg_color="transparent", hover_color=BORDER, text_color=MUTED, border_width=1,
+                                      border_color=BORDER, command=self.add_anhang)
+        self.b_anhang.pack(side="left", padx=(8, 0)); self.buttons.append(self.b_anhang)
+        self.anh_box = ctk.CTkFrame(tools, fg_color="transparent", width=1, height=1)   # v98: leer = keine Hoehe
         self.status = ctk.CTkLabel(main, text="Enter = senden  ·  Shift+Enter = neue Zeile", font=font(11),
                                    text_color=MUTED, anchor="w")
         self.status.grid(row=3, column=0, sticky="ew", padx=40, pady=(0, 12))
@@ -616,6 +625,7 @@ class App:
         self.close_panel(anim=False); self.show_chat()
         for c in self.chat.winfo_children(): c.destroy()
         self.msgs = []; self.welcome = None; self._welcome()
+        self.w.submit("anhang_leeren")                                   # v97: neuer Chat = ohne Anhang
         try: self.chat._parent_canvas.yview_moveto(0)
         except Exception: pass
 
@@ -858,6 +868,22 @@ class App:
         else:
             self.b_llm.grid(); self.b_llm.configure(text="Entladen" if state == "ready" else "Laden",
                                                      state="disabled" if state == "loading" else "normal")
+    # ------------------------------------------------------------------ v97: Anhang im Chat
+    def add_anhang(self):
+        ps = filedialog.askopenfilenames(parent=self.root, title="Datei für diesen Chat anhängen",
+                                         filetypes=[("Dokumente", "*.pdf *.docx *.txt *.md"), ("Alle Dateien", "*.*")])
+        if ps: self.w.submit("anhang", list(ps))
+
+    def _show_anhang(self, lst):
+        for c in self.anh_box.winfo_children(): c.destroy()
+        if not lst: self.anh_box.pack_forget(); return
+        self.anh_box.pack(side="left", padx=(8, 0))
+        names = ", ".join(a["name"] for a in lst)
+        ctk.CTkLabel(self.anh_box, text=f"📎 {names[:60]}{'…' if len(names) > 60 else ''}  ·  nur in diesem Chat",
+                     font=font(11), text_color=ACCENT).pack(side="left")
+        ctk.CTkButton(self.anh_box, text="✕", width=24, height=22, corner_radius=11, font=font(11), fg_color="transparent",
+                      hover_color=BORDER, text_color=MUTED, command=lambda: self.w.submit("anhang_leeren")).pack(side="left", padx=(4, 0))
+
     def toggle_follow(self, on=None):
         """v67: Folgefrage-Knopf. Gilt nur fuer die naechste Frage."""
         self.follow = (not self.follow) if on is None else on
@@ -1200,6 +1226,7 @@ class App:
                     self.sources(self.cur, d[0], vis, d[1] if len(d) > 1 else None)
                     self.cur = None; self._scroll()
                 elif kind == "llm_state": self._llm_view(d[0], d[1])
+                elif kind == "anhang": self._show_anhang(d[0])           # v97
                 elif kind == "folders": self._show_folders(*d)
                 elif kind == "confirm_delete": self._confirm_delete(*d)
                 elif kind == "wf_step": self._wf("on_step", *d)

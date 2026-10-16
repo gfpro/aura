@@ -1,4 +1,5 @@
-# aura/llm/base.py — Schnittstelle fuer Sprachmodelle.
+# aura/llm/base.py — Schnittstelle fuer Sprachmodelle. Version 20261016v104
+# v104: Empfaenger in der Quellenzeile; nur die Frage beantworten (keine Fuellsaetze), «nicht gefunden» statt raten.
 class LLMBackend:
     name = "basis"
     used = None                                    # wie viele Quellen das Modell tatsaechlich gesehen hat
@@ -17,9 +18,12 @@ def build_prompt(question, hits):
     """Prompt im RAG-Stil: nummerierte Quellen, Antwort nur aus den Quellen, mit [n]-Verweisen."""
     src = {"outlook_mail": "Mail", "outlook_calendar": "Termin", "edge_history": "Webseite", "folder_docs": "Dokument"}
     import datetime; d = datetime.date.today()
-    ctx = "\n\n".join(f"[{i + 1}] {src.get(h['source'], h['source'])} vom {h['ts'][:16]}, von {h.get('author') or 'unbekannt'}, "
+    an = lambda h: f", an {h['recipients'][:200]}" if h.get("recipients") else ""          # v104: «Wer waren die Adressaten?»
+    ctx = "\n\n".join(f"[{i + 1}] {src.get(h['source'], h['source'])} vom {h['ts'][:16]}, von {h.get('author') or 'unbekannt'}{an(h)}, "
                        f"Betreff: {h['title']}\n{h['text']}" for i, h in enumerate(hits))
     return (f"Heute ist {WOCHENTAG[d.weekday()]}, {d.strftime('%d.%m.%Y')}.\n"
             "Beantworte die Frage ausschliesslich anhand der Quellen. Belege jede Aussage mit der Quellennummer, "
-            "z.B. [1] oder [2]. Wenn die Quellen die Antwort nicht enthalten, sage das.\n\n"
-            f"Quellen:\n{ctx}\n\nFrage: {question}\nAntworte kurz, in hoechstens 3 Saetzen.\nAntwort:")
+            "z.B. [1] oder [2]. Steht die Antwort nicht in den Quellen, schreibe nur: «Dazu habe ich in den Quellen nichts "
+            "gefunden.» Rate nicht und verneine nichts, was die Quellen nicht ausdruecklich verneinen.\n\n"
+            f"Quellen:\n{ctx}\n\nFrage: {question}\n"
+            "Beantworte genau diese Frage – vollstaendig, aber ohne Zusatzinformationen, die nicht gefragt sind.\nAntwort:")

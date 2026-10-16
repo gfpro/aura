@@ -7,6 +7,11 @@
 # v49: Auto-Abgleich wird verworfen, solange ein Workflow laeuft oder wartet (verfaelschte Laufzeiten).
 # v65: Folgefragen (Gespraechsgedaechtnis ueber die letzten 3 Fragen).
 # v67: Folgefrage nur per Knopf «Bezug zur letzten Frage» (follow=True); Worterkennung nur mit followup_auto.
+# v105: Bester Treffer mit Nachbarstuecken (nachbarn_top, Standard 1); Vorgeschichte-Hinweis nur noch bei Ablauf-Fragen.
+# v101: Filter ueber Retriever.plan (Person/Quelle als Bonus).
+# v99: Anhang nur, wenn gemeint; Listenmodus nur mit der aktuellen Frage und nicht bei Auftraegen.
+# v98: Frage nennt Anhang/Dokument/Datei -> nur der Anhang geht ans Modell.
+# v97: Anhaenge im Chat (job_anhang, job_anhang_leeren): nur im Speicher, nie in aura.db; gelten bis «⌂» (neuer Chat).
 # v87: OneNote (job_onenote_tree = Abschnittsbaum; alte Seitenversionen/abgewaehlte Abschnitte werden entfernt).
 # v36: Workflow-Pakete, Neustart ab Schritt (job_workflow start_at).
 # v73: zitierter Mailverlauf wird durchsucht (nur Absaetze, die in keiner anderen Mail stehen); einmalige Nachbearbeitung
@@ -27,6 +32,9 @@ FOLLOW_REF = re.compile(r"\b(dazu|davon|dafür|dafuer|dagegen|damit|darin|daran|
                         r"er|sie|ihm|ihn|ihr|ihre[nrms]?|ihnen|das|es)\b", re.I)
 FOLLOW_START = re.compile(r"^\s*(und|aber|also|mehr|genauer|warum|wieso|weshalb|seit wann|bis wann|und was|was noch)\b", re.I)
 CHRONO = re.compile(r"\b(ablauf|verlauf|chronolog\w*|der reihe nach|von anfang an|wie hat sich|entwicklung)\b", re.I)
+ANH_REF = re.compile(r"\b(anhang\w*|angeh[äa]ngt\w*|dokument\w*|datei\w*|pdf|beilage\w*)\b", re.I)   # v98
+SRC_REF = re.compile(r"\b((?:e-?)?mails?\w*|termin\w*|kalender\w*|sitzung\w*|meeting\w*|verlauf\w*|onenote|confluence)\b", re.I)  # v99
+TASK = re.compile(r"^\s*(erstell\w*|schreib\w*|formulier\w*|generier\w*|entwirf|entwerfe|nimm|mach\w*|verfass\w*|liste? .* auf)\b", re.I)  # v99
 DEADLINE = re.compile(r"\b(frist\w*|deadline|bis wann|sp[äa]testens|f[äa]llig\w*|eingabeschluss|termin f[üu]r)\b", re.I)
 
 def keep_awake(on):
@@ -43,6 +51,7 @@ class Worker(threading.Thread):
         self.embedder = None; self.retriever = Retriever(); self.backends = {}
         self.pending = None; self.auto_runs = 0                      # v23
         self.chat = None                                              # v65: {'qs': [...], 'hits': [...], 't': Zeit}
+        self.anhang = []                                              # v97: [{name, path, text, chunks:[(text, vec)]}]
 
     # ---- Schnittstelle fuer die Oberflaeche
     def submit(self, name, *args):
@@ -426,10 +435,13 @@ class Worker(threading.Thread):
         if prev:                                                         # Suche mit dem bisherigen Thema
             question = " ".join(prev[-2:] + [asked]); self.progress(f"Folgefrage zu: {prev[-1][:60]}")
         # ---- Listenmodus ZUERST: ohne Embedding, ohne Filterlogik, ohne Sprachmodell (v18b)
+        # v99: Anhang nur, wenn die Frage ihn meint oder keine andere Quelle nennt («Mails», «Termine» -> ohne Anhang)
+        use_anh = bool(self.anhang) and (bool(ANH_REF.search(asked)) or not SRC_REF.search(asked))
         who = self.retriever.author_items(self.conn, question)
-        lst = listmode.calendar_list(self.conn, question, who[0] if who else None) \
-            or listmode.next_events(self.conn, question) or listmode.recent_mails(self.conn, question) \
-            or listmode.web_list(self.conn, question)
+        # v99: Listenmodus nur mit der aktuellen Frage (nicht mit der Vorfrage verknuepft) und nie bei Auftraegen («Erstelle …»)
+        lst = None if use_anh or TASK.search(asked) else listmode.calendar_list(self.conn, asked, who[0] if who else None) \
+            or listmode.next_events(self.conn, asked) or listmode.recent_mails(self.conn, asked) \
+            or listmode.web_list(self.conn, asked)
         if lst:
             self.emit("answer_start", asked, "liste", ref); self.emit("token", lst[0])
             self.emit("sources", lst[1], {"search": time.perf_counter() - t_start, "total": time.perf_counter() - t_start,
@@ -443,9 +455,8 @@ class Worker(threading.Thread):
         else:
             self.progress("Suche (nur BM25 - noch keine Vektoren) ..."); mode = "bm25"
         R, k = self.retriever, int(s["top_k"])
-        items = who[0] if who else None
-        it = R.intent(self.conn, question)
-        if it: items = R.filter_items(self.conn, it, items)
+        pl = {"who": None, "intent": None, "items": None, "boost": None} if use_anh else R.plan(self.conn, question)   # v101
+        who, it, items, boost = pl["who"], pl["intent"], pl["items"], pl["boost"]
         info = [f"Person {' '.join(who[1])}"] if who else []
         if it and it.get("range"): info.append(it["range"][2])
         if it and it.get("source"): info.append("nur Termine")
@@ -465,10 +476,12 @@ class Worker(threading.Thread):
             hits = R.item_hits(self.conn, items, k)                 # Liste nach Datum statt nach Relevanz
         else:
             rw = float(s.get("recency_weight", 0.01)) * (3 if it and it.get("recent") else 1)
-            hits = R.search(self.conn, question, qvec, k=k, mode=mode, items=items, prefer=R.facet(question),
+            hits = R.search(self.conn, question, qvec, k=k, mode=mode, items=items, prefer=R.facet(question), boost=boost,
                             recency=rw, half_days=int(s.get("recency_half_days", 180)),
                             quote_weight=float(s.get("zitat_gewicht", 0.8)))     # v73
             hits = self._drop_weak(hits, mode, s)
+            if hits and not DEADLINE.search(question) and int(s.get("nachbarn_top", 1)):   # v105: bester Treffer mit Nachbarn
+                self._add_neighbours(hits, int(s.get("nachbarn_top", 1)))
             if DEADLINE.search(question):
                 self._add_newer_in_thread(hits)
                 self._add_neighbours(hits, int(s.get("neighbour_hits", 2)))
@@ -479,6 +492,9 @@ class Worker(threading.Thread):
                 hits[:n] = sorted(hits[:n], key=lambda h: h["ts"], reverse=not CHRONO.search(asked))
             wh = self._wissen_hits(question, s)                          # v28: Wissenssammlungen, falls eingeschaltet
             if wh: hits = hits[:2] + wh + hits[2:]; self.progress(f"Wissen: {len(wh)} Stellen aus {', '.join(sorted({h['source'][7:] for h in wh}))}")
+        ah = self._anhang_hits(asked) if use_anh else []                  # v97: Anhang zuerst (v99: nur wenn gemeint)
+        if ah and ANH_REF.search(asked): hits = []                         # v98: Frage zum Anhang -> nur der Anhang
+        if ah: hits = ah + hits; self.progress(f"Anhang: {len(ah)} Stelle(n) aus {', '.join(sorted({h['title'] for h in ah}))}")
         if prev and self.chat and self.chat["hits"]:                     # v65: Quellen der letzten Antwort mitnehmen
             have = {h["item_id"] for h in hits}
             old = [h for h in self.chat["hits"] if h["item_id"] not in have][:int(s.get("followup_keep", 2))]
@@ -490,6 +506,9 @@ class Worker(threading.Thread):
         self.emit("answer_start", asked, mode, ref)
         t_search = time.perf_counter() - t_start
         be = self._llm(backend_id); be.settings = s; be.used = None; be.timing = None
+        if ah:                                                           # v97: Fragen zum Dokument brauchen mehr Platz
+            be.settings = dict(s, llm_max_new=max(int(s.get("llm_max_new", 250)), int(s.get("anhang_max_new", 600))),
+                               llm_top_k=max(int(s.get("llm_top_k", 4)), len(ah) + 2))
         t_gen = time.perf_counter()
         # Das Modell kennt weder Datum noch Uhrzeit -> mitgeben (sonst «heute» = Datum der Quelle)
         ctx_q = f"(Folgefrage. Vorherige Frage: {prev[-1]})\n" if prev else ""          # v65: nur die Frage, nie die Antwort
@@ -499,11 +518,12 @@ class Worker(threading.Thread):
             q_llm += ("\n(Die Quellen sind nach Datum sortiert, neueste zuerst. Werden mehrere Fristen genannt, gilt die "
                       "aus der neuesten Mail; ältere nur als verschoben erwähnen. Frist = Datum nach «spätestens», "
                       "«bis zum», «bis am». Ein Start- oder Einführungsdatum ist keine Frist.)")
-        elif backend_id != "extractive" and len(hits) > 1 and not (it and it.get("range")):
-            q_llm += ("\n(Die Quellen sind chronologisch sortiert, älteste zuerst. Erzähle den Ablauf in dieser Reihenfolge.)"
-                      if CHRONO.search(asked) else
-                      "\n(Die Quellen sind nach Datum sortiert, neueste zuerst. Beginne mit dem aktuellsten Stand, "
-                      "danach kurz die Vorgeschichte.)")
+        elif backend_id != "extractive" and len(hits) > 1 and not (it and it.get("range")) and CHRONO.search(asked):
+            q_llm += "\n(Die Quellen sind chronologisch sortiert, älteste zuerst. Erzähle den Ablauf in dieser Reihenfolge.)"
+        # v105: kein «danach kurz die Vorgeschichte» mehr bei Sachfragen – erzeugte Fuellabsaetze (Antwort-Test 16.10.)
+        if ah and backend_id != "extractive":
+            q_llm += ("\n(Die ersten Quellen stammen aus dem angehängten Dokument. Stütze dich vor allem darauf. "
+                      "Antworte so ausführlich, wie die Frage es verlangt – die Grenze von 4 Sätzen gilt hier nicht.)")
         lab = (dict((i, l) for i, l, _ in discover(MODELS)).get(backend_id, "") + " " + backend_id).lower()
         if backend_id != "extractive" and "qwen3" in lab and "instruct" not in lab:
             q_llm += " /no_think"        # Qwen3-Hybridmodelle (z.B. 8B): Denkteil abschalten, sonst frisst er llm_max_new
@@ -520,6 +540,52 @@ class Worker(threading.Thread):
         log.get().info(f"Antwort: {mode}, {len(hits)} Quellen, Modell {backend_id}, "
                        + ", ".join(f"{k} {v:.1f}" for k, v in tm.items() if isinstance(v, (int, float))))
         self.progress(f"Fertig ({mode}, {len(hits)} Quellen{', Folgefrage' if prev else ''})")
+
+    # ---- v97: Anhaenge im Chat (nur Speicher)
+    ANHANG_VOLL = 9000                                               # Zeichen gesamt: darunter geht der ganze Text ans Modell
+
+    def job_anhang(self, paths):
+        from pathlib import Path
+        from .workflow.nodes import read_file
+        emb = self._embedder(); use = emb.available()[0]
+        for p in paths:
+            name = Path(p).name
+            if any(a["path"] == p for a in self.anhang): continue
+            self.progress(f"Anhang: lese {name} ...")
+            try: text = re.sub(r"\n{3,}", "\n\n", read_file(p)).strip()
+            except Exception as e: self.progress(f"Anhang {name}: {e}"); continue
+            ch = make_chunks(text, f"{name}: ")
+            vecs = [None] * len(ch)
+            if use and ch:
+                emb.load()
+                for i, c in enumerate(ch):
+                    if self.cancel.is_set(): break
+                    vecs[i] = emb.passage(c)
+                    if i % 10 == 0: self.progress(f"Anhang {name}: {i + 1}/{len(ch)} Stücke", i + 1, len(ch))
+            self.anhang.append({"name": name, "path": p, "text": text, "chunks": list(zip(ch, vecs))})
+        self.emit("anhang", [{"name": a["name"], "zeichen": len(a["text"])} for a in self.anhang])
+        self.progress(f"Anhang bereit: {len(self.anhang)} Datei(en) – gilt nur für diesen Chat")
+
+    def job_anhang_leeren(self):
+        self.anhang = []; self.emit("anhang", [])
+
+    def _anhang_hits(self, question, k=4):
+        """Ganzer Text, wenn kurz; sonst die passendsten Stücke (Vektor + Wortübereinstimmung)."""
+        if not self.anhang: return []
+        hit = lambda a, t, sc: {"chunk_id": None, "item_id": None, "source": "anhang", "title": a["name"], "ts": "",
+                                "author": "", "text": t, "score": sc, "path": a["path"]}
+        if sum(len(a["text"]) for a in self.anhang) <= self.ANHANG_VOLL:
+            return [hit(a, a["text"], 1.0) for a in self.anhang]
+        emb = self._embedder(); qv = emb.query(question) if emb.available()[0] else None
+        words = {w for w in re.findall(r"\w{4,}", question.lower())}
+        sc = []
+        for a in self.anhang:
+            for t, v in a["chunks"]:
+                s = sum(x * y for x, y in zip(qv, v)) if qv is not None and v is not None else 0.0
+                s += 0.02 * sum(1 for w in words if w in t.lower())
+                sc.append((s, a, t))
+        sc.sort(key=lambda x: x[0], reverse=True)
+        return [hit(a, t, s) for s, a, t in sc[:k]]
 
     # ---- v28: Wissenssammlungen
     def _wissen(self):

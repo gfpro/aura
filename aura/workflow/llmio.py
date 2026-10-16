@@ -1,5 +1,7 @@
 # aura/workflow/llmio.py — Sprachmodell fuer Workflows: eigener Chat-Prompt, freie Antwort und erzwungenes JSON.
-# Version 20261015v89 (v89: Qwen3.5 – Denkblock immer aus, Vorspann-Schnappschuss fuer den rekurrenten Zustand;
+# Version 20261016v96 (v96: Auswahlfelder «bewerten» statt schreiben (System-One-Prinzip): das Modell darf nur
+#                     Tokens erlaubter Werte waehlen; Sicherheit je Feld ins Log und in statistik["unsicher"];
+#                     v89: Qwen3.5 – Denkblock immer aus, Vorspann-Schnappschuss fuer den rekurrenten Zustand;
 #                     v40: Feldgrenzen bis Satzende; v43: Vorspann mit Festplatten-Cache des KV-Caches;
 #                     v44: Kennzahlen ins Log logs\aura.log – Cache-Treffer, Einlesen, Schreiben je Feld, Geruest;
 #                     v44a2: Auswahlfelder mit «wann» enden, sobald ein erlaubter Wert steht – der Abgrenzungstext
@@ -154,6 +156,34 @@ def _unescape(v):
     try: return json.loads('"' + v.replace("\n", "\\n").replace("\t", "\\t") + '"')
     except Exception: return v.replace("\\n", "\n").replace('\\"', '"')
 
+AUSWAHL_BEWERTEN = True                                             # v96: Rueckfall: False
+UNSICHER_AB = 0.6                                                   # v96: darunter -> Hinweis (Pruefbericht)
+
+def _waehle(P, g, opts, cancelled):
+    """v96: Waehlt einen der erlaubten Werte Token fuer Token. Je Schritt sind nur Tokens erlaubt, die einen Wert
+    fortsetzen (Praefixbaum); dazu das Anfuehrungszeichen, wenn ein Wert schon vollstaendig ist. Kein Ruecksprung,
+    daher auch fuer Qwen3.5 (rekurrenter Zustand). Rueckgabe (wert, tokens, sicherheit); das letzte Token ist
+    NICHT im Cache (wie beim normalen Feldende). sicherheit = Produkt der Anteile des gewaehlten Tokens unter den
+    erlaubten (Softmax nur ueber die erlaubten)."""
+    seqs = [(o, P.encode(o)) for o in opts]
+    seen = set(); seqs = [(o, t) for o, t in seqs if t and not (tuple(t) in seen or seen.add(tuple(t)))]
+    q = P.encode('"'); q = q[0] if len(q) == 1 else None
+    out, conf = [], 1.0
+    while True:
+        if cancelled(): raise Cancelled()
+        k = len(out); live = [(o, t) for o, t in seqs if t[:k] == out]
+        done = [o for o, t in live if len(t) == k]
+        nxt = {t[k] for o, t in live if len(t) > k}
+        if not nxt: return done[0], out, conf                       # eindeutig fertig
+        cand = list(nxt) + ([q] if done and q is not None else [])
+        lg = [g.logits[c] for c in cand]; m = max(lg); ps = [math.exp(x - m) for x in lg]
+        j = ps.index(max(ps)); conf *= ps[j] / sum(ps)
+        if cand[j] == q and done: return done[0], out + [q], conf  # Wert endet hier
+        out.append(cand[j])
+        rest = [o for o, t in seqs if t[:len(out)] == out]
+        if len(rest) == 1: return rest[0], out, conf                # eindeutig: Rest ohne Rechnen (kommt mit dem Geruest)
+        g.accept(cand[j])
+
 def generate(be, system, user, max_new=400, temperature=0.0, penalty=1.05, on_text=None,
              progress=lambda *a: None, cancelled=lambda: False, think_off=False, vorspann=""):
     """Freie Antwort. Rueckgabe (text, statistik)."""
@@ -192,6 +222,7 @@ def structured(be, system, user, fields, temperature=0.0, penalty=1.05, on_field
     reserve = sum(lim) + 12 * len(fields)
     g = Gen(P, ids, progress, cancelled, reserve)
     res, t0, ext, cut = {}, time.perf_counter(), [], []
+    felder_sicher, unsicher = [], []                                  # v96
     felder, feed_s = [], 0.0                                            # v44: Zeit je Feld und fuer das Geruest
     END = re.compile(r"[.!?…)»]\s*$")
     for i, name in enumerate(names):
@@ -199,9 +230,17 @@ def structured(be, system, user, fields, temperature=0.0, penalty=1.05, on_field
         out, closed, val, at_end = [], False, "", False; tf = time.perf_counter()
         hard = lim[i] * 2 if fields[i].get("verlaengern", True) else lim[i]
         opts = sorted(fields[i]["auswahl"], key=len, reverse=True) if fields[i].get("_wann") else None
+        bew = None                                                      # v96: Auswahl bewerten
+        if AUSWAHL_BEWERTEN and fields[i].get("auswahl") and not fields[i].get("auswahl_frei"):
+            bew = [a.get("wert") if isinstance(a, dict) else str(a) for a in fields[i]["auswahl"]]
+            if not any(a.strip().lower() == "unklar" for a in bew): bew.append("unklar")
         skip = fields[i].get("_skip_wenn")                              # v49: Beleg zu neutralem Wert -> «keiner»
         if skip and res.get(skip[0], "").strip().lower().rstrip(".") in skip[1]:
             val, closed, hard = "keiner", True, 0
+        elif bew:
+            val, out, sicher = _waehle(P, g, bew, cancelled); closed, hard = True, 0
+            felder_sicher.append([name, round(sicher, 2)])
+            if sicher < UNSICHER_AB: unsicher.append([name, val, round(sicher, 2)])
         for k in range(hard):
             if cancelled(): raise Cancelled()
             if k >= lim[i]:                                         # ueber der Grenze: nur bis zum Satzende
@@ -238,9 +277,11 @@ def structured(be, system, user, fields, temperature=0.0, penalty=1.05, on_field
     gen = time.perf_counter() - t0
     st = {"in": g.n_in, "cache": g.cached, "out": g.n_out, "prefill_s": g.t_prefill, "gen_s": gen,
           "geruest_s": round(feed_s, 1), "felder": felder,
-          "verlaengert": [n for n in ext if n not in cut], "gekuerzt": cut}
+          "verlaengert": [n for n in ext if n not in cut], "gekuerzt": cut,
+          "sicherheit": felder_sicher, "unsicher": unsicher}
     _diag_llm("llm_json", P, st)
     diag("llm_felder", felder=[f"{n}:{k}/{s}s" for n, k, s in felder])
+    if felder_sicher: diag("llm_auswahl", sicherheit=[f"{n}:{c}" for n, c in felder_sicher])
     return res, st
 
 def fallback_generate(be, settings, system, user, on_text, cancelled):
