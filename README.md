@@ -15,6 +15,7 @@ Stand: v64 (Oktober 2026) · Änderungen: [CHANGELOG.md](CHANGELOG.md)
 ## Funktionen
 
 **Fragen stellen**
+- Anschliessen von lokalen Quellen wie Outlook (Mail & Kalender), Edge-Verlauf, Dokumentenordner, Confluence-Seiten mit Leserechten, OneNote (und bald noch mehr...).
 - Suche nach Wörtern und nach Bedeutung (Vektoren), kombiniert.
 - Filter nach Person und Zeitraum aus der Frage heraus («Was schrieb X letzte Woche zum Budget?»).
 - Antworten mit Quellenangaben; ohne Sprachmodell zeigt AURA die besten Fundstellen.
