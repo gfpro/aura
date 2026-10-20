@@ -1,21 +1,24 @@
-# aura/workflow/quellen.py — Bausteine für AURA-Daten und Abläufe. Version 20261011v62
+# aura/workflow/quellen.py — Bausteine für AURA-Daten und Abläufe. Version 20261019v108
+# v108: Zeitraum «gestern» und «seit_letztem» (letzter erfolgreicher Lauf, recap.py); Bausteine edge/onenote/gruppieren/themen_bericht in recap.py.
 #   kalender   Termine aus dem abgeglichenen Outlook-Kalender in einem Zeitraum
 #   mails      Mails aus dem abgeglichenen Postfach (Zeitraum, optional Suchbegriff)
 #   fuer_jedes einen Baustein für jedes Element einer Liste ausführen (z.B. Mails zu jedem Termin); «item» = Element
 #   meldung    Ergebnis in AURA anzeigen (Ansicht «Ergebnisse» auf der Startseite)
 #   mail_an_mich  Ergebnis als Outlook-Mail an die eigene Adresse (Standard: nur Entwurf, nicht senden)
+# v106: mail_an_mich: nach Send() Senden/Empfangen anstossen und prüfen, ob die Mail noch im Postausgang hängt (Warnung im
+#       Prüfbericht); Entwurf meldet Ordner. mails: AURA-eigene Mails (Kopfzeile «… · AURA») werden mit dem Filter weggelassen.
 # v62: Form der Ausgabe wählbar: form = text | stichpunkte | tabelle (Tabellen nur bei «tabelle» oder ausdrücklich angegeben).
 # v61: Anzeige/Mail hängen die Tabellen früherer Schritte automatisch an (tabellen_auto); Mail als gestaltetes HTML (Titel, Aufzählung, fett).
 # v59: kalender/mails liefern «tabelle» (Zeilen zum Anzeigen); meldung/mail_an_mich zeigen Tabellen (AURA: Tabelle, Mail: HTML).
 # v58: «kurz» = knappe Fassung fürs Sprachmodell (spart Tokens: 8B hat nur 4096); mails ohne automatische Antworten/Newsletter.
 # v54: kalender liefert ueberschneidungen (Termine, die sich zeitlich überlappen) – berechnet, nicht vom Modell.
-# Gelesen wird nur aus aura.db (lokal); Outlook selbst wird hier nicht angesprochen.
+# Gelesen wird nur aus aura.db (lokal); Outlook selbst wird hier nicht angesprochen (ausser mail_an_mich).
 import re
 from datetime import datetime, timedelta
 from .nodes import node, NODES
 from .expr import as_text, resolve
 
-ZEITRAEUME = {"heute": "heute", "morgen": "morgen", "naechste_7": "nächste 7 Tage", "naechste_30": "nächste 30 Tage",
+ZEITRAEUME = {"gestern": "gestern", "seit_letztem": "seit letztem Lauf", "heute": "heute", "morgen": "morgen", "naechste_7": "nächste 7 Tage", "naechste_30": "nächste 30 Tage",
               "letzte_7": "letzte 7 Tage", "letzte_30": "letzte 30 Tage", "diese_woche": "diese Woche"}
 
 def bereich(z, now=None):
@@ -24,11 +27,15 @@ def bereich(z, now=None):
     z = (z or "heute").strip().lower().replace("ä", "ae").replace(" ", "_")
     z = {"naechste_7_tage": "naechste_7", "naechste_30_tage": "naechste_30", "letzte_7_tage": "letzte_7",
          "letzte_30_tage": "letzte_30"}.get(z, z)
-    a, b = {"heute": (t0, t0 + d), "morgen": (t0 + d, t0 + 2 * d), "naechste_7": (now, t0 + 8 * d),
+    a, b = {"gestern": (t0 - d, t0), "heute": (t0, t0 + d), "morgen": (t0 + d, t0 + 2 * d), "naechste_7": (now, t0 + 8 * d),
             "naechste_30": (now, t0 + 31 * d), "letzte_7": (t0 - 7 * d, now), "letzte_30": (t0 - 30 * d, now),
             "diese_woche": (t0 - t0.weekday() * d, t0 + (7 - t0.weekday()) * d)}.get(z, (t0, t0 + d))
     f = lambda x: x.strftime("%Y-%m-%d %H:%M")
     return f(a), f(b)
+
+def _zr(p, ctx, standard="heute"):
+    from .recap import zeitraum
+    return zeitraum(p, ctx, standard)
 
 def _dt(ts):
     """'2026-10-11 08:30' -> '11.10. 08:30'"""
@@ -55,7 +62,7 @@ def _erster_text(ctx, iid, n=500):
 @node("kalender", "Termine aus dem Outlook-Kalender (abgeglichen in AURA). Parameter: zeitraum (heute, morgen, naechste_7, "
                   "naechste_30, letzte_7, letzte_30, diese_woche), max (50)")
 def n_kalender(p, state, ctx):
-    von, bis = bereich(p.get("zeitraum")); warn = []; _stand(ctx, "outlook_calendar", warn)
+    von, bis = _zr(p, ctx); warn = []; _stand(ctx, "outlook_calendar", warn)
     rows = ctx.conn.execute("SELECT id, title, ts, location, author, recipients, meta FROM items WHERE source='outlook_calendar' "
                             "AND ts >= ? AND ts < ? ORDER BY ts LIMIT ?", (von, bis, int(p.get("max", 50)))).fetchall()
     import json
@@ -95,9 +102,11 @@ def n_kalender(p, state, ctx):
     return {"termine": termine, "text": text, "kurz": kurz, "tabelle": tabelle, "count": len(termine), "von": von, "bis": bis,
             "ueberschneidungen": "\n".join(ueb) or "keine", "anzahl_ueberschneidungen": len(ueb), "_warnungen": warn}
 
+AURA_KOPF = re.compile(r"\d\d\.\d\d\.\d{4} \d\d:\d\d · AURA")         # v106: Kopfzeile der Mails von mail_an_mich
+
 @node("mails", "Mails aus dem Postfach (abgeglichen in AURA). Parameter: zeitraum, suche (optional), max (10)")
 def n_mails(p, state, ctx):
-    von, bis = bereich(p.get("zeitraum", "letzte_7")); n = int(p.get("max", 10)); q = as_text(p.get("suche", "")).strip()
+    von, bis = _zr(p, ctx, "letzte_7"); n = int(p.get("max", 10)); q = as_text(p.get("suche", "")).strip()
     warn = []; _stand(ctx, "outlook_mail", warn); mails = []
     filtern = str(p.get("filter", True)).lower() not in ("false", "nein", "0")      # v58
     roh = n * 3 if filtern else n
@@ -116,7 +125,8 @@ def n_mails(p, state, ctx):
         rx = re.compile(r"^(automatische antwort|abwesenheit|out of office|automatic reply|autoreply|réponse automatique)|"
                         r"newsletter|digest|no-?reply|noreply|unsubscribe|abmelden", re.I)
         alt = mails; mails = [m for m in alt if not (rx.search(m["betreff"]) or rx.search(m["von"]) or "abwesend" in m["text"][:300].lower()
-                                                    and m["betreff"].lower().startswith(("automatische", "abwesen")))][:n]
+                                                    and m["betreff"].lower().startswith(("automatische", "abwesen"))
+                                                    or AURA_KOPF.search(m["text"][:400]))][:n]       # v106: eigene AURA-Mails
         weg = len(alt) - len(mails)
     text = "\n".join(f"• {_dt(m['datum'])} · {m['von']} · {m['betreff']}\n  {m['text'][:400]}" for m in mails) or "Keine passenden Mails."
     kurz = "\n".join(f"{_dt(m['datum'])} {m['von'][:30]}: {m['betreff'][:80]} – "
@@ -206,16 +216,54 @@ def _html(text, tabellen, titel=""):
         out.append("</table>")
     return "".join(out) + "<p style='color:#6B7280;font-size:9pt'>— erstellt von AURA (lokal)</p></div>"
 
+def _im_postausgang(ns, betreff):
+    """v106: Anzahl Mails mit diesem Betreff im Postausgang. Liest per Tabelle (GetTable), ohne die Elemente zu öffnen –
+    ein geöffnetes Element im Postausgang würde Outlook sonst am Senden hindern."""
+    try:
+        ob = ns.GetDefaultFolder(4)                                  # 4 = olFolderOutbox
+        tb = ob.GetTable("[Subject] = '" + betreff.replace("'", "''") + "'")
+        n = 0
+        while not tb.EndOfTable: tb.GetNextRow(); n += 1
+        return n
+    except Exception:
+        return -1
+
 @node("mail_an_mich", "Ergebnis als Outlook-Mail an die eigene Adresse. Parameter: betreff, text, senden (false = nur Entwurf)")
 def n_mail_an_mich(p, state, ctx):
     """Nur an die eigene Adresse; Standard: Entwurf im Ordner «Entwürfe» (nichts verlässt den Rechner ohne eigenen Klick)."""
+    import time
     from ..connectors.base import outlook_namespace
     ns = outlook_namespace(); app = ns.Application; m = app.CreateItem(0)
     try: adr = ns.CurrentUser.AddressEntry.GetExchangeUser().PrimarySmtpAddress
     except Exception: adr = ns.CurrentUser.Name
-    m.To = adr; m.Subject = as_text(p.get("betreff") or state.get("workflow", {}).get("name", "AURA"))
-    m.HTMLBody = _html(_form_text(as_text(p.get("text", "")), p), _tabellen(p, state), m.Subject)   # v61/v62: gestaltetes HTML
-    senden = bool(p.get("senden", False)) and str(p.get("senden")).lower() not in ("false", "nein", "0")
-    if senden: m.Send(); ctx.progress(f"Mail an {adr} gesendet")
-    else: m.Save(); ctx.progress(f"Mail-Entwurf an {adr} in «Entwürfe» gespeichert")
-    return {"an": adr, "gesendet": senden}
+    betreff = as_text(p.get("betreff") or state.get("workflow", {}).get("name", "AURA"))
+    m.To = adr; m.Subject = betreff
+    m.HTMLBody = _html(_form_text(as_text(p.get("text", "")), p), _tabellen(p, state), betreff)   # v61/v62: gestaltetes HTML
+    sv = p.get("senden", False)
+    senden = (sv is True) or str(sv).strip().lower() in ("true", "ja", "1", "ein", "on")
+    warn = []; out = {"an": adr, "gesendet": False, "senden_parameter": str(sv)}
+    if senden:
+        m.Send(); m = None                                           # Element nach Send() nicht mehr anfassen
+        try: ns.SendAndReceive(False)                                # v106: Senden anstossen (sonst bleibt sie evtl. liegen)
+        except Exception: pass
+        n = -1
+        for _ in range(10):                                          # bis 10 s warten, bis der Postausgang leer ist
+            time.sleep(1); n = _im_postausgang(ns, betreff)
+            if n == 0: break
+        if n == 0:
+            out["gesendet"] = True; ctx.progress(f"Mail an {adr} gesendet")
+        elif n > 0:
+            warn.append(f"Mail «{betreff}» hängt nach 10 s noch im Postausgang – Outlook sendet sie evtl. erst später "
+                        f"oder gar nicht. Prüfen: Postausgang in Outlook; in AURA Postausgang/Entwürfe nicht als Mailordner wählen.")
+            ctx.progress("Mail im Postausgang – noch nicht gesendet")
+        else:
+            out["gesendet"] = True; warn.append("Versand angestossen, Postausgang konnte nicht geprüft werden.")
+    else:
+        m.Save()
+        try: ordner = m.Parent.Name
+        except Exception: ordner = "?"
+        out["ordner"] = ordner; ctx.progress(f"Mail-Entwurf an {adr} in «{ordner}» gespeichert")
+    out["_warnungen"] = warn
+    return out
+
+from . import recap  # noqa: E402,F401  v108: Bausteine registrieren

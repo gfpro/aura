@@ -1,5 +1,7 @@
-# aura/log.py — Ablauf-Log in logs\aura.log (max. 3 x 1 MB, aelteste wird ueberschrieben). Version 20261010v44
+# aura/log.py — Ablauf-Log in logs\aura.log (max. 3 x 1 MB, aelteste wird ueberschrieben). Version 20261019v107
 # Enthaelt KEINE Fragetexte und keine Mail-Inhalte, nur Ablauf, Zeiten, Kennzahlen und Fehler mit Zeilennummer.
+# v107: mem() schreibt Fehler ins Log statt sie zu verschlucken; Handle-Typen explizit.
+# v106: mem() schreibt Speicherwerte: DIAG mem phase=... ws_gb commit_gb peak_gb ram_pct sys_commit_gb sys_limit_gb
 # v44: Ort logs\ (vorher data\, wird beim Start einmalig verschoben); diag() schreibt Kennzahlen als eine Zeile:
 #      2026-10-10 11:02:13 INFO    [worker] DIAG llm_json modell=Qwen3-4B eingabe=9136 cache=3714 prefill_s=394 ...
 import logging, logging.handlers, sys, threading
@@ -44,3 +46,32 @@ def diag(was, **werte):
     """v44: Kennzahlen als eine Zeile «DIAG <was> k=v k=v», leicht zu vergleichen. Darf nie einen Fehler werfen."""
     try: get().info("DIAG %s %s", was, " ".join(f"{k}={_fmt(v)}" for k, v in werte.items()))
     except Exception: pass
+
+def _mem():
+    """v106: Speicher dieses Prozesses und des Systems (Windows, nur ctypes). Leeres dict, wenn nicht verfuegbar."""
+    import ctypes, ctypes.wintypes as w
+    class PMC(ctypes.Structure):
+        _fields_ = [("cb", w.DWORD), ("PageFaultCount", w.DWORD)] + [(n, ctypes.c_size_t) for n in (
+            "PeakWorkingSetSize", "WorkingSetSize", "QuotaPeakPagedPoolUsage", "QuotaPagedPoolUsage",
+            "QuotaPeakNonPagedPoolUsage", "QuotaNonPagedPoolUsage", "PagefileUsage", "PeakPagefileUsage", "PrivateUsage")]
+    class MS(ctypes.Structure):
+        _fields_ = [("dwLength", w.DWORD), ("dwMemoryLoad", w.DWORD)] + [(n, ctypes.c_ulonglong) for n in (
+            "ullTotalPhys", "ullAvailPhys", "ullTotalPageFile", "ullAvailPageFile", "ullTotalVirtual", "ullAvailVirtual", "ullAvailExtendedVirtual")]
+    k = ctypes.WinDLL("kernel32", use_last_error=True)
+    k.GetCurrentProcess.restype = w.HANDLE
+    k.K32GetProcessMemoryInfo.argtypes = [w.HANDLE, ctypes.POINTER(PMC), w.DWORD]; k.K32GetProcessMemoryInfo.restype = w.BOOL
+    k.GlobalMemoryStatusEx.argtypes = [ctypes.POINTER(MS)]; k.GlobalMemoryStatusEx.restype = w.BOOL
+    pm = PMC(); pm.cb = ctypes.sizeof(pm)
+    if not k.K32GetProcessMemoryInfo(k.GetCurrentProcess(), ctypes.byref(pm), pm.cb):
+        return dict(fehler=f"GetProcessMemoryInfo_{ctypes.get_last_error()}")
+    ms = MS(); ms.dwLength = ctypes.sizeof(ms); k.GlobalMemoryStatusEx(ctypes.byref(ms))
+    g = lambda b: round(b / 1e9, 2)
+    return dict(ws_gb=g(pm.WorkingSetSize), commit_gb=g(pm.PrivateUsage), peak_gb=g(pm.PeakWorkingSetSize),
+                ram_pct=ms.dwMemoryLoad, ram_frei_gb=g(ms.ullAvailPhys),
+                sys_commit_gb=g(ms.ullTotalPageFile - ms.ullAvailPageFile), sys_limit_gb=g(ms.ullTotalPageFile))
+
+def mem(phase, **extra):
+    """v106: eine Zeile «DIAG mem phase=... ws_gb=... commit_gb=...». Darf nie einen Fehler werfen."""
+    try: werte = _mem()
+    except Exception as e: werte = dict(fehler=f"{type(e).__name__}:{e}")
+    diag("mem", phase=phase, **werte, **extra)

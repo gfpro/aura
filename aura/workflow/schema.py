@@ -1,4 +1,4 @@
-# aura/workflow/schema.py — Beschreibung der Bausteine für den Schritt-Editor (Reiter «Schritte»). Version 20261011v62
+# aura/workflow/schema.py — Beschreibung der Bausteine für den Schritt-Editor (Reiter «Schritte»). Version 20261019v108
 #
 # Jeder Baustein (Schritt-Typ) beschreibt hier seine Felder in Alltagssprache. Die Oberfläche baut daraus das Formular;
 # ein neuer Baustein braucht nur einen Eintrag hier, keine Änderung an der Oberfläche.
@@ -41,7 +41,7 @@ BAUSTEINE = {
         "titel": "Termine holen", "gruppe": "Holen", "id": "termine",
         "beschreibung": "Holt Termine aus dem Outlook-Kalender (so wie in AURA abgeglichen).",
         "felder": [
-            {"key": "zeitraum", "label": "Zeitraum", "typ": "auswahl", "optionen": ["heute", "morgen", "naechste_7", "naechste_30", "letzte_7", "letzte_30", "diese_woche"], "standard": "heute"},
+            {"key": "zeitraum", "label": "Zeitraum", "typ": "auswahl", "optionen": ["gestern", "seit_letztem", "heute", "morgen", "naechste_7", "naechste_30", "letzte_7", "letzte_30", "diese_woche"], "standard": "heute"},
             {"key": "max", "label": "Höchstens Termine", "typ": "zahl", "standard": 50}],
         "ergebnis": [("text", "die Termine als Liste"), ("termine", "die Termine einzeln (für «Für jedes»)"),
                      ("kurz", "knapp, fürs Sprachmodell"), ("ueberschneidungen", "Termine, die sich überlappen"), ("count", "Anzahl")]},
@@ -49,13 +49,53 @@ BAUSTEINE = {
         "titel": "Mails holen", "gruppe": "Holen", "id": "mails",
         "beschreibung": "Holt Mails aus dem Postfach (so wie in AURA abgeglichen), optional passend zu einem Suchbegriff.",
         "felder": [
-            {"key": "zeitraum", "label": "Zeitraum", "typ": "auswahl", "optionen": ["heute", "morgen", "naechste_7", "naechste_30", "letzte_7", "letzte_30", "diese_woche"], "standard": "letzte_7"},
+            {"key": "zeitraum", "label": "Zeitraum", "typ": "auswahl", "optionen": ["gestern", "seit_letztem", "heute", "morgen", "naechste_7", "naechste_30", "letzte_7", "letzte_30", "diese_woche"], "standard": "letzte_7"},
             {"key": "suche", "label": "Suchbegriff", "typ": "text", "wert_einfuegen": True,
              "hilfe": "Optional. In «Für jedes» z.B. {{item.titel}} = Betreff des Termins."},
             {"key": "max", "label": "Höchstens Mails", "typ": "zahl", "standard": 10},
             {"key": "filter", "label": "Rauschen weglassen", "typ": "ja_nein", "standard": True,
              "hilfe": "Ohne automatische Antworten, Newsletter und Digests."}],
         "ergebnis": [("text", "die Mails als Liste"), ("kurz", "knapp, fürs Sprachmodell"), ("mails", "die Mails einzeln"), ("count", "Anzahl")]},
+    "edge": {
+        "titel": "Edge-Verlauf holen", "gruppe": "Holen", "id": "edge",
+        "beschreibung": "Besuchte Seiten und Suchbegriffe aus dem Edge-Verlauf (nur Titel und Adresse).",
+        "felder": [
+            {"key": "zeitraum", "label": "Zeitraum", "typ": "auswahl", "optionen": ["gestern", "seit_letztem", "heute", "letzte_7"], "standard": "gestern"},
+            {"key": "max", "label": "Höchstens Seiten", "typ": "zahl", "standard": 150}],
+        "ergebnis": [("text", "die Seiten als Liste"), ("seiten", "die Seiten einzeln"), ("count", "Anzahl")]},
+    "onenote": {
+        "titel": "OneNote-Seiten holen", "gruppe": "Holen", "id": "notizen",
+        "beschreibung": "OneNote-Seiten, die im Zeitraum geändert wurden (gewählte Abschnitte).",
+        "felder": [
+            {"key": "zeitraum", "label": "Zeitraum", "typ": "auswahl", "optionen": ["gestern", "seit_letztem", "heute", "letzte_7"], "standard": "gestern"},
+            {"key": "max", "label": "Höchstens Seiten", "typ": "zahl", "standard": 50}],
+        "ergebnis": [("text", "die Seiten als Liste"), ("seiten", "die Seiten einzeln"), ("count", "Anzahl")]},
+    "gruppieren": {
+        "titel": "Zu Themen gruppieren", "gruppe": "Verarbeiten", "id": "themen",
+        "beschreibung": "Verknüpft Mails, Termine, Seiten und Notizen zu Themen – nach Regeln, ohne Sprachmodell. Jede Verknüpfung nennt ihren Grund.",
+        "felder": [
+            {"key": "mails", "label": "Mails", "typ": "text", "wert_einfuegen": True, "hilfe": "z.B. {{mails.mails}}"},
+            {"key": "termine", "label": "Termine", "typ": "text", "wert_einfuegen": True, "hilfe": "z.B. {{termine.termine}}"},
+            {"key": "seiten", "label": "Edge-Seiten", "typ": "text", "wert_einfuegen": True, "hilfe": "z.B. {{edge.seiten}}"},
+            {"key": "notizen", "label": "OneNote-Seiten", "typ": "text", "wert_einfuegen": True, "hilfe": "z.B. {{notizen.seiten}}"},
+            {"key": "min_woerter", "label": "Gemeinsame Wörter nötig", "typ": "zahl", "standard": 2},
+            {"key": "fenster_h", "label": "Zeitfenster Edge (Stunden)", "typ": "zahl", "standard": 2},
+            {"key": "max_anteil", "label": "Wort zu häufig ab Anteil", "typ": "zahl", "standard": 0.1,
+             "hilfe": "Wörter, die in mehr als diesem Anteil der Elemente vorkommen (z.B. «RSIT»), verknüpfen nichts."},
+            {"key": "max_gruppen", "label": "Höchstens Themen", "typ": "zahl", "standard": 15}],
+        "ergebnis": [("gruppen", "die Themen einzeln (für «Für jedes»)"), ("einzeln", "nicht zugeordnete Elemente"),
+                     ("text", "Übersicht"), ("count", "Anzahl Themen")]},
+    "themen_bericht": {
+        "titel": "Themen-Bericht speichern", "gruppe": "Ausgeben", "id": "bericht",
+        "beschreibung": "Schreibt Themen, Zusammenfassungen und Termine von heute als Markdown in einen festen Ordner und zeigt sie in der Karte «Recap».",
+        "felder": [
+            {"key": "gruppen", "label": "Themen", "typ": "text", "pflicht": True, "wert_einfuegen": True, "standard": "{{themen}}"},
+            {"key": "zusammenfassungen", "label": "Zusammenfassungen", "typ": "text", "wert_einfuegen": True, "hilfe": "z.B. {{jedes.ergebnisse}}"},
+            {"key": "heute", "label": "Termine heute", "typ": "text", "wert_einfuegen": True, "hilfe": "z.B. {{heute.termine}}"},
+            {"key": "von", "label": "Von", "typ": "text", "wert_einfuegen": True},
+            {"key": "bis", "label": "Bis", "typ": "text", "wert_einfuegen": True},
+            {"key": "ordner", "label": "Ordner", "typ": "text", "standard": "recap", "hilfe": "Relativ = im AURA-Ordner, z.B. C:\\aura\\recap"}],
+        "ergebnis": [("path", "Pfad der Datei"), ("text", "der Bericht")]},
     "fuer_jedes": {
         "titel": "Für jedes …", "gruppe": "Verarbeiten", "id": "jedes",
         "beschreibung": "Führt einen Baustein für jedes Element einer Liste aus, z.B. «Mails holen» für jeden Termin.",

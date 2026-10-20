@@ -7,6 +7,7 @@
 # v49: Auto-Abgleich wird verworfen, solange ein Workflow laeuft oder wartet (verfaelschte Laufzeiten).
 # v65: Folgefragen (Gespraechsgedaechtnis ueber die letzten 3 Fragen).
 # v67: Folgefrage nur per Knopf «Bezug zur letzten Frage» (follow=True); Worterkennung nur mit followup_auto.
+# v106: Speicher-Messung (log.mem) vor/nach jedem Auftrag und alle 500 Vektoren beim Einbetten.
 # v105: Bester Treffer mit Nachbarstuecken (nachbarn_top, Standard 1); Vorgeschichte-Hinweis nur noch bei Ablauf-Fragen.
 # v101: Filter ueber Retriever.plan (Person/Quelle als Bonus).
 # v99: Anhang nur, wenn gemeint; Listenmodus nur mit der aktuellen Frage und nicht bei Auftraegen.
@@ -74,7 +75,7 @@ class Worker(threading.Thread):
         while True:
             name, args = self.jobs.get(); self.current = name
             self.emit("busy", True, name)
-            t0 = time.perf_counter(); log.get().info(f"Job {name} gestartet")
+            t0 = time.perf_counter(); log.get().info(f"Job {name} gestartet"); log.mem(name + ":start")
             try:
                 getattr(self, "job_" + name)(*args)
                 log.get().info(f"Job {name} fertig in {time.perf_counter() - t0:.1f} s")
@@ -82,7 +83,7 @@ class Worker(threading.Thread):
                 log.get().exception(f"Job {name} fehlgeschlagen")
                 self.emit("error", f"{type(e).__name__}: {e}", traceback.format_exc())
             finally:
-                self.current = None; self.emit("busy", False, name); self.emit("stats", db.stats(self.conn))
+                log.mem(name + ":ende"); self.current = None; self.emit("busy", False, name); self.emit("stats", db.stats(self.conn))
 
     def progress(self, text, done=None, total=None): self.emit("progress", text, done, total)
 
@@ -314,7 +315,7 @@ class Worker(threading.Thread):
         todo = self.conn.execute("SELECT c.id, c.text FROM chunks c JOIN items i ON i.id = c.item_id "
                                  "WHERE c.vec IS NULL AND c.id > ? ORDER BY i.ts DESC", (min_chunk or 0,)).fetchall()
         if not todo: self.progress("Alle Textstuecke haben bereits einen Vektor."); return
-        self.progress("Lade Embedding-Modell ..."); emb.load()
+        self.progress("Lade Embedding-Modell ..."); emb.load(); log.mem("embed:e5_geladen")
         total = self.conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]; have = total - len(todo)
         if not keep_awake(True): self.progress("Hinweis: Standby-Schutz konnte nicht gesetzt werden")
         t0 = time.perf_counter(); n = 0; resets = emb.resets
@@ -325,6 +326,7 @@ class Worker(threading.Thread):
                 n += 1
                 if emb.resets > resets:
                     resets = emb.resets; self.progress(f"GPU war weg (z.B. Standby) und wurde neu geladen: {emb.last_reset}")
+                if n % 500 == 0: log.mem("embed", n=n)              # v106
                 if n % 25 == 0:
                     keep_awake(True)                              # Leerlauf-Zaehler regelmaessig zuruecksetzen
                     self.conn.commit(); el = time.perf_counter() - t0; rest = el / n * (len(todo) - n)
@@ -357,12 +359,13 @@ class Worker(threading.Thread):
 
     def job_load_llm(self, backend_id):
         try:
-            self._llm(backend_id)
+            self._llm(backend_id); log.mem("llm_geladen")
             emb = self._embedder()
             if emb.available()[0]:
                 self.progress("Bereite Suche vor (Embedding-Modell, Vektoren) ...")
                 emb.query("Vorbereitung")                       # laedt e5 auf die GPU
                 self.retriever.vector(self.conn, [0.0] * 1024, n=1)   # laedt alle Vektoren in den Speicher
+                log.mem("vektoren_geladen")
                 self.progress("Bereit")
         finally: self._llm_state()
 

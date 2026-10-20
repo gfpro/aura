@@ -1,0 +1,92 @@
+{
+ "name": "Recap täglich",
+ "description": "Rückblick seit dem letzten Lauf (Mails, Termine, Edge, OneNote) zu Themen gruppiert, plus Termine von heute. Ablage: C:\\aura\\recap",
+ "zeitplan": {
+  "tage": "werktags",
+  "zeit": "07:30"
+ },
+ "inputs": [],
+ "steps": [
+  {
+   "id": "mails",
+   "type": "mails",
+   "label": "Mails seit letztem Recap",
+   "zeitraum": "seit_letztem",
+   "max": 80,
+   "filter": true
+  },
+  {
+   "id": "termine",
+   "type": "kalender",
+   "label": "Termine seit letztem Recap",
+   "zeitraum": "seit_letztem",
+   "max": 50
+  },
+  {
+   "id": "edge",
+   "type": "edge",
+   "label": "Edge seit letztem Recap",
+   "zeitraum": "seit_letztem",
+   "max": 150
+  },
+  {
+   "id": "notizen",
+   "type": "onenote",
+   "label": "OneNote seit letztem Recap",
+   "zeitraum": "seit_letztem",
+   "max": 50
+  },
+  {
+   "id": "heute",
+   "type": "kalender",
+   "label": "Termine heute",
+   "zeitraum": "heute",
+   "max": 30
+  },
+  {
+   "id": "themen",
+   "type": "gruppieren",
+   "label": "Zu Themen gruppieren",
+   "mails": "{{mails.mails}}",
+   "termine": "{{termine.termine}}",
+   "seiten": "{{edge.seiten}}",
+   "notizen": "{{notizen.seiten}}",
+   "min_woerter": 2,
+   "fenster_h": 2,
+   "max_anteil": 0.1,
+   "max_gruppen": 15
+  },
+  {
+   "id": "jedes",
+   "type": "fuer_jedes",
+   "label": "Je Thema zusammenfassen",
+   "liste": "{{themen.gruppen}}",
+   "max": 15,
+   "schritt": {
+    "type": "llm",
+    "max_new": 160,
+    "temperature": 0,
+    "prompt": "Fasse die folgenden zusammengehörigen Einträge in höchstens 3 Sätzen auf Deutsch zusammen. Schreibe nur, was dasteht; nichts ergänzen, nichts vermuten. Nenne Entscheide, Fristen und nächste Schritte, falls genannt.\n\n{{item.text}}"
+   }
+  },
+  {
+   "id": "bericht",
+   "type": "themen_bericht",
+   "label": "Recap speichern",
+   "gruppen": "{{themen}}",
+   "zusammenfassungen": "{{jedes.ergebnisse}}",
+   "heute": "{{heute.termine}}",
+   "von": "{{termine.von}}",
+   "bis": "{{termine.bis}}",
+   "ordner": "recap"
+  },
+  {
+   "id": "anzeige",
+   "type": "meldung",
+   "label": "Recap anzeigen",
+   "titel": "Recap",
+   "text": "{{bericht.kurz}}",
+   "form": "stichpunkte"
+  }
+ ]
+}

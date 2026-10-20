@@ -1,4 +1,4 @@
-# aura/hilfe.py — Infotexte (Tooltips) fuer alle Fenster. Version 20261015v90 (v90: Übersicht, Expertenansicht; v82: «Beim Start Widgets zeigen»; v81: Widgets-Ansicht; v80: «▶», Widgets; v79: «⌂», Ablaufband; v75: Position korrigiert (Reihenfolge withdraw/topmost/geometry/deiconify); v74: Tooltip vor dem Hauptfenster; v70: Text «8 Bit»; v68: Info-Leiste rechts; v60: Tooltip verschwindet beim Minimieren/Fensterwechsel, nicht mehr über anderen Programmen; v46: Slide-In, Vollansicht, Startfragen)
+# aura/hilfe.py — Infotexte (Tooltips) fuer alle Fenster. Version 20261020v109 (v109: Menügruppen, Widgets, Log öffnen; v90: Übersicht, Expertenansicht; v82: «Beim Start Widgets zeigen»; v81: Widgets-Ansicht; v80: «▶», Widgets; v79: «⌂», Ablaufband; v75: Position korrigiert (Reihenfolge withdraw/topmost/geometry/deiconify); v74: Tooltip vor dem Hauptfenster; v70: Text «8 Bit»; v68: Info-Leiste rechts; v60: Tooltip verschwindet beim Minimieren/Fensterwechsel, nicht mehr über anderen Programmen; v46: Slide-In, Vollansicht, Startfragen)
 # Alle Texte stehen hier an einem Ort. Zuordnung:
 #   auto(fenster, ctx)  - findet Knoepfe/Schalter/Haekchen anhand ihrer Beschriftung (TEXTE[ctx], dann TEXTE["*"])
 #   tip(widget, key)    - fester Text fuer Felder ohne Beschriftung (key beginnt mit "#") oder freier Text
@@ -32,6 +32,8 @@ TEXTE = {
         "Beim Start Widgets zeigen": "Ein: AURA öffnet beim Start die Widgets (▶). Aus: AURA öffnet mit den Fragen (⌂). Wirkt beim nächsten Start.",
         "⌂": "Zu den Fragen (Startseite mit Kacheln). Der Chatverlauf wird dabei geleert.",
         "▶": "Workflow-Ergebnisse: die angehefteten Widgets in voller Breite. «⌂» führt zurück zu den Fragen.",
+        "Ergebnisse": "Ergebnisse aller Workflows: neueste zuerst, mit Öffnen, Speichern und Laufordner.",
+        "Log öffnen": "Öffnet das Protokoll (Log) – nützlich bei Fehlermeldungen.",
         "Kontext": "Zeigt die Textstücke, die das Sprachmodell für diese Antwort gelesen hat. Hilfreich, wenn eine Antwort falsch wirkt: Stand die Information überhaupt drin?",
     },
     "quellen": {
@@ -66,8 +68,8 @@ TEXTE = {
         "Ordner öffnen": "Öffnet den Paketordner im Explorer (workflow.json, wissen, vorlagen, laeufe).",
         "Löschen": "Löscht den Workflow mit Wissen, Vorlagen und allen Läufen. Der Ordner wird nach «workflows\\_geloescht» verschoben und lässt sich von dort zurückholen.",
         "In Paket umwandeln": "Wandelt die alte Einzeldatei in ein Paket mit eigenem Wissen, Vorlagen und Läufen um. Einmalig nötig für Workflows aus Versionen vor v36.",
-        "☆ Als Widget": "Zeigt das Ergebnis des letzten Laufs als Widget unter «▶» (nur bei Ausgabe «Anzeige in AURA» sinnvoll).",
-        "★ Als Widget": "Ist als Widget unter «▶» angeheftet. Klick entfernt das Widget wieder (der Workflow bleibt).",
+        "☆ Als Widget": "Zeigt das Ergebnis des letzten Laufs als Widget unter «Workflows › Widgets» (nur bei Ausgabe «Anzeige in AURA» sinnvoll).",
+        "★ Als Widget": "Ist als Widget unter «Workflows › Widgets» angeheftet. Klick entfernt das Widget wieder (der Workflow bleibt).",
         "Ablauf": "Schritte des Workflows als Band mit dem Ergebnis des letzten Laufs. Klick auf einen Schritt zeigt sein Ergebnis.",
         "Ausführen": "Workflow mit eigenen Unterlagen starten und den Fortschritt verfolgen.",
         "Wissen": "Fachdokumente, die nur dieser Workflow verwendet.",
@@ -105,7 +107,7 @@ TEXTE = {
         "#frage": "Frage in normaler Sprache stellen, z.B. «Welche Termine habe ich nächste Woche?» oder «Was schrieb X zum Budget?».\nEnter = senden, Shift+Enter = neue Zeile.",
         "#beispiel": "Klick stellt die Frage sofort.\nBei «XY» wird sie nur ins Eingabefeld übernommen: «XY» ist markiert und wird beim Tippen durch dein Thema ersetzt.",
         "#version": "Installierte Version von AURA. Klick öffnet das Protokoll (Log) – nützlich bei Fehlermeldungen.",
-        "#fortschritt": "Was AURA gerade im Hintergrund tut.",
+        "#fortschritt": "Was AURA gerade im Hintergrund tut. Balken: blau = läuft, grün = fertig, rot = Fehler (Details: Einstellungen › Log öffnen).",
         "#zurueck": "Zurück zur vorherigen Ansicht bzw. zum Chat. Diese Ansicht bleibt im Hintergrund offen – ein laufender Workflow läuft weiter.",
         "#panel_zu": "Bereich schliessen (Esc). Ein laufender Abgleich geht im Hintergrund weiter.",
         "#w_name": "Name, wie er in Listen erscheint. Der Ordnername bleibt unverändert.",

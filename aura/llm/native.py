@@ -1,4 +1,4 @@
-# aura/llm/native.py — Hugging-Face-Sprachmodelle auf der nativen GPU-Engine. Version 20261016v104 (v104: System-Prompt ohne Satzgrenze – nur die Frage beantworten, keine Fuellsaetze; v88: Qwen3.5 ueber qwen35.py, Denkmodus aus; v86: gemm fp16; v85: KV-Cache fp16, Einstellung llm_kv16; v84: splitr im Log; v83: Split-K-Varianten im Log; v28: Kontextlaenge aus Einstellungen; v44: Kernel-Wahl ins Log; v70: 8-Bit-Gewichte, Einstellung llm_int8;
+# aura/llm/native.py — Hugging-Face-Sprachmodelle auf der nativen GPU-Engine. Version 20261019v106 (v106: Speicher nach Engine-Aufbau ins Log; v104: System-Prompt ohne Satzgrenze – nur die Frage beantworten, keine Fuellsaetze; v88: Qwen3.5 ueber qwen35.py, Denkmodus aus; v86: gemm fp16; v85: KV-Cache fp16, Einstellung llm_kv16; v84: splitr im Log; v83: Split-K-Varianten im Log; v28: Kontextlaenge aus Einstellungen; v44: Kernel-Wahl ins Log; v70: 8-Bit-Gewichte, Einstellung llm_int8;
 #   v72: Schweizer Rechtschreibung (ß -> ss) und ohne Vorspann «Antwort:»)
 # Unterstuetzt: Qwen3ForCausalLM (z.B. Qwen3-0.6B ... Qwen3-4B-Instruct-2507), Gewichte bf16.
 import json, time
@@ -36,6 +36,7 @@ class NativeCausalLM(LLMBackend):
         self.tok = BPETokenizer(self.dir / "tokenizer.json")
         self.eng = Engine(self.dir, progress=self.progress, maxT=self.context_len(), int8=self.int8(), kv16_on=self.kv16())
         self.stop_ids = {self.tok.added[s] for s in STOP if s in self.tok.added}
+        from ..log import mem; mem("llm:engine_aufgebaut")            # v106: zeigt, ob CPU-Kopie der Gewichte bleibt
         try: b = self.eng.self_check(self.progress)
         except Exception:
             self.unload(); raise                                       # v70: GPU-Speicher nicht belegt lassen
