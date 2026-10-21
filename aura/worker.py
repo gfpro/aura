@@ -8,6 +8,12 @@
 # v65: Folgefragen (Gespraechsgedaechtnis ueber die letzten 3 Fragen).
 # v67: Folgefrage nur per Knopf «Bezug zur letzten Frage» (follow=True); Worterkennung nur mit followup_auto.
 # v106: Speicher-Messung (log.mem) vor/nach jedem Auftrag und alle 500 Vektoren beim Einbetten.
+# v114: Anonymisator – PDF-Text wird zu Absaetzen zusammengefuegt (Einstellung anon_umbruch).
+# v113: Anonymisator (job_anon_scan, job_anon_absender) – Ergebnis nur als Ereignis «anon», nichts wird gespeichert.
+# v112: Mail-Anhaenge (pdf/docx/txt/md) als eigene Textstuecke «Betreff › Anhang name»; gleicher Anhang nur einmal
+#       (Tabelle anhang_hash); einmaliger Nachtrag fuer bestehende Mails (job_anhaenge, startet automatisch, fortsetzbar).
+# v111: Steht ein Treffer schon unter den Quellen, aber mit einem Stueck ohne das seltene Wort -> Stueck austauschen.
+# v110: Seltene Woerter: Treffer garantiert (alle Woerter passen) oder Rueckfrage «Meintest du …?» (Teiltreffer); force = Quelle per Knopf.
 # v105: Bester Treffer mit Nachbarstuecken (nachbarn_top, Standard 1); Vorgeschichte-Hinweis nur noch bei Ablauf-Fragen.
 # v101: Filter ueber Retriever.plan (Person/Quelle als Bonus).
 # v99: Anhang nur, wenn gemeint; Listenmodus nur mit der aktuellen Frage und nicht bei Auftraegen.
@@ -17,7 +23,7 @@
 # v36: Workflow-Pakete, Neustart ab Schritt (job_workflow start_at).
 # v73: zitierter Mailverlauf wird durchsucht (nur Absaetze, die in keiner anderen Mail stehen); einmalige Nachbearbeitung
 #      aller Mails (job_verlauf, startet automatisch); Mails geplanter Workflows (Betreff = Workflow-Name) ausgeschlossen.
-import ctypes, json, queue, re, threading, time, traceback
+import ctypes, hashlib, json, queue, re, threading, time, traceback
 from array import array
 from . import db, listmode, log
 from .config import MODELS, load_settings
@@ -72,6 +78,10 @@ class Worker(threading.Thread):
         self.emit("stats", db.stats(self.conn))
         if not db.flag(self.conn, "verlauf_v73") and self.conn.execute("SELECT 1 FROM items WHERE source='outlook_mail' LIMIT 1").fetchone():
             self.jobs.put(("verlauf", ()))                              # v73: einmalig, vor allen anderen Auftraegen
+        self.conn.execute("CREATE TABLE IF NOT EXISTS anhang_hash(h TEXT PRIMARY KEY)"); self.conn.commit()   # v112
+        if load_settings().get("mail_anhaenge", True) and not db.flag(self.conn, "anhaenge_v112") \
+                and self.conn.execute("SELECT 1 FROM items WHERE source='outlook_mail' LIMIT 1").fetchone():
+            self.jobs.put(("anhaenge", ()))                             # v112: einmaliger Nachtrag
         while True:
             name, args = self.jobs.get(); self.current = name
             self.emit("busy", True, name)
@@ -122,7 +132,7 @@ class Worker(threading.Thread):
                 if it.get("zitat"):
                     kept, new = verlauf_neu(it["zitat"], lambda hs: db.hashes_known(self.conn, hs))
                     db.hashes_add(self.conn, new); zit = make_chunks(kept, self._vprefix(it)) if kept else []
-            if db.add_item(self.conn, cid, it, make_chunks(text, prefix), zit): n += 1
+            if db.add_item(self.conn, cid, it, make_chunks(text, prefix) + self._anh_chunks(it), zit): n += 1   # v112
             if n and n % 200 == 0: self.conn.commit()
         removed = 0
         if cid == "outlook_calendar" and getattr(ctx, "seen", None) and not self.cancel.is_set() \
@@ -182,6 +192,46 @@ class Worker(threading.Thread):
             out |= {w["name"].strip().lower() for w in mit_zeitplan(WF_DIR) if w.get("name")}
         except Exception as e: log.get().warning(f"Ausschluss Workflow-Mails: {e}")
         return out
+
+    # ---- v112: Mail-Anhaenge
+    def _anh_chunks(self, it):
+        """Textstuecke der Anhaenge; ein Anhang, der schon in einer anderen Mail steht, wird uebersprungen."""
+        out = []
+        for name, txt in it.get("anhaenge") or []:
+            h = hashlib.sha1(re.sub(r"\s+", " ", txt).encode("utf-8")).hexdigest()
+            if self.conn.execute("INSERT OR IGNORE INTO anhang_hash(h) VALUES(?)", (h,)).rowcount == 0: continue
+            out += make_chunks(txt, f"{it.get('title', '')} ({it.get('author', '')}, {(it.get('ts') or '')[:10]}) › Anhang {name}: ")
+        return out
+
+    def job_anhaenge(self):
+        """v112, einmalig: Anhaenge aller schon eingelesenen Mails nachtragen. Abbrechbar; ein Neustart macht weiter
+        (erledigte Mails tragen meta.anh = 1)."""
+        from .connectors.base import outlook_namespace
+        from .connectors.outlook_mail import anhang_texte
+        c, s, t0 = self.conn, load_settings(), time.perf_counter()
+        ns = outlook_namespace()
+        rows = c.execute("SELECT id, ext_id, title, author, ts FROM items WHERE source='outlook_mail' "
+                         "AND COALESCE(json_extract(meta, '$.anh'), 0) = 0 ORDER BY ts DESC").fetchall()
+        added = mails = 0
+        for k, (iid, eid, ti, au, ts) in enumerate(rows):
+            if self.cancel.is_set() or not self.jobs.empty(): break     # weicht Fragen der Oberflaeche aus
+            if k % 50 == 0:
+                self.progress(f"Anhänge: Mails {k}/{len(rows)} · {added} Textstücke aus {mails} Mails", k, len(rows)); c.commit()
+            try: ch = self._anh_chunks({"anhaenge": anhang_texte(ns.GetItemFromID(eid), s), "title": ti, "author": au, "ts": ts})
+            except Exception: ch = []                                  # verschluesselt, verschoben ...
+            if ch:
+                o = c.execute("SELECT COALESCE(MAX(ord), -1) + 1 FROM chunks WHERE item_id = ?", (iid,)).fetchone()[0]
+                c.executemany("INSERT INTO chunks(item_id, ord, text, zitat) VALUES(?,?,?,0)", [(iid, o + j, x) for j, x in enumerate(ch)])
+                added += len(ch); mails += 1
+            c.execute("UPDATE items SET meta = json_set(COALESCE(meta, '{}'), '$.anh', 1) WHERE id = ?", (iid,))
+        c.commit()
+        done = not self.cancel.is_set() and self.jobs.empty()
+        if added: db.rebuild_fts(c); self.retriever.invalidate()
+        if done: db.flag(c, "anhaenge_v112", time.strftime("%Y-%m-%d %H:%M"))
+        elif not self.cancel.is_set(): self.jobs.put(("anhaenge", ()))   # einer Frage ausgewichen -> danach weiter
+        log.get().info(f"Anhaenge: {added} Stuecke aus {mails} Mails in {time.perf_counter() - t0:.0f} s, fertig={done}")
+        self.progress(f"Anhänge: {added} Textstücke aus {mails} Mails" + (" – jetzt «Vektoren berechnen»" if added and done else "")
+                      + ("" if done else " (unterbrochen, wird beim nächsten Start fortgesetzt)"))
 
     def job_verlauf(self):
         """v73, einmalig: fuer alle eingelesenen Mails den zitierten Verlauf nachtragen (nur Absaetze, die in keiner
@@ -430,7 +480,7 @@ class Worker(threading.Thread):
         if FOLLOW_START.search(question) or (len(w) <= 6 and (FOLLOW_REF.search(question) or not own)): return c["qs"]
         return []
 
-    def job_ask(self, question, backend_id, follow=None):
+    def job_ask(self, question, backend_id, follow=None, force=None):
         t_start = time.perf_counter()
         prev = self._followup(question, load_settings(), follow)         # v65/v67
         ref = prev[-1] if prev else ""                                   # v67: Anzeige «Bezug: …» in der Oberflaeche
@@ -442,7 +492,7 @@ class Worker(threading.Thread):
         use_anh = bool(self.anhang) and (bool(ANH_REF.search(asked)) or not SRC_REF.search(asked))
         who = self.retriever.author_items(self.conn, question)
         # v99: Listenmodus nur mit der aktuellen Frage (nicht mit der Vorfrage verknuepft) und nie bei Auftraegen («Erstelle …»)
-        lst = None if use_anh or TASK.search(asked) else listmode.calendar_list(self.conn, asked, who[0] if who else None) \
+        lst = None if use_anh or force is not None or TASK.search(asked) else listmode.calendar_list(self.conn, asked, who[0] if who else None) \
             or listmode.next_events(self.conn, asked) or listmode.recent_mails(self.conn, asked) \
             or listmode.web_list(self.conn, asked)
         if lst:
@@ -475,6 +525,7 @@ class Worker(threading.Thread):
             self.emit("token", f"Keine Objekte für diesen Filter gefunden ({', '.join(info)}).")
             self.emit("sources", []); return
         # v77: «neueste» ohne Filter (items None) ist eine Themenfrage -> Suche mit staerkerem Aktualitaetsbonus
+        searched = not (it and items is not None and (it.get("recent") or (it.get("range") and len(items) <= k)))   # v110
         if it and items is not None and (it.get("recent") or (it.get("range") and len(items) <= k)):
             hits = R.item_hits(self.conn, items, k)                 # Liste nach Datum statt nach Relevanz
         else:
@@ -495,6 +546,28 @@ class Worker(threading.Thread):
                 hits[:n] = sorted(hits[:n], key=lambda h: h["ts"], reverse=not CHRONO.search(asked))
             wh = self._wissen_hits(question, s)                          # v28: Wissenssammlungen, falls eingeschaltet
             if wh: hits = hits[:2] + wh + hits[2:]; self.progress(f"Wissen: {len(wh)} Stellen aus {', '.join(sorted({h['source'][7:] for h in wh}))}")
+        if searched and not use_anh and force is None and s.get("rueckfrage", True):   # v110
+            n = int(s.get("llm_top_k", 4)); top = {h["item_id"] for h in hits[:n]}
+            rare_all = R.rare_items(self.conn, asked)
+            for c in rare_all:                                           # v111: Quelle schon dabei, aber Stueck ohne seltenes Wort
+                if c["item_id"] not in top: continue
+                for h in hits[:n]:
+                    if h["item_id"] == c["item_id"] and not any(re.search(r"\b%s\b" % re.escape(w), h["text"], re.I) for w in c["rare"]):
+                        r = self.conn.execute("SELECT text FROM chunks WHERE id = ?", (c["chunk_id"],)).fetchone()
+                        if r:
+                            h["chunk_id"], h["text"] = c["chunk_id"], r[0]
+                            self.progress(f"Seltenes Wort: Textstück mit «{', '.join(c['rare'])}» eingesetzt")
+            cand = [c for c in rare_all if c["item_id"] not in top]
+            full = [c for c in cand if not c["missing"]]
+            if full:
+                add = R.chunk_hits(self.conn, [c["chunk_id"] for c in full[:2]]); ids = {a["item_id"] for a in add}
+                hits = add + [h for h in hits if h["item_id"] not in ids]
+                self.progress(f"Seltenes Wort: {len(add)} Treffer vorgezogen")
+            elif cand:
+                return self._rueckfrage(asked, backend_id, cand[:4], ref, prev, t_start)
+        if force:                                                        # v110: Quelle per Knopf gewaehlt
+            add = R.item_hits(self.conn, list(force), len(force)); ids = set(force)
+            hits = add + [h for h in hits if h["item_id"] not in ids]
         ah = self._anhang_hits(asked) if use_anh else []                  # v97: Anhang zuerst (v99: nur wenn gemeint)
         if ah and ANH_REF.search(asked): hits = []                         # v98: Frage zum Anhang -> nur der Anhang
         if ah: hits = ah + hits; self.progress(f"Anhang: {len(ah)} Stelle(n) aus {', '.join(sorted({h['title'] for h in ah}))}")
@@ -544,6 +617,21 @@ class Worker(threading.Thread):
                        + ", ".join(f"{k} {v:.1f}" for k, v in tm.items() if isinstance(v, (int, float))))
         self.progress(f"Fertig ({mode}, {len(hits)} Quellen{', Folgefrage' if prev else ''})")
 
+    def _rueckfrage(self, asked, backend_id, cand, ref, prev, t0):
+        """v110: Seltenes Wort trifft Objekte ausserhalb der Quellen, aber nicht alle Woerter passen -> nachfragen statt raten."""
+        def orig(t):
+            m = re.search(r"\b%s\b" % re.escape(t), asked, re.I); return m.group(0) if m else t
+        rare = ", ".join(orig(t) for t in sorted({r for c in cand for r in c["rare"]}))
+        miss = " ".join(orig(t) for t in sorted({m for c in cand for m in c["missing"]}))
+        txt = f"Zu «{miss}» habe ich nichts Passendes gefunden. Zu «{rare}» gibt es {len(cand)} Treffer. Meintest du einen davon?"
+        self.emit("answer_start", asked, "rueckfrage", ref); self.emit("token", txt)
+        dt = time.perf_counter() - t0
+        self.emit("sources", [], {"search": dt, "total": dt, "list": True})
+        self.emit("rueckfrage", asked, backend_id, cand)
+        self.chat = {"qs": (prev + [asked])[-3:], "hits": [], "t": time.time()}
+        log.get().info(f"Antwort: Rueckfrage, {len(cand)} Kandidaten")
+        self.progress("Rückfrage: bitte Treffer wählen")
+
     # ---- v97: Anhaenge im Chat (nur Speicher)
     ANHANG_VOLL = 9000                                               # Zeichen gesamt: darunter geht der ganze Text ans Modell
 
@@ -589,6 +677,81 @@ class Worker(threading.Thread):
                 sc.append((s, a, t))
         sc.sort(key=lambda x: x[0], reverse=True)
         return [hit(a, t, s) for s, a, t in sc[:k]]
+
+    # ---- v113: Anonymisator
+    def job_anon_scan(self, quelle, ist_datei, mit_llm, backend_id):
+        """Liest Datei bzw. Text, sucht Muster/Begriffe und (optional) Namen per Sprachmodell. Ergebnis: Ereignis
+        «anon» {text, hits, warnungen, stats, name}. Ersetzt wird erst in der Oberflaeche nach Freigabe."""
+        from pathlib import Path
+        from . import anon
+        name = Path(quelle).name if ist_datei else "eingefügter Text"
+        try:
+            if ist_datei:
+                from .workflow.nodes import read_file
+                self.progress(f"Anonymisieren: lese {name} ...")
+                text = read_file(quelle)
+            else: text = quelle
+        except Exception as e:
+            self.emit("anon", {"fehler": f"{name}: {e}"}); return
+        text = anon.normalize(text)
+        if ist_datei and Path(quelle).suffix.lower() == ".pdf" and load_settings().get("anon_umbruch", True):
+            text = anon.reflow(text)                                     # v114: PDF-Zeilen zu Absaetzen
+        if not text.strip(): self.emit("anon", {"fehler": f"{name}: kein extrahierbarer Text"}); return
+        rules, warn, st = anon.lade_regeln()
+        hits = anon.finde(text, rules)
+        self.progress(f"Anonymisieren: {len(hits)} Treffer aus Mustern und Begriffsliste")
+        n_llm = 0
+        if mit_llm and backend_id and backend_id != "extractive":
+            try: n_llm = self._anon_llm(text, hits, backend_id)
+            except Exception as e:
+                log.get().exception("Anonymisieren: Sprachmodell"); warn.append(f"Sprachmodell-Durchlauf abgebrochen ({type(e).__name__}: {e})")
+            finally: self._llm_state()
+        elif mit_llm: warn.append("Kein Sprachmodell gewählt – nur Muster und Begriffsliste.")
+        hits.sort(key=lambda h: h["start"])
+        st.update(zeichen=len(text), treffer=len(hits), llm=n_llm)
+        log.get().info(f"Anonymisieren: {len(text)} Zeichen, {len(hits)} Treffer (davon Modell {n_llm})")   # nie Inhalte ins Log
+        self.emit("anon", {"text": text, "hits": hits, "warnungen": warn, "stats": st, "name": name})
+        self.progress(f"Anonymisieren: {len(hits)} Stellen markiert – bitte prüfen")
+
+    def _anon_llm(self, text, hits, backend_id):
+        """tiseR 6.1: je Fenster eine LISTE von Namen; nur woertlich vorkommende werden uebernommen (Literal-Match-Guard),
+        ein Modell-Fund ueberschreibt keinen Muster-/Begriffstreffer."""
+        from . import anon
+        from .workflow import llmio
+        be = self._llm(backend_id)
+        lab = (dict((i, l) for i, l, _ in discover(MODELS)).get(backend_id, "") + " " + backend_id).lower()
+        think_off = "qwen3" in lab and "instruct" not in lab
+        wins = anon.fenster(text); namen = []
+        for w in wins:
+            if self.cancel.is_set(): break
+            self.progress(f"Anonymisieren: Sprachmodell liest Abschnitt {w['index'] + 1}/{len(wins)}", w["index"], len(wins))
+            out, _ = llmio.generate(be, anon.LLM_SYSTEM, w["text"], max_new=160, temperature=0.0, penalty=1.0,
+                                    cancelled=self.cancel.is_set, think_off=think_off, vorspann=anon.LLM_VORSPANN)
+            for n in anon.llm_namen(out):
+                if n not in namen: namen.append(n)
+        neu = 0
+        for n in namen:
+            if n not in text: continue                                   # Literal-Match-Guard: erfunden -> verworfen
+            add = anon.alle_vorkommen(text, n, hits, "llm", "[NAME]")
+            hits += add; neu += len(add)
+        return neu
+
+    def job_anon_absender(self, n=60):
+        """Vorschlaege fuer den Assistenten: haeufigste Absender (ohne Mailadressen, Organisationskuerzel abgetrennt)."""
+        rows = self.conn.execute("SELECT author, COUNT(*) c FROM items WHERE source='outlook_mail' AND author <> '' "
+                                 "GROUP BY author ORDER BY c DESC LIMIT 400").fetchall()
+        out, seen = [], set()
+        for a, c in rows:
+            a = re.sub(r"\s*[<(\[].*$", "", a or "").strip()
+            if "@" in a or " " not in a: continue
+            teile = [t for t in a.split() if not (t.isupper() and len(t) > 1) and not re.search(r"[\d/]", t)]
+            if len(teile) < 2: continue
+            teile = [t.strip(",") for t in teile]
+            name = " ".join(teile[-1:] + teile[:-1])                     # Outlook «Muster Sarah» / «Carré Llopis Amèlia» -> Vorname zuerst
+            if name.lower() in seen: continue
+            seen.add(name.lower()); out.append((name, c))
+            if len(out) >= n: break
+        self.emit("anon_absender", out)
 
     # ---- v28: Wissenssammlungen
     def _wissen(self):

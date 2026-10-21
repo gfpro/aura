@@ -1,4 +1,6 @@
-# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261020v109
+# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261021v113
+# v113: Gruppe «Werkzeuge» in der Seitenleiste mit «Text anonymisieren» (anon_gui.py, Nachbau tiseR-Anonymisator).
+# v110: Rückfrage «Meintest du …?» mit Knöpfen (Ereignis rueckfrage); Klick fragt mit genau dieser Quelle.
 # v109: Seitenleiste neu: aufklappbare Gruppen Chat · Wissen · Workflows · Einstellungen (nur eine offen, gemerkt in menu_offen);
 #       Wissens-Zusammenfassung entfaellt (steht in der Info-Leiste rechts); «▶» entfaellt (→ Workflows › Widgets);
 #       unten Bereich «Aufgaben» mit Balken: blau = laeuft, gruen = fertig, rot = Fehler; «Vektoren berechnen»/«Pause» dort.
@@ -160,6 +162,10 @@ class App:
         self.b_erg = self._item(b, "Ergebnisse", self.open_ergebnisse, 1)                  # v54
         hilfe.tip(self.b_erg, "Ergebnisse aller Workflows: neueste zuerst, mit Öffnen, Speichern und Laufordner.")
         hilfe.tip(self._item(b, "Widgets", self.open_widgets, 2), hilfe.TEXTE["haupt"]["▶"])
+
+        # ---- v113: Werkzeuge
+        b = self._grp(menu, "Werkzeuge", "Hilfsmittel für den Alltag, z.B. Texte anonymisieren.")
+        hilfe.tip(self._item(b, "Text anonymisieren", self.open_anon, 0), hilfe.TEXTE["haupt"]["Text anonymisieren"])
 
         # ---- Einstellungen
         b = self._grp(menu, "Einstellungen", "Abgleich, Anzeige und Protokoll.")
@@ -929,6 +935,26 @@ class App:
         ctk.CTkButton(self.anh_box, text="✕", width=24, height=22, corner_radius=11, font=font(11), fg_color="transparent",
                       hover_color=BORDER, text_color=MUTED, command=lambda: self.w.submit("anhang_leeren")).pack(side="left", padx=(4, 0))
 
+    def _rueckfrage(self, q, backend, cands):
+        """v110: Kandidaten als Knöpfe unter der Rückfrage."""
+        f = getattr(self, "last_ans", None)
+        if f is None or not f.winfo_exists(): return
+        box = ctk.CTkFrame(f, fg_color="transparent"); box.pack(fill="x", padx=16, pady=(0, 12))
+        for c in cands:
+            t = f"{c['ts'][:10]}  ·  {c['title'][:70]}  ·  {c['author'][:30]}"
+            ctk.CTkButton(box, text=t, anchor="w", height=28, corner_radius=8, font=font(12), fg_color=CARD, hover_color=BORDER,
+                          text_color=INK, command=lambda i=c["item_id"]: self._ask_force(q, backend, [i])).pack(fill="x", pady=2)
+        ctk.CTkButton(box, text="Nein – trotzdem allgemein suchen", anchor="w", height=26, corner_radius=8, font=font(11),
+                      fg_color="transparent", hover_color=BORDER, text_color=MUTED, border_width=1, border_color=BORDER,
+                      command=lambda: self._ask_force(q, backend, [])).pack(anchor="w", pady=(6, 0))
+        self._scroll()
+
+    def _ask_force(self, q, backend, items):
+        """v110: items = [id] -> genau diese Quelle zuerst; [] -> ohne Rückfrage suchen."""
+        if self.cur or self.b_ask.cget("state") == "disabled":
+            self.status.configure(text="Bitte warten, bis der laufende Auftrag fertig ist."); return
+        self.w.submit("ask", q, backend, False, items)
+
     def toggle_follow(self, on=None):
         """v67: Folgefrage-Knopf. Gilt nur fuer die naechste Frage."""
         self.follow = (not self.follow) if on is None else on
@@ -958,6 +984,15 @@ class App:
 
     def _wf(self, meth, *a):
         w = getattr(self, "wfwin", None)
+        if w is not None and w.alive(): getattr(w, meth)(*a)
+
+    def open_anon(self):                                              # v113
+        from .anon_gui import AnonWindow
+        if getattr(self, "anonwin", None) and self.anonwin.alive(): self.show_view("anon"); return
+        self.anonwin = AnonWindow(self)
+
+    def _anon(self, meth, *a):
+        w = getattr(self, "anonwin", None)
         if w is not None and w.alive(): getattr(w, meth)(*a)
 
     def open_wissen(self):
@@ -1246,6 +1281,7 @@ class App:
                 if kind == "progress":
                     self.prog.configure(text=d[0]); self.status.configure(text=d[0])
                     self._wf("on_progress", d[0])
+                    self._anon("on_progress", d[0])                     # v113
                     if d[1] is not None and d[2]: self._pb_value(d[1] / d[2])     # v109
                 elif kind == "busy":
                     self.busy = d[0]
@@ -1254,6 +1290,7 @@ class App:
                         if auto and b is self.b_ask: continue
                         try: b.configure(state="disabled" if d[0] else "normal")
                         except Exception: pass                           # v46: Slide-In evtl. schon geschlossen
+                    self._anon("on_busy", *d)                            # v113
                     if d[0]: self._pb_start()                            # v109: blau = läuft
                     else: self._pb_done()                                # grün = fertig (rot, falls Fehler)
                 elif kind == "stats":
@@ -1272,9 +1309,12 @@ class App:
                     vis = visible(self.cur_text) or "(Keine Antwort – Token-Grenze im Denkteil erreicht)"
                     self.cur_lbl.configure(text=vis)
                     self.sources(self.cur, d[0], vis, d[1] if len(d) > 1 else None)
-                    self.cur = None; self._scroll()
+                    self.last_ans = self.cur; self.cur = None; self._scroll()       # v110
                 elif kind == "llm_state": self._llm_view(d[0], d[1])
+                elif kind == "anon": self._anon("on_scan", d[0])        # v113
+                elif kind == "anon_absender": self._anon("on_absender", d[0])
                 elif kind == "anhang": self._show_anhang(d[0])           # v97
+                elif kind == "rueckfrage": self._rueckfrage(*d)               # v110
                 elif kind == "folders": self._show_folders(*d)
                 elif kind == "confirm_delete": self._confirm_delete(*d)
                 elif kind == "wf_step": self._wf("on_step", *d)

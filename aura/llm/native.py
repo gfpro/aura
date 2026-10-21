@@ -1,4 +1,4 @@
-# aura/llm/native.py — Hugging-Face-Sprachmodelle auf der nativen GPU-Engine. Version 20261019v106 (v106: Speicher nach Engine-Aufbau ins Log; v104: System-Prompt ohne Satzgrenze – nur die Frage beantworten, keine Fuellsaetze; v88: Qwen3.5 ueber qwen35.py, Denkmodus aus; v86: gemm fp16; v85: KV-Cache fp16, Einstellung llm_kv16; v84: splitr im Log; v83: Split-K-Varianten im Log; v28: Kontextlaenge aus Einstellungen; v44: Kernel-Wahl ins Log; v70: 8-Bit-Gewichte, Einstellung llm_int8;
+# aura/llm/native.py — Hugging-Face-Sprachmodelle auf der nativen GPU-Engine. Version 20261020v110 (v110: Quellen nur mit Link werden genannt; v106: Speicher nach Engine-Aufbau ins Log; v104: System-Prompt ohne Satzgrenze – nur die Frage beantworten, keine Fuellsaetze; v88: Qwen3.5 ueber qwen35.py, Denkmodus aus; v86: gemm fp16; v85: KV-Cache fp16, Einstellung llm_kv16; v84: splitr im Log; v83: Split-K-Varianten im Log; v28: Kontextlaenge aus Einstellungen; v44: Kernel-Wahl ins Log; v70: 8-Bit-Gewichte, Einstellung llm_int8;
 #   v72: Schweizer Rechtschreibung (ß -> ss) und ohne Vorspann «Antwort:»)
 # Unterstuetzt: Qwen3ForCausalLM (z.B. Qwen3-0.6B ... Qwen3-4B-Instruct-2507), Gewichte bf16.
 import json, time
@@ -12,6 +12,7 @@ SYSTEM = ("Du bist AURA, ein lokaler Assistent. Antworte auf Deutsch, sachlich u
           "Fuellsaetze, einfacher Text ohne Markdown (keine Sternchen, keine Rauten). Nenne zuerst die direkte Antwort. "
           "Stuetze dich ausschliesslich auf die Quellen und belege Aussagen mit der Quellennummer, z.B. [1]. "
           "Widersprechen sich Quellen, gilt die neueste (Datum beachten). "
+          "Enthaelt eine Quelle nur Betreff, Absender und einen Link, nenne genau das (Absender, Datum, Betreff, Inhalt verlinkt). "
           "Wenn die Quellen die Antwort nicht enthalten, sage das klar. "
           "Schreibe in Schweizer Rechtschreibung: immer ss statt ß. Beginne ohne Vorspann wie «Antwort:».")      # v72
 STOP = {"<|im_end|>", "<|endoftext|>"}

@@ -1,4 +1,5 @@
 # aura/rag.py — hybride Suche: BM25 (SQLite FTS5) + Vektoren (e5), kombiniert per Reciprocal Rank Fusion.
+# v110: Stoppwoerter/Zahlen nicht in BM25; rare_items() (seltene Woerter -> Garantie oder Rueckfrage); Datum TT.MM.JJJJ als Bonus.
 # v104: Treffer tragen die Empfaenger (recipients) fuer die Quellenzeile.
 # v102: Bonus-Ranglisten mit halbem Gewicht (boost_weight 0,5).
 # v101: plan(): Person und Quelle (z.B. «Kalender») nur noch als Bonus statt harter Filter – ausser bei Listenfragen
@@ -90,7 +91,7 @@ class Retriever:
         return None
 
     def bm25(self, conn, query, n=50, items=None):
-        terms = re.findall(r"\w+", query.lower())
+        terms = self.terms(query) or re.findall(r"\w+", query.lower())   # v110: ohne Stoppwoerter/Zahlen
         if not terms: return []
         q = " OR ".join('"%s"' % t for t in terms)
         if items is None:
@@ -125,6 +126,46 @@ class Retriever:
             "mich", "geschrieben", "zuletzt", "was", "wer", "wie", "wann", "ist", "sind", "eine", "einen", "zum", "zur",
             "thema", "alle", "nachrichten", "gesendet", "bekommen", "erhalten", "dem", "den", "des", "ich", "du",
             "wen", "wem", "wessen", "uns", "ihn", "ihm", "ihr", "ihnen", "sie", "ihm", "allen", "einem", "einer"}   # v101
+
+    STOP_Q = STOP | {"informationen", "information", "infos", "info", "suche", "such", "finde", "finden", "zeige", "gibt", "gab",
+                     "über", "ueber", "dazu", "bitte", "kannst", "können", "koennen", "weisst", "weißt", "noch", "auch", "für",
+                     "fuer", "bei", "aus", "nach", "vor", "ein", "auf", "oder", "sich", "etwas", "alles", "welches", "vom",
+                     "mit", "an", "im", "in", "zu", "wo", "gibt's", "steht", "stand", "worum", "geht"}   # v110
+
+    def terms(self, q):
+        """v110: Inhaltswoerter der Frage (ohne Stoppwoerter, Zahlen, Woerter < 3 Zeichen)."""
+        return [t for t in dict.fromkeys(re.findall(r"\w+", q.lower())) if len(t) >= 3 and not t.isdigit() and t not in self.STOP_Q]
+
+    def rare_items(self, conn, question, max_df=5, limit=6):
+        """v110: Woerter der Frage, die in hoechstens max_df Objekten vorkommen -> diese Objekte, mit den Fragewoertern,
+        die darin fehlen (missing). Alle passen = Treffer garantieren; Teiltreffer = nachfragen."""
+        terms = self.terms(question)[:8]; found = {}
+        for t in terms:
+            try:
+                rows = conn.execute("SELECT c.item_id, MIN(c.id) FROM chunks_fts f JOIN chunks c ON c.id = f.rowid "
+                                    "WHERE chunks_fts MATCH ? GROUP BY c.item_id LIMIT ?", (f'"{t}"', max_df + 1)).fetchall()
+            except Exception: continue
+            if not rows or len(rows) > max_df: continue
+            for iid, cid in rows: found.setdefault(iid, [cid, set()])[1].add(t)
+        out = []
+        for iid, (cid, rare) in found.items():
+            r = conn.execute("SELECT title, author, ts, source FROM items WHERE id = ?", (iid,)).fetchone()
+            if not r: continue
+            hay = " ".join([r[0] or "", r[1] or ""] + [x for (x,) in conn.execute("SELECT text FROM chunks WHERE item_id = ?", (iid,))]).lower()
+            out.append({"item_id": iid, "chunk_id": cid, "title": r[0] or "", "author": r[1] or "", "ts": r[2] or "",
+                        "source": r[3] or "", "rare": sorted(rare), "missing": [t for t in terms if t not in hay]})
+        out.sort(key=lambda x: x["ts"], reverse=True); out.sort(key=lambda x: len(x["missing"]))
+        return out[:limit]
+
+    def chunk_hits(self, conn, cids):
+        """v110: Treffer-Dicts fuer bestimmte Textstuecke."""
+        out = []
+        for cid in cids:
+            r = conn.execute("SELECT c.text, i.id, i.source, i.title, i.ts, i.author, i.recipients FROM chunks c "
+                             "JOIN items i ON i.id = c.item_id WHERE c.id = ?", (cid,)).fetchone()
+            if r: out.append({"chunk_id": cid, "text": r[0], "item_id": r[1], "source": r[2], "title": r[3] or "",
+                              "ts": r[4] or "", "author": r[5] or "", "recipients": r[6] or "", "score": 1.0})
+        return out
 
     def author_items(self, conn, question):
         """Erkennt Personennamen in der Frage (Absender/Organisator). Liefert passende item-IDs oder None."""
@@ -216,6 +257,8 @@ class Retriever:
             boost += [r[0] for r in conn.execute("SELECT id FROM items WHERE source = ? ORDER BY ts DESC LIMIT 500", (it["source"],))]
             it["soft_source"] = it.pop("source")
         if it.get("range") or it.get("source"): items = self.filter_items(conn, it, items)
+        for d, m, y in re.findall(r"\b(\d{1,2})\.(\d{1,2})\.(\d{4})\b", question):   # v110: «vom 07.03.2024» als Bonus
+            boost += [r[0] for r in conn.execute("SELECT id FROM items WHERE ts LIKE ? LIMIT 200", (f"{y}-{int(m):02d}-{int(d):02d}%",))]
         return {"who": who, "intent": it or None, "items": items, "boost": boost or None}
 
     def search(self, conn, query, qvec=None, k=6, mode="hybrid", per_item=1, items=None, prefer=None,

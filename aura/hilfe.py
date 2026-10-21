@@ -1,4 +1,4 @@
-# aura/hilfe.py — Infotexte (Tooltips) fuer alle Fenster. Version 20261020v109 (v109: Menügruppen, Widgets, Log öffnen; v90: Übersicht, Expertenansicht; v82: «Beim Start Widgets zeigen»; v81: Widgets-Ansicht; v80: «▶», Widgets; v79: «⌂», Ablaufband; v75: Position korrigiert (Reihenfolge withdraw/topmost/geometry/deiconify); v74: Tooltip vor dem Hauptfenster; v70: Text «8 Bit»; v68: Info-Leiste rechts; v60: Tooltip verschwindet beim Minimieren/Fensterwechsel, nicht mehr über anderen Programmen; v46: Slide-In, Vollansicht, Startfragen)
+# aura/hilfe.py — Infotexte (Tooltips) fuer alle Fenster. Version 20261021v114 (v114: Schalter Nachnamen; v113: Werkzeuge › Text anonymisieren; v109: Menügruppen, Widgets, Log öffnen; v90: Übersicht, Expertenansicht; v82: «Beim Start Widgets zeigen»; v81: Widgets-Ansicht; v80: «▶», Widgets; v79: «⌂», Ablaufband; v75: Position korrigiert (Reihenfolge withdraw/topmost/geometry/deiconify); v74: Tooltip vor dem Hauptfenster; v70: Text «8 Bit»; v68: Info-Leiste rechts; v60: Tooltip verschwindet beim Minimieren/Fensterwechsel, nicht mehr über anderen Programmen; v46: Slide-In, Vollansicht, Startfragen)
 # Alle Texte stehen hier an einem Ort. Zuordnung:
 #   auto(fenster, ctx)  - findet Knoepfe/Schalter/Haekchen anhand ihrer Beschriftung (TEXTE[ctx], dann TEXTE["*"])
 #   tip(widget, key)    - fester Text fuer Felder ohne Beschriftung (key beginnt mit "#") oder freier Text
@@ -34,7 +34,28 @@ TEXTE = {
         "▶": "Workflow-Ergebnisse: die angehefteten Widgets in voller Breite. «⌂» führt zurück zu den Fragen.",
         "Ergebnisse": "Ergebnisse aller Workflows: neueste zuerst, mit Öffnen, Speichern und Laufordner.",
         "Log öffnen": "Öffnet das Protokoll (Log) – nützlich bei Fehlermeldungen.",
+        "Text anonymisieren": "Ersetzt Namen, AHV-Nummern, IBAN, Mailadressen, Telefonnummern, Koordinaten und deine heiklen Begriffe "
+                              "durch Platzhalter. Du prüfst die Markierungen, bevor etwas ersetzt wird. Die Einstufung des Textes bleibt.",
         "Kontext": "Zeigt die Textstücke, die das Sprachmodell für diese Antwort gelesen hat. Hilfreich, wenn eine Antwort falsch wirkt: Stand die Information überhaupt drin?",
+    },
+    "anon": {                                                        # v113
+        "📄  Datei wählen und prüfen …": "Datei wählen (PDF mit Text, Word, Text, Markdown, E-Mail .eml). AURA liest sie nur – die Datei bleibt unverändert.",
+        "Eingefügten Text prüfen ▶": "Prüft den Text im Feld darüber. Nichts wird gespeichert.",
+        "Begriffsliste einrichten (5 Minuten) …": "Geführt: Personen, Projekte, Standorte, Partner und Systeme erfassen. Die Liste bleibt nur auf diesem Rechner.",
+        "Begriffsliste bearbeiten …": "Begriffsliste ergänzen oder ändern (geführt, Schritt für Schritt).",
+        "＋ Markierung hinzufügen": "Zuerst Text mit der Maus markieren. AURA ersetzt dann diese Stelle und alle gleich geschriebenen.",
+        "Freigeben & ersetzen ▶": "Ersetzt alle farbig markierten Stellen. Grau (abgewählt) bleibt stehen.",
+        "← Neuer Text": "Verwirft diese Prüfung und beginnt mit einem neuen Text.",
+        "Kopieren": "Kopiert den anonymisierten Text in die Zwischenablage.",
+        "Speichern als .txt …": "Speichert den anonymisierten Text als Textdatei an einem Ort deiner Wahl.",
+        "Aus Datei übernehmen …": "Liste aus einer Datei übernehmen: eine Zeile pro Begriff (txt, docx) oder eine Tabelle mit Spalte «Begriff» "
+                                  "(csv, xlsx – z.B. die tiseR-Liste, Blatt «_anon»).",
+        "Vorschläge aus meinen Mails …": "Zeigt die häufigsten Absender aus deinen Mails zum Anhaken. Nur übernehmen, wer wirklich geschützt werden muss.",
+        "Weiter →": "Eingaben dieser Seite merken und weiter. Gespeichert wird erst am Schluss.",
+        "Speichern ✓": "Speichert die Begriffsliste (nur auf diesem Rechner, data\\anon\\begriffe.csv).",
+        "Abbrechen": "Ohne Speichern zurück.",
+        "Nachnamen auch allein ersetzen *": "Ein: «Muster» wird auch ohne Vornamen ersetzt (findet mehr). Gross-/Kleinschreibung zählt, "
+                                           "gewöhnliche Wörter wie «Koch» oder «Schweizer» bleiben aussen vor. Aus: nur Vor- und Nachname zusammen.",
     },
     "quellen": {
         "Ordner": "Outlook-Ordner wählen, die AURA einlesen soll. Mails aus abgewählten Ordnern werden nach Rückfrage aus AURA entfernt – in Outlook bleibt alles.",
