@@ -107,6 +107,7 @@ Die Datenordner `data\`, `models\`, `workflows\` und `wissen\` bleiben erhalten.
 - Gescannte PDFs ohne Textschicht (OCR) werden nicht gelesen (keine Texterkennung).
 - Ein Workflow-Lauf dauert mit einem 4B-Modell auf integrierter Grafik je nach Vorlage 2–5 Minuten. Notebook während eines Laufs nicht zuklappen; Zeitplan-Läufe starten nur, wenn AURA offen ist.
 - Getestet auf Hardwareklasse der HP EliteBook mit AI-Features.
+- Arbeitsspeicher-Auslastung während dem Betrieb sehr hoch (~90%).
 
 ## Aufbau
 
