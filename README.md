@@ -126,4 +126,4 @@ Die Datenordner `data\`, `models\`, `workflows\` und `wissen\` bleiben erhalten.
 
 ## Lizenz
 
-Komponenten Dritter sind in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) aufgeführt (customtkinter, comtypes, pypdf). Die Modelle stehen unter eigenen Lizenzen: Qwen3 unter Apache 2.0, multilingual-e5-large unter MIT.
+Die Komponenten Dritter sowie die Modelle stehen unter eigenen Lizenzen: Qwen3 unter Apache 2.0, multilingual-e5-large unter MIT. AURA ist primär ein Prototyp, der für den Test im BV-Netz gedacht ist.
