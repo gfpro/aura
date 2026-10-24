@@ -1,11 +1,11 @@
-# aura/llm/native.py — Hugging-Face-Sprachmodelle auf der nativen GPU-Engine. Version 20261020v110 (v110: Quellen nur mit Link werden genannt; v106: Speicher nach Engine-Aufbau ins Log; v104: System-Prompt ohne Satzgrenze – nur die Frage beantworten, keine Fuellsaetze; v88: Qwen3.5 ueber qwen35.py, Denkmodus aus; v86: gemm fp16; v85: KV-Cache fp16, Einstellung llm_kv16; v84: splitr im Log; v83: Split-K-Varianten im Log; v28: Kontextlaenge aus Einstellungen; v44: Kernel-Wahl ins Log; v70: 8-Bit-Gewichte, Einstellung llm_int8;
+# aura/llm/native.py — Hugging-Face-Sprachmodelle auf der nativen GPU-Engine. Version 20261024v118 (v118: nur noch Qwen3.5, Qwen3-Engine entfernt; v110: Quellen nur mit Link werden genannt; v106: Speicher nach Engine-Aufbau ins Log; v104: System-Prompt ohne Satzgrenze – nur die Frage beantworten, keine Fuellsaetze; v88: Qwen3.5 ueber qwen35.py, Denkmodus aus; v86: gemm fp16; v85: KV-Cache fp16, Einstellung llm_kv16; v84: splitr im Log; v83: Split-K-Varianten im Log; v28: Kontextlaenge aus Einstellungen; v44: Kernel-Wahl ins Log; v70: 8-Bit-Gewichte, Einstellung llm_int8;
 #   v72: Schweizer Rechtschreibung (ß -> ss) und ohne Vorspann «Antwort:»)
-# Unterstuetzt: Qwen3ForCausalLM (z.B. Qwen3-0.6B ... Qwen3-4B-Instruct-2507), Gewichte bf16.
+# Unterstuetzt: Qwen3.5 (Qwen3_5ForConditionalGeneration / Qwen3_5ForCausalLM, z.B. Qwen3.5-4B), Gewichte bf16 oder int8.
 import json, time
 from pathlib import Path
 from .base import LLMBackend, build_prompt
 
-SUPPORTED = {"Qwen3ForCausalLM", "Qwen3_5ForConditionalGeneration", "Qwen3_5ForCausalLM"}
+SUPPORTED = {"Qwen3_5ForConditionalGeneration", "Qwen3_5ForCausalLM"}   # v118: Qwen3 entfernt
 Q35 = {"Qwen3_5ForConditionalGeneration", "Qwen3_5ForCausalLM"}
 NO_THINK = "<think>\n\n</think>\n\n"                                # v88: Qwen3.5 ohne Denkmodus
 SYSTEM = ("Du bist AURA, ein lokaler Assistent. Antworte auf Deutsch, sachlich und knapp: nur was gefragt ist, ohne "
@@ -28,11 +28,10 @@ class NativeCausalLM(LLMBackend):
 
     def load(self):
         if self.arch not in SUPPORTED:
-            raise RuntimeError(f"{self.arch} wird von der nativen Engine noch nicht unterstuetzt.")
+            raise RuntimeError(f"{self.arch} wird nicht unterstuetzt - AURA laeuft nur noch mit Qwen3.5 (Einstellung llm, z.B. hf:Qwen3.5-4B).")
         if self.eng: return
         from .bpe_tokenizer import BPETokenizer
-        if self.q35: from .qwen35 import Qwen35Engine as Engine        # v88
-        else: from .qwen import Qwen3Engine as Engine
+        from .qwen35 import Qwen35Engine as Engine                    # v118: einzige Engine
         t0 = time.perf_counter()
         self.tok = BPETokenizer(self.dir / "tokenizer.json")
         self.eng = Engine(self.dir, progress=self.progress, maxT=self.context_len(), int8=self.int8(), kv16_on=self.kv16())
@@ -42,33 +41,18 @@ class NativeCausalLM(LLMBackend):
         except Exception:
             self.unload(); raise                                       # v70: GPU-Speicher nicht belegt lassen
         e = self.eng
-        if self.q35: return self._ready_q35(b, t0)                      # v88
-        self.kernels = (f"Gewichte {'int8' if e.q8 else 'bf16'}, Matrix {e.lin_kernel} ({b['gflops_' + e.lin_kernel]:.0f} GFLOPS), "
-                        f"Attention {e.attn_kernel}, Einlesen {e.pre_kernel}, Schreiben {e.dec_kernel}, kleine Bloecke {e.small_kernel}")
-        self.progress("Sprachmodell: Probelauf ..."); self.eng.forward(self.tok.encode("Hallo"), 0); self.eng.g.sync()
-        self.load_s = time.perf_counter() - t0
-        from ..log import diag                                       # v44: Kernel-Wahl und Selbsttest ins Log
-        diag("kernel", modell=self.name, kontext=e.maxT, gewichte="int8" if e.q8 else "bf16", kv="fp16" if e.kv16 else "fp32",
-             q8_diff=f"{b.get('q8_diff', 0):.1e}", q8_bf16_ms=b.get("q8_bf16", 0) * 1000, q8_int8_ms=b.get("q8_int8", 0) * 1000, laden_s=self.load_s, matrix=e.lin_kernel,
-             gflops=b["gflops_" + e.lin_kernel], attention=e.attn_kernel, einlesen=e.pre_kernel, schreiben=e.dec_kernel,
-             pre_v2_ms=b.get("pre_v2", 0) * 1000, pre_gemm_ms=b.get("pre_gemm", 0) * 1000, pre_diff=f"{b.get('pre_diff', 0):.1e}",
-             dec_v2_ms=b.get("dec_v2", 0) * 1000, dec_split_ms=b.get("dec_split", 0) * 1000, dec_s128_ms=b.get("dec_split_128", 0) * 1000, dec_s64_ms=b.get("dec_split_64", 0) * 1000, dec_r128_ms=b.get("dec_splitr_128", 0) * 1000, dec_r64_ms=b.get("dec_splitr_64", 0) * 1000,
-             klein=e.small_kernel, small_v2_ms=b.get("small_v2", 0) * 1000, small_mt_ms=b.get("small_mt", 0) * 1000,
-             small_diff=f"{b.get('small_diff', 0):.1e}", klein_attn=e.small_attn,
-             sattn_v2_ms=b.get("sattn_v2", 0) * 1000, sattn_split_ms=b.get("sattn_split", 0) * 1000, sattn_s128_ms=b.get("sattn_split_128", 0) * 1000, sattn_s64_ms=b.get("sattn_split_64", 0) * 1000, sattn_r128_ms=b.get("sattn_splitr_128", 0) * 1000, sattn_r64_ms=b.get("sattn_splitr_64", 0) * 1000,
-             sattn_diff=f"{b.get('sattn_diff', 0):.1e}")
-        self.progress(f"Sprachmodell bereit ({'8 Bit, ' if e.q8 else ''}geladen in {self.load_s:.0f} s)")
+        return self._ready_q35(b, t0)
 
     def _ready_q35(self, b, t0):
         e = self.eng
-        self.kernels = (f"Qwen3.5, Gewichte {'int8' if e.q8 else 'bf16'}, Matrix {e.lin_kernel}, Einlesen {e.pre_kernel}, "
-                        f"Schreiben {e.dec_kernel}")
+        self.kernels = (f"Qwen3.5, Gewichte {'int8' if e.q8 else 'bf16'}, Matrix {e.lin_kernel}, kleine Bloecke {e.small_kernel}, "
+                        f"Attention {e.attn_kernel}, Einlesen {e.pre_kernel}, Schreiben {e.dec_kernel}")
         self.progress("Sprachmodell: Probelauf ..."); self.eng.forward(self.tok.encode("Hallo"), 0); self.eng.g.sync()
         self.eng.kv_ids = []; self.eng._reset_state()
         self.load_s = time.perf_counter() - t0
         from ..log import diag
         diag("kernel", modell=self.name, engine="qwen35", kontext=e.maxT, gewichte="int8" if e.q8 else "bf16",
-             kv="fp16" if e.kv16 else "fp32", laden_s=self.load_s, matrix=e.lin_kernel, einlesen=e.pre_kernel, schreiben=e.dec_kernel,
+             kv="fp16" if e.kv16 else "fp32", laden_s=self.load_s, matrix=e.lin_kernel, klein=e.small_kernel, attention=e.attn_kernel, einlesen=e.pre_kernel, schreiben=e.dec_kernel,
              **{k: (f"{v:.1e}" if k.endswith("diff") or k.startswith("attn") else v * 1000) for k, v in b.items()
                 if isinstance(v, float) and not k.startswith("gflops")})
         self.progress(f"Sprachmodell bereit (Qwen3.5, {'8 Bit, ' if e.q8 else ''}geladen in {self.load_s:.0f} s)")
@@ -83,7 +67,7 @@ class NativeCausalLM(LLMBackend):
 
     def int8(self):
         from ..config import load_settings
-        return bool(load_settings().get("llm_int8", False))
+        return bool(load_settings().get("llm_int8", True))             # v125: Standard 8 Bit
 
     def context_len(self):
         """llm_context (Standard 16384), aber so begrenzt, dass Gewichte + KV-Cache in llm_mem_gb passen."""

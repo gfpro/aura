@@ -11,7 +11,7 @@
 # sondern AURA. Das Modell fuellt nur die Werte. Ergebnis: immer gueltiges JSON mit genau diesen Feldern,
 # egal wie klein das Modell ist. Ein Wert endet am ersten nicht maskierten " oder nach max_tokens.
 #
-# Backend aura/llm/native.py: be.eng (Qwen3Engine), be.tok (BPETokenizer, Spezialtokens in tok.added),
+# Backend aura/llm/native.py: be.eng (Qwen35Engine), be.tok (BPETokenizer, Spezialtokens in tok.added),
 # be.stop_ids. Pruefen:  py tools\wf_run.py --check
 import heapq, json, math, random, re, sys, time
 from ..log import diag

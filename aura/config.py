@@ -16,6 +16,7 @@ DEFAULTS = {
     "llm_top_k": 4,                          # Quellen fuer das Sprachmodell (mehr = langsamer)
     "llm_max_new": 250,                      # maximale Antwortlaenge in Tokens
     "llm_temperature": 0.0,                  # 0 = immer das wahrscheinlichste Wort (schnell, sachlich)
+    "llm_int8": True,                        # v125: 8-Bit-Gewichte (Standard); false nur als Gegenprobe
 }
 
 def ensure_dirs():

@@ -1,4 +1,6 @@
 # aura/rag.py — hybride Suche: BM25 (SQLite FTS5) + Vektoren (e5), kombiniert per Reciprocal Rank Fusion.
+# v120: Auftrags-/Zeitwoerter («nenne», «letzten», «zeig mir» ...) sind Stoppwoerter fuer BM25 und seltene Woerter;
+#       Bindestrich-Begriffe («KI-Massnahmenplan») zusaetzlich als Wortgruppe (findet auch «KI Massnahmenplan»).
 # v110: Stoppwoerter/Zahlen nicht in BM25; rare_items() (seltene Woerter -> Garantie oder Rueckfrage); Datum TT.MM.JJJJ als Bonus.
 # v104: Treffer tragen die Empfaenger (recipients) fuer die Quellenzeile.
 # v102: Bonus-Ranglisten mit halbem Gewicht (boost_weight 0,5).
@@ -93,7 +95,8 @@ class Retriever:
     def bm25(self, conn, query, n=50, items=None):
         terms = self.terms(query) or re.findall(r"\w+", query.lower())   # v110: ohne Stoppwoerter/Zahlen
         if not terms: return []
-        q = " OR ".join('"%s"' % t for t in terms)
+        phr = ['"%s %s"' % (a, b) for a, b in re.findall(r"(\w+)-(\w+)", query.lower())]   # v120: KI-X = «KI X»
+        q = " OR ".join(phr + ['"%s"' % t for t in terms])
         if items is None:
             return [r[0] for r in conn.execute(
                 "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY bm25(chunks_fts) LIMIT ?", (q, n))]
@@ -131,6 +134,11 @@ class Retriever:
                      "über", "ueber", "dazu", "bitte", "kannst", "können", "koennen", "weisst", "weißt", "noch", "auch", "für",
                      "fuer", "bei", "aus", "nach", "vor", "ein", "auf", "oder", "sich", "etwas", "alles", "welches", "vom",
                      "mit", "an", "im", "in", "zu", "wo", "gibt's", "steht", "stand", "worum", "geht"}   # v110
+    STOP_Q |= {"nenne", "nennen", "nenn", "nennt", "zeig", "zeigen", "liste", "listen", "auflisten", "gib", "geben",
+               "sag", "sage", "sagen", "fasse", "fass", "zusammen", "zusammenfassen", "erzähl", "erzähle", "erklär",
+               "erkläre", "schreib", "schreibe", "letzte", "letzten", "letzter", "letztes", "neueste", "neuesten",
+               "neuester", "aktuelle", "aktuellen", "aktuellste", "aktuellsten", "jüngste", "jüngsten", "neu", "neue",
+               "neuen", "stand", "status", "update", "updates", "news", "mitteilungen", "hinweise", "details"}   # v120
 
     def terms(self, q):
         """v110: Inhaltswoerter der Frage (ohne Stoppwoerter, Zahlen, Woerter < 3 Zeichen)."""

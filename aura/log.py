@@ -3,7 +3,7 @@
 # v107: mem() schreibt Fehler ins Log statt sie zu verschlucken; Handle-Typen explizit.
 # v106: mem() schreibt Speicherwerte: DIAG mem phase=... ws_gb commit_gb peak_gb ram_pct sys_commit_gb sys_limit_gb
 # v44: Ort logs\ (vorher data\, wird beim Start einmalig verschoben); diag() schreibt Kennzahlen als eine Zeile:
-#      2026-10-10 11:02:13 INFO    [worker] DIAG llm_json modell=Qwen3-4B eingabe=9136 cache=3714 prefill_s=394 ...
+#      2026-10-10 11:02:13 INFO    [worker] DIAG llm_json modell=Qwen3.5-4B eingabe=9136 cache=3714 prefill_s=394 ...
 import logging, logging.handlers, sys, threading
 from .config import ROOT, DB_PATH
 

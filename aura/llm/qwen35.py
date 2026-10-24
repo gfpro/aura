@@ -1,4 +1,18 @@
-# aura/llm/qwen35.py — Version 20261015v89  (AURA)
+# aura/llm/qwen35.py — Version 20261024v128  (AURA)
+# v128: Ausgabeschicht in Bloecken <= 120 MB (9B: hidden 4096 -> 16384 Zeilen waeren 134 MB > D3D11-Grenze 128 MB).
+# v127: Nach dem Laden Modelldateien (mmap, ~9 GB bf16) schliessen; Einbettungen als eigene Kopie (~1,3 GB) behalten.
+#        Vorher blieben alle gelesenen Dateiseiten im Arbeitsspeicher des Prozesses (ws_gb ~16,6 bei 96 % RAM).
+# v118: Attention Schreiben/kleine Bloecke (fp16-KV) «attn2»: K je uint = 2 Werte (halb so viele Lesebefehle), Block-Maximum
+#        per Baum-Reduktion statt 4x256 serieller Lesungen je Thread. Selbsttest vergleicht mit attn256 und waehlt.
+#        c2/c4/c8 (v117) entfernt: Zeit wuchs mit der Tokenzahl, nie gewaehlt.
+# v117: Kleine Bloecke: Varianten «c2/c4/c8» = Schreib-Kernel K_MV8 fuer 2/4/8 Tokens je Durchgang (X direkt aus dem
+#        Cache, kein Gruppenspeicher-Kachel). v116 «b» war gleich langsam wie mvt8 (7,2 ms vs 0,6 ms fuer 1 Token).
+# v116: Kleine Bloecke int8 (2..64 Tokens) mit neuem Kernel «b» statt K_MVT8: X-Kachel als float4, Lane j = 4 k am Stueck
+#        (konfliktfreier Gruppenspeicher; K_MVT8 las mit Abstand 64 Byte -> 8fach-Bankkonflikte). Selbsttest waehlt.
+#        Selbsttest prueft v8 und b jetzt an allen Matrixformen (qkv, z, a, out, gate, down), nicht nur gate_proj.
+# v115: v8 neu aufgebaut (v114: 140 ms statt 88 ms, vermutlich 24 KB Gruppenspeicher + Umsortieren der Gewichte).
+# v114: Einlesen int8 mit neuem Kernel «v8» (Aufbau wie bf16-K_LINEAR2: 128 Tokens x 64 Ausgaben, float4 im
+#        Gruppenspeicher, 32er-k-Scheiben). Selbsttest vergleicht v8 mit q44 (Genauigkeit + Tempo), waehlt den schnelleren.
 # v89: Schnappschuss am Vorspann-Ende (snap_at, von llmio gesetzt); save_kv nutzt ihn statt neu zu rechnen.
 # v88: Native Engine fuer Qwen3.5 (Qwen3_5ForConditionalGeneration, nur Text-Teil) auf DirectX 11.
 #   Aufbau: 24 x Gated-DeltaNet (lineare Attention, rekurrenter Zustand 128x128 je Kopf) + 8 x volle Attention
@@ -14,7 +28,7 @@ from array import array
 from ctypes import c_void_p
 from pathlib import Path
 from ..engine.gpu import GPU, _com
-from .qwen import (K_LINEAR2, K_MATVEC, K_MATVEC_T, K_RMS, K_SILUMUL, K_COPY, K_COPY16, K_QUANT, K_MV8, K_MVT8,
+from .qwen import (_I8, K_LINEAR2, K_MATVEC, K_MATVEC_T, K_RMS, K_SILUMUL, K_COPY, K_COPY16, K_QUANT, K_MV8, K_MVT8,
                    K_SOFTMAX, k_linear8, k_gemm, k_gemm16, kv16, ShardedSafeTensors, bf16_to_f32, common_prefix,
                    CHUNK, LMH_ROWS, SMALL_MAX, SMAX_MB)
 
@@ -159,6 +173,97 @@ void main(uint3 d:SV_DispatchThreadID){
   for(uint e=d.x;e<N;e+=STRIDE){ float z=Q[(e>>8)*512+256+(e&255)]; A[e]*=1.0/(1.0+exp(-z)); }
 }"""
 
+# v115: Einlesen int8 «v8». Gruppe = 128 Tokens x 64 Ausgaben, k-Scheibe 16 (12 KB Gruppenspeicher wie K_LINEAR2).
+# float4 entlang k: Gewichte direkt aus i8(u)*s (1 uint4 je Zeile, keine Umsortierung), X je Token 4 k am Stueck.
+# Je Thread 8 Tokens x 4 Ausgaben (Ausgaben im Abstand 16 -> konfliktfreie Lesezugriffe), 12 float4-Lesungen fuer 32 dot.
+K_LIN8V = _I8 + r"""
+cbuffer C:register(b0){ uint T; uint IN; uint OUT; uint PAD; };
+RWStructuredBuffer<float> X:register(u0); RWStructuredBuffer<uint4> W:register(u1);
+RWStructuredBuffer<float> Y:register(u2); RWStructuredBuffer<float> S:register(u3);
+groupshared float4 As[4][128]; groupshared float4 Ws[4][64];
+[numthreads(16,16,1)]
+void main(uint3 g:SV_GroupID, uint3 l:SV_GroupThreadID, uint li:SV_GroupIndex){
+  uint t0=g.y*128, o0=g.x*64, i, r, c, kq;
+  float acc[8][4]; [unroll] for(i=0;i<8;i++) [unroll] for(c=0;c<4;c++) acc[i][c]=0;
+  for(uint k0=0;k0<IN;k0+=16){
+    [unroll] for(r=0;r<2;r++){ uint sl=li+256*r; uint t=t0+(sl>>2), q=sl&3, x=t*IN+k0+4*q;
+      As[q][sl>>2]=(t<T)?float4(X[x],X[x+1],X[x+2],X[x+3]):float4(0,0,0,0); }
+    if(li<64){ uint o=o0+li; bool ok=o<OUT; uint4 u=ok?W[(o*IN+k0)/16]:uint4(0,0,0,0); float s=ok?S[(o*IN+k0)/128]:0;
+      Ws[0][li]=i8(u.x)*s; Ws[1][li]=i8(u.y)*s; Ws[2][li]=i8(u.z)*s; Ws[3][li]=i8(u.w)*s; }
+    GroupMemoryBarrierWithGroupSync();
+    [unroll] for(kq=0;kq<4;kq++){
+      float4 w0=Ws[kq][l.x], w1=Ws[kq][l.x+16], w2=Ws[kq][l.x+32], w3=Ws[kq][l.x+48];
+      [unroll] for(i=0;i<8;i++){ float4 a=As[kq][l.y*8+i];
+        acc[i][0]+=dot(a,w0); acc[i][1]+=dot(a,w1); acc[i][2]+=dot(a,w2); acc[i][3]+=dot(a,w3); } }
+    GroupMemoryBarrierWithGroupSync();
+  }
+  [unroll] for(i=0;i<8;i++){ uint t=t0+l.y*8+i; if(t<T){
+    [unroll] for(c=0;c<4;c++){ uint o=o0+l.x+16*c; if(o<OUT) Y[t*OUT+o]=acc[i][c]; } } }
+}"""
+
+# v116: bis 16 Tokens. Gruppe = 32 Zeilen; Thread = 4 Zeilen x 16 Tokens, Lane j (0..31) rechnet k = 4j..4j+3 je 128er-Scheibe.
+K_MVT8B = _I8 + r"""
+cbuffer C:register(b0){ uint T; uint IN; uint OUT; uint T0; };
+RWStructuredBuffer<float> X:register(u0); RWStructuredBuffer<uint4> W:register(u1);
+RWStructuredBuffer<float> Y:register(u2); RWStructuredBuffer<float> S:register(u3);
+groupshared float4 Xs[16][32]; groupshared float red[256][8];
+[numthreads(256,1,1)]
+void main(uint3 g:SV_GroupID, uint3 l:SV_GroupThreadID){
+  uint li=l.x, j=li&31, rg=li>>5, t, r, h, k0, o0=g.x*32+rg*4, c=j&3;
+  float acc[4][16]; [unroll] for(r=0;r<4;r++) [unroll] for(t=0;t<16;t++) acc[r][t]=0;
+  for(k0=0;k0<IN;k0+=128){
+    [unroll] for(r=0;r<2;r++){ uint idx=li+256*r; uint tt=idx>>5, kq=idx&31, x=(T0+tt)*IN+k0+4*kq;
+      Xs[tt][kq]=(tt<T)?float4(X[x],X[x+1],X[x+2],X[x+3]):float4(0,0,0,0); }
+    GroupMemoryBarrierWithGroupSync();
+    [unroll] for(r=0;r<4;r++){ uint o=o0+r; float4 w=float4(0,0,0,0);
+      if(o<OUT){ uint4 u=W[(o*IN+k0)/16+(j>>2)]; uint v=(c==0)?u.x:((c==1)?u.y:((c==2)?u.z:u.w));
+        w=i8(v)*S[(o*IN+k0)/128]; }
+      [unroll] for(t=0;t<16;t++) acc[r][t]+=dot(w,Xs[t][j]); }
+    GroupMemoryBarrierWithGroupSync();
+  }
+  [unroll] for(r=0;r<4;r++) [unroll] for(h=0;h<2;h++){
+    [unroll] for(t=0;t<8;t++) red[li][t]=acc[r][h*8+t];
+    GroupMemoryBarrierWithGroupSync();
+    if(li<64){ uint g2=li>>3, tt=li&7, jj; float sm=0;
+      for(jj=0;jj<32;jj++) sm+=red[g2*32+jj][tt];
+      uint o=g.x*32+g2*4+r, tk=h*8+tt; if(tk<T&&o<OUT) Y[(T0+tk)*OUT+o]=sm; }
+    GroupMemoryBarrierWithGroupSync(); }
+}"""
+
+# v118: Attention 256 fuer fp16-KV (K/V als uint = 2 Werte). Sonst wie K_ATTN; Gruppengroesse 4 fest (im Init geprueft).
+K_ATTN2 = r"""
+cbuffer C:register(b0){ uint POS0; uint L; uint NH; uint NKV; uint T0; uint P1; uint P2; uint P3; };
+RWStructuredBuffer<float> Q:register(u0); RWStructuredBuffer<uint> K:register(u1);
+RWStructuredBuffer<uint> V:register(u2); RWStructuredBuffer<float> PO:register(u3);
+RWStructuredBuffer<float> ML:register(u4);
+groupshared float q[4][256]; groupshared float sc[4][256]; groupshared float rm[4][256];
+[numthreads(256,1,1)]
+void main(uint3 g:SV_GroupID, uint3 l:SV_GroupThreadID){
+  uint s=g.x, kvh=g.y, t=g.z, i=l.x, KH=NKV*128, P=POS0+T0+t, h, j, k, a;
+  uint jb=s*L, je=min(jb+L, P+1), so=(t*%(NS)d+s)*NH;
+  [unroll] for(h=0;h<4;h++) q[h][i]=Q[((T0+t)*NH+kvh*4+h)*512+i];
+  GroupMemoryBarrierWithGroupSync();
+  float m[4], ls[4], acc[4];
+  [unroll] for(h=0;h<4;h++){ m[h]=-1e30; ls[h]=0; acc[h]=0; }
+  for(uint b0=jb;b0<je;b0+=256){
+    uint n=min(256,je-b0); float d[4]; [unroll] for(h=0;h<4;h++) d[h]=0;
+    if(i<n){ uint rb=(b0+i)*KH+kvh*128;
+      for(k=0;k<128;k++){ uint u=K[rb+k]; float k0=f16tof32(u&0xffff), k1=f16tof32(u>>16);
+        [unroll] for(h=0;h<4;h++) d[h]+=q[h][2*k]*k0+q[h][2*k+1]*k1; } }
+    [unroll] for(h=0;h<4;h++){ float v=(i<n)?d[h]*0.0625:-1e30; sc[h][i]=v; rm[h][i]=v; }
+    GroupMemoryBarrierWithGroupSync();
+    for(a=128;a>0;a>>=1){ if(i<a){ [unroll] for(h=0;h<4;h++) rm[h][i]=max(rm[h][i],rm[h][i+a]); } GroupMemoryBarrierWithGroupSync(); }
+    [unroll] for(h=0;h<4;h++){ float bm=max(m[h],rm[h][0]); float f=exp(m[h]-bm); acc[h]*=f; ls[h]*=f; m[h]=bm; }
+    [unroll] for(h=0;h<4;h++) sc[h][i]=(i<n)?exp(sc[h][i]-m[h]):0;
+    GroupMemoryBarrierWithGroupSync();
+    for(j=0;j<n;j++){ uint u=V[(b0+j)*KH+kvh*128+(i>>1)]; float v=f16tof32((i&1)?(u>>16):(u&0xffff));
+      [unroll] for(h=0;h<4;h++){ float pr=sc[h][j]; ls[h]+=pr; acc[h]+=pr*v; } }
+    GroupMemoryBarrierWithGroupSync();
+  }
+  [unroll] for(h=0;h<4;h++){ uint qh=kvh*4+h; PO[(so+qh)*256+i]=acc[h];
+    if(i==0){ ML[(so+qh)*2]=m[h]; ML[(so+qh)*2+1]=ls[h]; } }
+}""" % dict(NS=NS_MAX)
+
 K_SOFTMAX256 = K_SOFTMAX.replace("0.08838834764831845", "0.0625")
 
 
@@ -188,18 +293,27 @@ class Qwen35Engine:
         self.k_copy16 = sh(K_COPY16) if self.kv16 else None
         self.k_conv, self.k_delta, self.k_gnorm, self.k_rope = sh(K_CONV), sh(K_DELTA), sh(K_GNORM), sh(K_QKROPE)
         self.k_attn, self.k_merge, self.k_gate = sh(hk(K_ATTN)), sh(K_MERGE), sh(K_GATE)
+        self.k_attn2 = None; self.attn2 = False                                    # v118
+        if self.kv16:
+            try: self.k_attn2 = sh(K_ATTN2)
+            except Exception as e: progress(f"Attention attn2 nicht verfuegbar: {e}")
         self.k_gemm = None
         try:
             gm = (sh(k_gemm16(False)), sh(k_gemm16(True))) if self.kv16 else (sh(k_gemm(False)), sh(k_gemm(True)))
             self.k_gemm = gm + (sh(K_SOFTMAX256),)
         except Exception as e: progress(f"Attention gemm nicht verfuegbar: {e}")
-        self.q8 = False; self.stg = None
+        self.q8 = False; self.stg = None; self.k_lin8v = None; self.k_mvt8b = None; self.small8 = "mvt8"
         H, I = self.H, self.I
+        self.lmh_rows = min(LMH_ROWS, max(64, 120_000_000 // (H * 2) // 64 * 64))   # v128
         if int8:
             try:
                 self.k_quant, self.k_mv8, self.k_mvt8 = sh(K_QUANT), sh(K_MV8), sh(K_MVT8)
                 self.k_lin8 = sh(k_linear8(4, 4))
-                self.stg = g.buffer(max(LMH_ROWS * H, I * H, 2 * self.NH * self.D * H, 8192 * H) // 2); self.q8 = True
+                try: self.k_lin8v = sh(K_LIN8V)                                    # v114
+                except Exception as e: progress(f"Einlesen int8 v8 nicht verfuegbar: {e}")
+                try: self.k_mvt8b = sh(K_MVT8B)                                    # v116
+                except Exception as e: progress(f"Kleine Bloecke int8 b nicht verfuegbar: {e}")
+                self.stg = g.buffer(max(self.lmh_rows * H, I * H, 2 * self.NH * self.D * H, 8192 * H) // 2); self.q8 = True
             except Exception as e: progress(f"8-Bit-Kernels nicht verfuegbar ({e}) - lade mit bf16")
         self.lin_kernel = "q44" if self.q8 else "v2"; self.small_kernel = "mt"
         self.pre_kernel = "gemm" if self.k_gemm else "split"; self.dec_kernel = "split"
@@ -232,10 +346,12 @@ class Qwen35Engine:
         self.emb_raw = st.raw(emb); self.row_bytes = H * 2
         progress("Lade Sprachmodell: Ausgabeschicht", self.L, self.L)
         hr = st.raw(head); self.lmh = []
-        for r0 in range(0, self.V, LMH_ROWS):
-            r1 = min(self.V, r0 + LMH_ROWS); part = hr[r0 * self.row_bytes: r1 * self.row_bytes]
+        for r0 in range(0, self.V, self.lmh_rows):
+            r1 = min(self.V, r0 + self.lmh_rows); part = hr[r0 * self.row_bytes: r1 * self.row_bytes]
             self.lmh.append((r0, r1, self._quant(part, r1 - r0, H) if self.q8 else g.buffer((r1 - r0) * H // 2, part)))
         if self.q8: g.free(self.stg); self.stg = None
+        self.emb_raw = bytes(self.emb_raw); del hr, part                 # v127: keine Verweise mehr in die Dateien
+        self._release_files(progress)
         # ---- RoPE-Tabelle (32 Frequenzen)
         inv = [1.0 / self.theta ** (2 * i / self.rot) for i in range(self.rot // 2)]
         cs = array("f")
@@ -264,6 +380,15 @@ class Qwen35Engine:
         self.kv_ids, self.reused = [], 0
         self.split_on = True; self.snap_at = 0
         self._reset_state()
+
+    def _release_files(self, progress=lambda *a: None):
+        """v127: mmap der .safetensors schliessen. Scheitert es (Verweise offen), bleibt alles wie bisher."""
+        st = self.st
+        try:
+            for o in reversed(st._keep): o.close()
+            st._keep, st.t = [], {}; self.st = None
+        except Exception as e:
+            progress(f"Modelldateien bleiben geöffnet ({type(e).__name__}: {e})")
 
     # ---- Zustand (rekurrent)
     def _reset_state(self):
@@ -307,8 +432,11 @@ class Qwen35Engine:
             _, w8, sc = w
             if T == 1: g._run(self.k_mv8, struct.pack("<4I", IN, 0, 0, OUT), [x, w8, y, sc], ((OUT + 7) // 8, 1, 1))
             elif T <= SMALL_MAX:
+                k = self.k_mvt8b if self.small8 == "b" else self.k_mvt8           # v116
                 for t0 in range(0, T, 16):
-                    g._run(self.k_mvt8, struct.pack("<4I", min(16, T - t0), IN, OUT, t0), [x, w8, y, sc], ((OUT + 31) // 32, 1, 1))
+                    g._run(k, struct.pack("<4I", min(16, T - t0), IN, OUT, t0), [x, w8, y, sc], ((OUT + 31) // 32, 1, 1))
+            elif self.lin_kernel == "v8":                                          # v114
+                g._run(self.k_lin8v, struct.pack("<4I", T, IN, OUT, 0), [x, w8, y, sc], ((OUT + 63) // 64, (T + 127) // 128, 1))
             else: g._run(self.k_lin8, struct.pack("<4I", T, IN, OUT, 0), [x, w8, y, sc], ((OUT + 63) // 64, (T + 63) // 64, 1))
         elif T == 1: g._run(self.k_mv, struct.pack("<4I", IN, 0, 0, 0), [x, w, y], (OUT, 1, 1))
         elif T <= SMALL_MAX:
@@ -358,7 +486,7 @@ class Qwen35Engine:
                     L = max(128, (-(-n // NS_MAX) + 127) // 128 * 128)
                 else: L = n
                 ns = -(-n // L)
-                g._run(self.k_attn, struct.pack("<8I", pos0, L, self.NH, self.NKV, t0, 0, 0, 0),
+                g._run(self.k_attn2 if self.attn2 else self.k_attn, struct.pack("<8I", pos0, L, self.NH, self.NKV, t0, 0, 0, 0),
                        [self.QKV, self.kc[l], self.vc[l], self.PO, self.ML], (ns, self.NKV, tt))
                 g._run(self.k_merge, struct.pack("<4I", ns, self.NH, t0, 0), [self.PO, self.ML, self.A], (self.NH, tt, 1))
         n = T * self.NH * 256; groups = min((n + 255) // 256, 65535)
@@ -592,14 +720,62 @@ class Qwen35Engine:
         res["dec_split"] = timed(lambda: self._attn(l0, 1, Pd, force="split"))
         res["dec_one"] = timed(lambda: self._attn(l0, 1, Pd, force="one"))
         self.split_on = res["dec_split"] <= res["dec_one"]; self.dec_kernel = self.small_attn = "split" if self.split_on else "one"
+        # 6b) v118: attn2 gegen attn256 (10 Tokens am Ende von Pd, dann Tempo 1 Token)
+        if self.k_attn2:
+            mode = "split" if self.split_on else "one"; o2 = {}
+            g.write(self.QKV, fb(rv(10 * self.NH * 512)))
+            for a2 in (False, True):
+                self.attn2 = a2; self._attn(l0, 10, Pd - 10, force=mode); o2[a2] = g.read(self.A, 10 * self.NH * 256)
+                res["sattn10_" + ("attn2" if a2 else "attn256")] = timed(lambda: self._attn(l0, 10, Pd - 10, force=mode))
+                res["dec1_" + ("attn2" if a2 else "attn256")] = timed(lambda: self._attn(l0, 1, Pd, force=mode))
+            res["attn2_diff"] = rel(o2[False], o2[True])
+            self.attn2 = res["attn2_diff"] < 1e-3 and res["dec1_attn2"] < res["dec1_attn256"]
+            self.attn_kernel = "attn2" if self.attn2 else "attn256"
+            progress(f"Attention Schreiben {Pd + 1} Pos.: attn256 {res['dec1_attn256'] * 1000:.2f} ms, attn2 {res['dec1_attn2'] * 1000:.2f} ms "
+                     f"(Abw. {res['attn2_diff']:.0e}) -> {self.attn_kernel}")
         # 7) Tempo Delta-Regel (Schreiben, 1 Token)
         res["delta_1tok"] = timed(lambda: g._run(self.k_delta, struct.pack("<4I", 1, 0, 0, 0),
                                                  [self.QKV, self.Ab, self.Bb, alb, dtb, stb, self.A], (2, 32, 1)))
+        # 8) v116: int8-Kernels an allen Matrixformen: Genauigkeit (gegen q44 bzw. mvt8) und Tempo
+        if self.q8 and isinstance(self.w[0]["gate_proj"], tuple):
+            H, I = self.H, self.I; l1 = self.lin[0]; w0, w1 = self.w[0], self.w[l1]
+            forms = [("gate", w0["gate_proj"], H, I, self.X, self.Gt), ("down", w0["down_proj"], I, H, self.Gt, self.O),
+                     ("qkv", w1["in_proj_qkv"], H, 8192, self.X, self.QKV), ("a", w1["in_proj_a"], H, 32, self.X, self.Ab),
+                     ("out", w1["out_proj"], 4096, H, self.A, self.O)]
+            def cmp(T, kname, alt, ref, keys):
+                worst = 0.0
+                for nm, w, IN, OUT, xb, yb in forms:
+                    g.write(xb, fb(rv(T * IN))); outs = []
+                    for kn in (ref, alt):
+                        setattr(self, kname, kn); self._lin(xb, w, yb, T, IN, OUT); outs.append(g.read(yb, T * OUT))
+                    worst = max(worst, rel(outs[0], outs[1]))
+                res[keys] = worst; return worst
+            def tmess(T, kname, kn, w, IN, OUT, xb, yb):
+                setattr(self, kname, kn); return timed(lambda: self._lin(xb, w, yb, T, IN, OUT), 2)
+            gate = forms[0]
+            if self.k_lin8v:                                                   # Einlesen: 200 Tokens (Randkacheln) genau, 512 Tempo
+                ok = cmp(200, "lin_kernel", "v8", "q44", "lin8_diff") < 1e-4
+                g.write(self.X, fb(rv(CHUNK * H)))
+                for kn in ("q44", "v8"): res["lin8_" + kn] = tmess(CHUNK, "lin_kernel", kn, *gate[1:])
+                for kn in ("q44", "v8"): res["gflops_" + kn] = 2 * CHUNK * H * I / res["lin8_" + kn] / 1e9
+                self.lin_kernel = "v8" if ok and res["lin8_v8"] < res["lin8_q44"] else "q44"
+            cands = (["b"] if self.k_mvt8b else [])                     # v118: ohne c2/c4/c8: kleine Bloecke, 10 Tokens
+            if cands:
+                res["small8_mvt8"] = tmess(10, "small8", "mvt8", *gate[1:]); best, res["small8_diff"] = "mvt8", 0.0
+                for kn in cands:
+                    d = cmp(10, "small8", kn, "mvt8", "small8_diff_" + kn); res["small8_" + kn] = tmess(10, "small8", kn, *gate[1:])
+                    if d < 1e-4 and res["small8_" + kn] < res["small8_" + best]: best, res["small8_diff"] = kn, d
+                res["small8_cands"] = ["mvt8"] + cands
+                res["mv8_1"] = timed(lambda: self._lin(self.X, gate[1], self.Gt, 1, H, I), 3)
+                self.small8 = self.small_kernel = best
+            progress(f"int8: Einlesen q44 {res.get('lin8_q44', 0) * 1000:.0f} / v8 {res.get('lin8_v8', 0) * 1000:.0f} ms "
+                     f"(Abw. {res.get('lin8_diff', 0):.0e}) -> {self.lin_kernel}; 10 Tokens "
+                     + ", ".join(f"{k} {res['small8_' + k] * 1000:.1f}" for k in res.get("small8_cands", [])) + f" ms -> {self.small8}")
         for b in bufs.values(): g.free(b)
         progress(f"Qwen3.5-Selbsttest ok: Faltung {res['conv_diff']:.0e}, Delta {res['delta_diff']:.0e}, Norm {res['gnorm_diff']:.0e}, "
                  f"RoPE {res['rope_diff']:.0e}, Attention {res['attn_diff']:.0e}; Schreiben {Pd + 1} Pos.: split "
                  f"{res['dec_split'] * 1000:.2f} ms, eins {res['dec_one'] * 1000:.2f} ms -> {self.dec_kernel}; "
                  f"Delta 1 Token {res['delta_1tok'] * 1000:.2f} ms; Einlesen {self.pre_kernel}")
         self.kv_ids = []; self._reset_state()
-        res["gflops_" + self.lin_kernel] = 0.0
+        res.setdefault("gflops_" + self.lin_kernel, 0.0)
         self.bench = res; return res

@@ -1,4 +1,6 @@
-# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261021v113
+# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261024v119
+# v125: Schalter «8 Bit» entfernt (8 Bit ist Standard; Gegenprobe bf16 nur per settings.json "llm_int8": false).
+# v119: Schieberegler «Quellen» (2–12) unter dem Sprachmodell (Einstellung llm_top_k).
 # v113: Gruppe «Werkzeuge» in der Seitenleiste mit «Text anonymisieren» (anon_gui.py, Nachbau tiseR-Anonymisator).
 # v110: Rückfrage «Meintest du …?» mit Knöpfen (Ereignis rueckfrage); Klick fragt mit genau dieser Quelle.
 # v109: Seitenleiste neu: aufklappbare Gruppen Chat · Wissen · Workflows · Einstellungen (nur eine offen, gemerkt in menu_offen);
@@ -131,7 +133,7 @@ class App:
         self.grp = {}; self.grp_cur = None
 
         # ---- Chat: Sprachmodell, 8 Bit
-        b = self._grp(menu, "Chat", "Sprachmodell wählen, laden und 8 Bit.")
+        b = self._grp(menu, "Chat", "Sprachmodell wählen und laden, Anzahl Quellen.")
         self.models = discover(MODELS); ids = [m[0] for m in self.models]
         self.om = ctk.CTkOptionMenu(b, values=[m[1] for m in self.models], height=32, corner_radius=8,
                                     font=font(12), dropdown_font=font(12), fg_color=CARD, button_color=CARD,
@@ -146,8 +148,18 @@ class App:
         self.b_llm = ctk.CTkButton(lrow, text="Laden", width=76, height=28, corner_radius=8, font=font(12, "bold"),
                                    fg_color=ACCENT, hover_color=ACCENT_HI, command=self.toggle_llm)
         self.b_llm.grid(row=0, column=2); self.llm_ready = False
-        self.q8_var = tk.BooleanVar(value=bool(self.s.get("llm_int8", False)))                # v70
-        self._switch(b, "8 Bit (schneller)", self.q8_var, self.toggle_q8, 2)
+        self.q8_var = tk.BooleanVar(value=bool(self.s.get("llm_int8", True)))                # v70
+        # v125: kein Schalter mehr; q8_var bleibt fuer toggle_q8 (nicht mehr aufgerufen)
+        qrow = ctk.CTkFrame(b, fg_color="transparent"); qrow.grid(row=3, column=0, sticky="ew", pady=(8, 0))   # v119
+        qrow.grid_columnconfigure(1, weight=1)
+        nq = max(2, min(12, int(self.s.get("llm_top_k", 4))))
+        self.q_lbl = ctk.CTkLabel(qrow, text=f"Quellen {nq}", font=font(11), text_color=INK, width=70, anchor="w")
+        self.q_lbl.grid(row=0, column=0, sticky="w", padx=(2, 0))
+        self.q_sl = ctk.CTkSlider(qrow, from_=2, to=12, number_of_steps=10, height=16, progress_color=ACCENT,
+                                  button_color=ACCENT, button_hover_color=ACCENT_HI, command=self.set_quellen)
+        self.q_sl.set(nq); self.q_sl.grid(row=0, column=1, sticky="ew", padx=(4, 2))
+        hilfe.tip(self.q_sl, "Wie viele Quellen das Sprachmodell liest. Mehr Quellen = vollständigere Antworten, aber je Quelle "
+                             "etwa 3–5 s länger. Höchstens 2 Textstücke je Mail/Dokument.")
         self._llm_view("none" if self.s["llm"] == "extractive" else "off",
                        "kein Laden noetig" if self.s["llm"] == "extractive" else "nicht geladen")
 
@@ -332,7 +344,7 @@ class App:
             nm = self.om.get(); kurz, _, rest = nm.partition(" [")
             self.rb_mname.configure(text=kurz)
             typ = rest.rstrip("]").replace(", ", " · ") if rest else ""
-            if self.s.get("llm_int8") and self.s.get("llm") != "extractive": typ = (typ + " · " if typ else "") + "8 Bit"
+            if self.s.get("llm") != "extractive": typ = (typ + " · " if typ else "") + ("8 Bit" if self.s.get("llm_int8", True) else "bf16 (Gegenprobe)")
             self.rb_mtyp.configure(text=typ)
             if text is not None:
                 self.rb_mstate.configure(text=f"● {text}", text_color=TEAL if col == OK else ("#F59E0B" if col == "#F59E0B" else MUTED))
@@ -894,6 +906,11 @@ class App:
         if self.llm_ready: self.w.submit("unload_llm")          # altes Modell aus dem GPU-Speicher
         self._llm_view("none" if self.s["llm"] == "extractive" else "off",
                        "kein Laden noetig" if self.s["llm"] == "extractive" else "nicht geladen")
+
+    def set_quellen(self, v):                                          # v119
+        n = int(round(float(v))); self.q_lbl.configure(text=f"Quellen {n}")
+        self.s = load_settings()
+        if self.s.get("llm_top_k") != n: self.s["llm_top_k"] = n; save_settings(self.s)
 
     def toggle_q8(self):
         """v70: 8-Bit-Gewichte ein/aus. Gilt beim nächsten «Laden»; ein geladenes Modell wird entladen."""

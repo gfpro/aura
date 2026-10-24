@@ -5,5 +5,9 @@
 Quelle: https://huggingface.co/intfloat/multilingual-e5-large
 
 ## Sprachmodell (optional, nächster Baustein)
-Je ein Ordner pro Modell, z.B. `models/Qwen2.5-3B-Instruct/` mit `config.json`, `*.safetensors`, `tokenizer.json`.
+Je ein Ordner pro Modell, z.B. `models/Qwen3.5-4B/` mit `chat_template.jinja`, `config.json`, `merges.txt`, `*.safetensors`, `preprocessor_config.json`, `tokenizer.json`, `tokenizer_config.json`, `vocab.json`.
+AURA erkennt Modelle automatisch an `config.json` (Feld `architectures`).
+
+## Sprachmodell (optional, nächster Baustein)
+Je ein Ordner pro Modell, z.B. `models/Qwen3.5-9B/` mit `chat_template.jinja`, `config.json`, `merges.txt`, `*.safetensors`, `preprocessor_config.json`, `tokenizer.json`, `tokenizer_config.json`, `vocab.json`.
 AURA erkennt Modelle automatisch an `config.json` (Feld `architectures`).

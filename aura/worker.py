@@ -8,6 +8,15 @@
 # v65: Folgefragen (Gespraechsgedaechtnis ueber die letzten 3 Fragen).
 # v67: Folgefrage nur per Knopf «Bezug zur letzten Frage» (follow=True); Worterkennung nur mit followup_auto.
 # v106: Speicher-Messung (log.mem) vor/nach jedem Auftrag und alle 500 Vektoren beim Einbetten.
+# v124: Confluence-Fassungsvergleich: neue Seitenversion -> Textstueck «Aenderungen vom … (Bearbeiter) an «Seite»» mit neuen/
+#       geaenderten und entfernten Zeilen; fruehere Aenderungs-Stuecke werden mitgenommen (confluence_diff_keep, 8).
+#       (v123 zurueckgenommen: Aenderungsdatum im Prompt verdraengte die Inhalte.)
+# v122: Kuerzlich geaenderte, passende Confluence-Seite wird als Quelle Nr. 2 vorgezogen (falls nicht schon dabei).
+# v121: Confluence – Benachrichtigungsmails «[…confluence] Bereich > Seite»: je Seite nur eine; liegt die Seite in AURA,
+#       wird ihr bestes Textstueck statt der Mail genommen. Hinweis unter der Antwort auf passende Seiten, die in den
+#       letzten confluence_hinweis_tage (14) geaendert wurden (Datum + Bearbeiter).
+# v119: Quellen 2–12 (llm_top_k): Suche holt mind. 2x so viele Kandidaten. (Je Objekt liefert die Suche ohnehin nur
+#       1 Stueck; _streuen greift erst bei Nachbarn/Wissen/Folgefragen.)
 # v114: Anonymisator – PDF-Text wird zu Absaetzen zusammengefuegt (Einstellung anon_umbruch).
 # v113: Anonymisator (job_anon_scan, job_anon_absender) – Ergebnis nur als Ereignis «anon», nichts wird gespeichert.
 # v112: Mail-Anhaenge (pdf/docx/txt/md) als eigene Textstuecke «Betreff › Anhang name»; gleicher Anhang nur einmal
@@ -23,7 +32,7 @@
 # v36: Workflow-Pakete, Neustart ab Schritt (job_workflow start_at).
 # v73: zitierter Mailverlauf wird durchsucht (nur Absaetze, die in keiner anderen Mail stehen); einmalige Nachbearbeitung
 #      aller Mails (job_verlauf, startet automatisch); Mails geplanter Workflows (Betreff = Workflow-Name) ausgeschlossen.
-import ctypes, hashlib, json, queue, re, threading, time, traceback
+import ctypes, difflib, hashlib, json, queue, re, threading, time, traceback
 from array import array
 from . import db, listmode, log
 from .config import MODELS, load_settings
@@ -42,7 +51,21 @@ CHRONO = re.compile(r"\b(ablauf|verlauf|chronolog\w*|der reihe nach|von anfang a
 ANH_REF = re.compile(r"\b(anhang\w*|angeh[äa]ngt\w*|dokument\w*|datei\w*|pdf|beilage\w*)\b", re.I)   # v98
 SRC_REF = re.compile(r"\b((?:e-?)?mails?\w*|termin\w*|kalender\w*|sitzung\w*|meeting\w*|verlauf\w*|onenote|confluence)\b", re.I)  # v99
 TASK = re.compile(r"^\s*(erstell\w*|schreib\w*|formulier\w*|generier\w*|entwirf|entwerfe|nimm|mach\w*|verfass\w*|liste? .* auf)\b", re.I)  # v99
+CONF_MAIL = re.compile(r"^\s*(?:(?:re|aw|wg|fw|fwd)\s*:\s*)*\[[^\]]*confluence[^\]]*\]\s*(.*)$", re.I)   # v121
 DEADLINE = re.compile(r"\b(frist\w*|deadline|bis wann|sp[äa]testens|f[äa]llig\w*|eingabeschluss|termin f[üu]r)\b", re.I)
+
+def diff_chunks(old, new, ts, author, title, max_plus=3000, max_minus=1500):
+    """v124: Zeilenvergleich alt/neu -> Textstuecke «Aenderungen vom TT.MM.JJJJ (Bearbeiter) an «Titel»: …»."""
+    a = [l.strip() for l in old.splitlines() if l.strip()]; b = [l.strip() for l in new.splitlines() if l.strip()]
+    plus, minus = [], []
+    for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+        if op in ("replace", "insert"): plus += b[j1:j2]
+        if op in ("replace", "delete"): minus += a[i1:i2]
+    if not plus and not minus: return []
+    txt = ("Neu oder geändert:\n" + "\n".join(plus))[:max_plus] if plus else ""
+    if minus: txt += ("\n\n" if txt else "") + ("Entfernt:\n" + "\n".join(minus))[:max_minus]
+    d = f"{ts[8:10]}.{ts[5:7]}.{ts[:4]}" if len(ts) >= 10 else ts
+    return make_chunks(txt, f"Änderungen vom {d}" + (f" ({author})" if author else "") + f" an «{title}»: ")
 
 def keep_awake(on):
     """ES_CONTINUOUS|ES_SYSTEM_REQUIRED: kein Standby wegen Inaktivitaet. Zugeklappter Deckel,
@@ -132,7 +155,8 @@ class Worker(threading.Thread):
                 if it.get("zitat"):
                     kept, new = verlauf_neu(it["zitat"], lambda hs: db.hashes_known(self.conn, hs))
                     db.hashes_add(self.conn, new); zit = make_chunks(kept, self._vprefix(it)) if kept else []
-            if db.add_item(self.conn, cid, it, make_chunks(text, prefix) + self._anh_chunks(it), zit): n += 1   # v112
+            extra = self._conf_diff(it) if cid == "confluence" else []          # v124
+            if db.add_item(self.conn, cid, it, make_chunks(text, prefix) + self._anh_chunks(it) + extra, zit): n += 1   # v112
             if n and n % 200 == 0: self.conn.commit()
         removed = 0
         if cid == "outlook_calendar" and getattr(ctx, "seen", None) and not self.cancel.is_set() \
@@ -192,6 +216,26 @@ class Worker(threading.Thread):
             out |= {w["name"].strip().lower() for w in mit_zeitplan(WF_DIR) if w.get("name")}
         except Exception as e: log.get().warning(f"Ausschluss Workflow-Mails: {e}")
         return out
+
+    # ---- v124: Confluence-Fassungsvergleich
+    DIFF_TAG = "Änderungen vom "
+
+    def _conf_diff(self, it):
+        """Vergleicht die neue Fassung mit der gespeicherten vorherigen (gleiche Seiten-ID). Rueckgabe: Textstuecke."""
+        try:
+            pid = str((it.get("meta") or {}).get("page_id") or it["ext_id"].split("|")[0])
+            r = self.conn.execute("SELECT id, body FROM items WHERE source = 'confluence' AND ext_id LIKE ? AND ext_id <> ? "
+                                  "ORDER BY ts DESC LIMIT 1", (pid + "|v%", it["ext_id"])).fetchone()
+            if not r: return []
+            old_id, old = r
+            out = diff_chunks(old or "", it.get("text") or "", it.get("ts") or "", it.get("author") or "", it.get("title") or "")
+            keep = int(load_settings().get("confluence_diff_keep", 8))
+            alt = [t for (t,) in self.conn.execute("SELECT text FROM chunks WHERE item_id = ? AND text LIKE ? ORDER BY ord",
+                                                    (old_id, self.DIFF_TAG + "%"))]
+            if out: self.progress(f"Confluence: «{it.get('title', '')}» – Änderungen erfasst")
+            return out + alt[:max(0, keep)]
+        except Exception as e:
+            log.get().warning(f"Confluence-Vergleich: {e}"); return []
 
     # ---- v112: Mail-Anhaenge
     def _anh_chunks(self, it):
@@ -434,6 +478,58 @@ class Worker(threading.Thread):
         keep = [h for i, h in enumerate(hits) if i < 2 or h["score"] >= rel * top]
         return keep
 
+    @staticmethod
+    def _streuen(hits, n, per):
+        """v119: Unter den ersten n hoechstens per Stuecke je Objekt (item_id); ueberzaehlige rutschen hinter die n,
+        Reihenfolge sonst nach Relevanz. per <= 0: aus."""
+        if per <= 0 or len(hits) <= n: return hits
+        front, back, cnt = [], [], {}
+        for h in hits:
+            key = h.get("item_id") or id(h)
+            if len(front) < n and cnt.get(key, 0) < per: front.append(h); cnt[key] = cnt.get(key, 0) + 1
+            else: back.append(h)
+        return front + back
+
+    def _confluence_mails(self, hits, question, qvec, mode):
+        """v121: Benachrichtigungsmails zu Confluence-Seiten: je Seite eine; Seite in AURA -> deren Textstueck statt Mail."""
+        out, seen = [], set()
+        have = {h.get("item_id") for h in hits}
+        for h in hits:
+            m = CONF_MAIL.match(h.get("title") or "") if h.get("source") == "outlook_mail" else None
+            if not m: out.append(h); continue
+            page = m.group(1).split(">")[-1].strip()
+            if not page or page.lower() in seen: continue
+            seen.add(page.lower())
+            r = self.conn.execute("SELECT id FROM items WHERE source = 'confluence' AND title = ? ORDER BY ts DESC LIMIT 1",
+                                  (page,)).fetchone()
+            if r and r[0] in have: continue                             # Seite ist schon Quelle -> Mail unnoetig
+            if r:
+                ph = self.retriever.search(self.conn, question, qvec, k=1, mode=mode, items=[r[0]])
+                if ph:
+                    ph[0]["score"] = h.get("score", 0); out.append(ph[0]); have.add(r[0]); continue
+            out.append(h)
+        return out
+
+    def _confluence_hinweis(self, question, days):
+        """v121: «Hinweis: Confluence-Seite … zuletzt geaendert am … von …» fuer passende, kuerzlich geaenderte Seiten."""
+        if days <= 0: return "", []
+        try:
+            from datetime import date, timedelta
+            terms = self.retriever.terms(question)
+            if not terms: return "", []
+            since = (date.today() - timedelta(days)).isoformat()
+            rows = self.conn.execute(
+                "SELECT DISTINCT i.title, i.ts, i.author, i.id FROM chunks_fts f JOIN chunks c ON c.id = f.rowid JOIN items i ON i.id = c.item_id "
+                "WHERE chunks_fts MATCH ? AND i.source = 'confluence' AND i.ts >= ? ORDER BY i.ts DESC LIMIT 3",
+                (" AND ".join('"%s"' % t for t in terms), since)).fetchall()
+        except Exception as e:
+            log.get().warning(f"Confluence-Hinweis: {e}"); return "", []
+        lines = []
+        for title, ts, au, _ in rows:
+            d = f"{ts[8:10]}.{ts[5:7]}.{ts[:4]}" if len(ts or "") >= 10 else (ts or "?")
+            lines.append(f"Hinweis: Confluence-Seite «{title}» zuletzt geändert am {d}" + (f" von {au}" if au else "") + ".")
+        return "\n".join(lines), [x[3] for x in rows]
+
     def _add_neighbours(self, hits, n):
         """Frist-Fragen: Folgestueck (und Vorgaenger) derselben Mail anhaengen - die Frist steht oft im Nachbarstueck."""
         for h in hits[:n]:
@@ -507,7 +603,8 @@ class Worker(threading.Thread):
             self.progress("Suche (hybrid) ..."); qvec = emb.query(question); mode = "hybrid"
         else:
             self.progress("Suche (nur BM25 - noch keine Vektoren) ..."); mode = "bm25"
-        R, k = self.retriever, int(s["top_k"])
+        R = self.retriever; n_llm = int(s.get("llm_top_k", 4))
+        k = max(int(s["top_k"]), 2 * n_llm)                              # v119: genug Kandidaten fuer die Streuung
         pl = {"who": None, "intent": None, "items": None, "boost": None} if use_anh else R.plan(self.conn, question)   # v101
         who, it, items, boost = pl["who"], pl["intent"], pl["items"], pl["boost"]
         info = [f"Person {' '.join(who[1])}"] if who else []
@@ -534,6 +631,15 @@ class Worker(threading.Thread):
                             recency=rw, half_days=int(s.get("recency_half_days", 180)),
                             quote_weight=float(s.get("zitat_gewicht", 0.8)))     # v73
             hits = self._drop_weak(hits, mode, s)
+            hits = self._streuen(hits, n_llm, int(s.get("quellen_je_objekt", 2)))   # v119
+            hits = self._confluence_mails(hits, question, qvec, mode)                # v121
+            hw_txt, hw_ids = self._confluence_hinweis(question, int(s.get("confluence_hinweis_tage", 14)))
+            neu = [i for i in hw_ids if i not in {h.get("item_id") for h in hits[:n_llm]}][:1]   # v122
+            if neu:
+                ph = R.search(self.conn, question, qvec, k=1, mode=mode, items=neu)
+                if ph:
+                    hits = [h for h in hits if h.get("item_id") != neu[0]]; hits[1:1] = ph
+                    self.progress(f"Confluence: kürzlich geänderte Seite «{ph[0]['title']}» als Quelle vorgezogen")
             if hits and not DEADLINE.search(question) and int(s.get("nachbarn_top", 1)):   # v105: bester Treffer mit Nachbarn
                 self._add_neighbours(hits, int(s.get("nachbarn_top", 1)))
             if DEADLINE.search(question):
@@ -603,8 +709,10 @@ class Worker(threading.Thread):
         lab = (dict((i, l) for i, l, _ in discover(MODELS)).get(backend_id, "") + " " + backend_id).lower()
         if backend_id != "extractive" and "qwen3" in lab and "instruct" not in lab:
             q_llm += " /no_think"        # Qwen3-Hybridmodelle (z.B. 8B): Denkteil abschalten, sonst frisst er llm_max_new
+        hw = self._confluence_hinweis(question, int(s.get("confluence_hinweis_tage", 14)))[0]   # v121: nur Anzeige
         try:
             be.generate(q_llm, hits, lambda t: self.emit("token", t), self.cancel.is_set)
+            if hw: self.emit("token", "\n\n" + hw)
         finally:
             tm = dict(be.timing or {})
             tm.update(search=t_search, load=t_gen - t_start - t_search, total=time.perf_counter() - t_start)
