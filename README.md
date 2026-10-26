@@ -51,8 +51,8 @@ Stand: v64 (Oktober 2026) · Änderungen: [CHANGELOG.md](CHANGELOG.md)
    | Modell | Zweck | Ordner |
    | --- | --- | --- |
    | [intfloat/multilingual-e5-large](https://huggingface.co/intfloat/multilingual-e5-large) | Suche nach Bedeutung (Pflicht) | `models\multilingual-e5-large\` |
-   | [Qwen/Qwen3-4B-Instruct-2507](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507) | Besser für kurze Antworten | `models\Qwen3-4B\` |
-   | [Qwen/Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) | Besser für lange Antworten | `models\Qwen3.5-4B\` |
+   | [Qwen/Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) | Schneller für Chat | `models\Qwen3.5-4B\` |
+   | [Qwen/Qwen3.5-9B](https://huggingface.co/Qwen/Qwen3.5-9B) | Besser für Workflow | `models\Qwen3.5-9B\` |
 
    Jeder Modellordner braucht `config.json`, `tokenizer.json` und die `*.safetensors`-Dateien.
 6. Doppelklick auf `AURA.pyw`. Beim ersten Start legt AURA Datenbank und Einstellungen an.
