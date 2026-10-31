@@ -1,3 +1,4 @@
+# aura/worker.py — Version 20261029v129 (v129: job_chat_neu)
 # aura/worker.py — EIN Hintergrund-Thread fuer alles Schwere (Outlook, GPU, Suche).
 # DirectX 11 und Outlook-COM vertragen keinen parallelen Zugriff aus mehreren Threads.
 # Die Oberflaeche schickt Auftraege (jobs) und liest Ereignisse (events).
@@ -767,6 +768,10 @@ class Worker(threading.Thread):
 
     def job_anhang_leeren(self):
         self.anhang = []; self.emit("anhang", [])
+
+    def job_chat_neu(self):
+        """v129: neuer Chat – kein Anhang, kein Bezug zur letzten Frage."""
+        self.chat = None; self.job_anhang_leeren()
 
     def _anhang_hits(self, question, k=4):
         """Ganzer Text, wenn kurz; sonst die passendsten Stücke (Vektor + Wortübereinstimmung)."""

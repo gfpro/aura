@@ -1,4 +1,4 @@
-# aura/workflow/nodes.py — Bausteine (Schritt-Typen). Version 20261016v96 (v96: unsichere Auswahlfelder -> Hinweis im Pruefbericht; v41: leer_werte, v43: vorspann; rag liefert text_pin/text_suche)
+# aura/workflow/nodes.py — Bausteine (Schritt-Typen). Version 20261030v137 (v137: Verneinungsliste ohne «nicht anwendbar/entfällt/verzichtet»; v136: Feldoption verneinung_pruefen – Beleg mit Verneinung im Zitat oder im Folgesatz wird verworfen; v135: Feldoption min_sicherheit/unsicher_wert – unsichere Auswahl wird ersetzt statt verwendet; v132: Ausfuehrlichkeit je Workflow (knapp/normal/ausfuehrlich) fuer freie Antworten und Felder mit «ausfuehrlich_ok»; v96: unsichere Auswahlfelder -> Hinweis im Pruefbericht; v41: leer_werte, v43: vorspann; rag liefert text_pin/text_suche)
 # v45: word_vorlage sucht nach dem Ausfuellen verbliebene Platzhalter (Parameter platzhalter) -> Warnungen/Pruefbericht.
 # v49: Option beleg_nach (Zitat nach dem Wert, neutral -> «keiner» ohne Modell), Standard aus.
 # v44: Feldoption vorschlag – Text geht NUR in den Pruefbericht (_vorschlaege), nie in das Ergebnis des Schritts.
@@ -91,6 +91,21 @@ FIELD_RULES = ("\n\nAntworte als JSON-Objekt mit genau diesen Feldern (alle Wert
                "Fehlt eine Information, das ausdruecklich so schreiben. Nichts erfinden.")
 
 NEUTRAL = {"nein", "keine", "keiner", "unklar", "keine angabe in den unterlagen.", ""}
+
+# v137: nur Wendungen, die die AUSNAHME selbst verneinen. Entfernt: «nicht anwendbar», «entfällt», «verzichtet» –
+# «Das BöB ist nicht anwendbar» oder «Ausschreibung entfällt» BEJAHEN eine Ausnahme (Fehlalarm inhouse_bit).
+VERNEINT = re.compile(r"liegt[^.]{0,60}nicht vor|kommt[^.]{0,40}nicht in frage|nicht erfüllt|"
+                      r"bietet[^.]{0,60}nicht an|keine ausnahme|nicht beansprucht|abgelehnt|ist nicht gegeben|"
+                      r"(?:ausnahme|voraussetzung)[^.]{0,40}besteht nicht", re.I)
+
+def _verneint(zitat, quellen):
+    """v136: Steht im Zitat oder im direkt folgenden Text (bis ca. 2 Sätze) eine Verneinung? Rückgabe: Fundstelle oder ''."""
+    z = re.sub(r"\s+", " ", zitat or "").strip().lower(); q = re.sub(r"\s+", " ", quellen or "")
+    if len(z) < 12: return ""
+    i = q.lower().find(z[:80])
+    fenster = z if i < 0 else q[i:i + len(z) + 260]
+    m = VERNEINT.search(fenster)
+    return m.group(0) if m else ""
 LEER = "Keine Angabe in den Unterlagen."
 
 def _prep_fields(fields, nach=False):
@@ -135,8 +150,23 @@ def n_llm(p, state, ctx):
         ctx.progress(f"GPU-Zuruecksetzung ({e}) - lade Sprachmodell neu und wiederhole den Schritt ...")
         be.unload(); be.load(); return _llm(p, state, ctx)
 
+AUSF = {"knapp": (0.6, "Fasse dich kurz: nur das Wesentliche, ohne Ausschmückung."),
+        "normal": (1.0, ""),
+        "ausfuehrlich": (1.8, "Antworte ausführlich: nenne Zusammenhänge, Hintergründe und Einzelheiten aus den Unterlagen "
+                              "(Daten, Personen, Beträge, Fristen). Erfinde nichts dazu.")}
+
+def ausfuehrlichkeit(state, ctx):
+    """v132: Stufe des Workflows (workflow.json: "ausfuehrlichkeit"), Standard «normal»."""
+    a = (state.get("workflow") or {}).get("ausfuehrlichkeit")
+    if a is None:
+        try: a = json.loads((ctx.wf_dir / "workflow.json").read_text(encoding="utf-8")).get("ausfuehrlichkeit")
+        except Exception: a = None
+    a = str(a or "normal").lower().replace("ü", "ue")
+    return a if a in AUSF else "normal"
+
 def _llm(p, state, ctx):
     be, bid, label = ctx.llm(p.get("backend") or state["workflow"].get("llm"))
+    stufe = ausfuehrlichkeit(state, ctx); fak, satz = AUSF[stufe]          # v132
     s = ctx.settings
     temp = float(p.get("temperature", 0.0)); pen = float(p.get("repetition_penalty", 1.05))
     system, prompt = as_text(p.get("system", "")), as_text(p.get("prompt", ""))
@@ -152,6 +182,12 @@ def _llm(p, state, ctx):
                                           + ", ".join(names), None, ctx.cancelled)
             return dict(llmio.extract_json(txt, names), _raw=txt, _forced=False)
         return {"text": llmio.fallback_generate(be, s, system, prompt, None, ctx.cancelled)}
+    if fields and stufe != "normal":                                   # v132: nur markierte Textfelder
+        fields = [dict(f) for f in fields]
+        for f in fields:
+            if f.get("ausfuehrlich_ok") and not f.get("auswahl") and not f.get("zahl"):
+                f["max_tokens"] = max(10, int(int(f.get("max_tokens", 250)) * fak))
+                f["hint"] = (f.get("hint", "") + " – " + satz).strip(" –")
     if fields:
         fields = _prep_fields(fields, bool(p.get("beleg_nach", False)))
         spec = "\n".join(_spec(f) for f in fields)
@@ -188,6 +224,12 @@ def _llm(p, state, ctx):
                 if v.strip().lower() in neutral: res[n + "_belegt"] = None
                 else:
                     ok = belegt(res.get(n + "_beleg", ""), quellen); res[n + "_belegt"] = ok
+                    vn = _verneint(res.get(n + "_beleg", ""), quellen) if ok and f.get("verneinung_pruefen") else ""
+                    if vn:                                               # v136
+                        res[n + "_belegt"] = False; res.setdefault(n + "_roh", v)
+                        res[n] = f.get("ohne_beleg", f.get("wenn_leer") or "keine")
+                        hinweise.append(f"{f.get('label', n)}: «{v[:80]}» – die Unterlagen verneinen das («{vn}») – auf «{res[n]}» gesetzt.")
+                        ok = True
                     if not ok:
                         res.setdefault(n + "_roh", v)
                         res[n] = f.get("ohne_beleg", "unklar" if "unklar" in (f.get("auswahl") or []) else (f.get("wenn_leer") or LEER))
@@ -196,18 +238,31 @@ def _llm(p, state, ctx):
             if f.get("wenn_leer") and res.get(n, "").strip().lower().rstrip(".") in {x.rstrip(".") for x in leerw}:
                 res[n] = f["wenn_leer"]
         lab = {f["name"]: f.get("label", f["name"]) for f in fields}       # v96: Auswahl mit geringer Sicherheit
+        sich = {n: c for n, c in st.get("sicherheit", [])}; ersetzt = set()
+        for f in fields:                                               # v135: Mindestsicherheit je Feld
+            n, ms = f["name"], f.get("min_sicherheit")
+            if ms is None or n not in sich or sich[n] >= float(ms): continue
+            alt = f.get("unsicher_wert", "unklar")
+            if str(res.get(n, "")).strip().lower() == str(alt).strip().lower(): continue
+            res.setdefault(n + "_roh", res.get(n, "")); ersetzt.add(n)
+            hinweise.append(f"{lab.get(n, n)}: Modell schwankte ({sich[n]:.0%} für «{res.get(n, '')}», verlangt "
+                            f"{float(ms):.0%}) – auf «{alt}» gesetzt. Bitte in den Unterlagen prüfen.")
+            res[n] = alt
         for n, v, c in st.get("unsicher", []):
-            if str(res.get(n, v)).strip().lower() != "unklar":
+            if n not in ersetzt and str(res.get(n, v)).strip().lower() != "unklar":
                 hinweise.append(f"{lab.get(n, n)}: «{res.get(n, v)}» gewählt, aber das Modell war unsicher "
                                 f"({c:.0%}) – bitte prüfen.")
         for h in hinweise: ctx.progress("Hinweis: " + h)
         return dict(res, _stats=st, _forced=True, _hinweise=hinweise, _warnungen=warn, _vorschlaege=vorschlaege)
-    txt, st = llmio.generate(be, system, prompt, int(p.get("max_new", s.get("llm_max_new", 400))), temp, pen,
+    max_new = int(p.get("max_new", s.get("llm_max_new", 400)))
+    if stufe != "normal" and p.get("ausfuehrlich_ok", True):            # v132: freie Antwort
+        max_new = max(20, int(max_new * fak)); system = (system + "\n\n" + satz).strip()
+    txt, st = llmio.generate(be, system, prompt, max_new, temp, pen,
                              on_text=ctx.on_text, progress=ctx.progress, cancelled=ctx.cancelled, think_off=think_off,
                              vorspann=vorspann)
     if s.get("schweiz_ss", True): txt = txt.replace("ß", "ss")
     ctx.progress(f"Antwort fertig: {st['in']} Tokens gelesen ({st['prefill_s']:.0f} s), {st['out']} geschrieben ({st['gen_s']:.0f} s)")
-    return {"text": txt, "_stats": st}
+    return {"text": txt, "_stats": st, "_ausfuehrlichkeit": stufe}
 
 # ----------------------------------------------------------------------------- AURA-Wissen
 @node("rag", "Suche. Parameter: query, k (6); collection (Wissenssammlung[en]) + pin (Pflichtstellen, z.B. 'BöB Art. 21') "

@@ -1,4 +1,7 @@
-# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261024v119
+# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261029v129
+# v129: Senden-Knopf orange «⏳» + Hinweis, solange Vektoren berechnet werden (Frage bleibt im Eingabefeld).
+#       «＋ Neuer Chat» und «🕘 Verlauf» über dem Chat; Chats werden 30 Tage gespeichert (chatlog.py, data\chats.db;
+#       Einstellungen chats_behalten, chats_tage). «⌂» startet ebenfalls einen neuen Chat (setzt den Bezug im Worker zurück).
 # v125: Schalter «8 Bit» entfernt (8 Bit ist Standard; Gegenprobe bf16 nur per settings.json "llm_int8": false).
 # v119: Schieberegler «Quellen» (2–12) unter dem Sprachmodell (Einstellung llm_top_k).
 # v113: Gruppe «Werkzeuge» in der Seitenleiste mit «Text anonymisieren» (anon_gui.py, Nachbau tiseR-Anonymisator).
@@ -30,7 +33,7 @@ from tkinter import filedialog, messagebox, ttk
 import customtkinter as ctk
 import os
 from pathlib import Path                                            # v71
-from . import VERSION, log, hilfe
+from . import VERSION, log, hilfe, chatlog
 from .config import MODELS, load_settings, save_settings, location_warning
 from .connectors import CONNECTORS
 from .llm import discover
@@ -52,6 +55,7 @@ ACCENT, ACCENT_HI = "#6E56F8", "#5A43E0"
 TEAL    = ("#0F9D7A", "#2DD4A4")          # v68: Statusfarbe der Info-Leiste
 OK, OFF, ERR = "#10B981", ("#C4C8CF", "#4B5260"), "#E5484D"
 BLUE    = "#3B82F6"                        # v109: Balken «läuft»
+AMBER, AMBER_HI = "#F59E0B", "#D97706"       # v129: Senden gesperrt (Vektoren)
 FH = "Georgia"
 MODI = {"Hell": "light", "Dunkel": "dark", "System": "system"}            # v69                            # v68: Serifen nur für wenige Überschriften
 # v46: Startfragen. Mit «XY» wird nur ins Eingabefeld uebernommen (XY markiert), sonst sofort gefragt.
@@ -94,6 +98,11 @@ class App:
         root.title(f"{APP_NAME} – {SUBTITLE}"); root.minsize(820, 560); root.configure(fg_color=BG)
         root.grid_columnconfigure(1, weight=1); root.grid_rowconfigure(0, weight=1)
         self.last_speed = None                                         # v68: Tempo der letzten Antwort (Info-Leiste)
+        self.chat_id = None; self.cur_q = ""; self.embedding = False   # v129
+        try:
+            if self.s.get("chats_behalten", True): chatlog.purge(int(self.s.get("chats_tage", 30)))
+            else: chatlog.purge(0)                                     # ausgeschaltet: nichts aufbewahren
+        except Exception: log.get().exception("Chats aufräumen")
         self._sidebar(); self._main(); self._rightbar()
         hilfe.auto(root, "haupt")                                      # v38: Infotexte
         root.bind("<Escape>", lambda e: self.close_panel(), add="+")   # v46: Slide-In schliessen
@@ -619,8 +628,12 @@ class App:
     def _main(self):
         main = self.mainf = ctk.CTkFrame(self.root, fg_color=BG, corner_radius=0); main.grid(row=0, column=1, sticky="nsew")
         main.grid_columnconfigure(0, weight=1); main.grid_rowconfigure(1, weight=1)
-        ctk.CTkLabel(main, text="Fragen", font=font(22, "bold"), text_color=INK, anchor="w").grid(
-            row=0, column=0, sticky="w", padx=36, pady=(26, 6))
+        hd = ctk.CTkFrame(main, fg_color="transparent"); hd.grid(row=0, column=0, sticky="ew", padx=(36, 36), pady=(26, 6))
+        hd.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(hd, text="Fragen", font=font(22, "bold"), text_color=INK, anchor="w").grid(row=0, column=0, sticky="w")
+        for col, (txt, cmd) in enumerate((("🕘 Verlauf", self.open_chats), ("＋ Neuer Chat", self.new_chat)), start=1):   # v129
+            ctk.CTkButton(hd, text=txt, height=30, corner_radius=15, font=font(12), fg_color="transparent", hover_color=BORDER,
+                          text_color=INK, border_width=1, border_color=BORDER, command=cmd).grid(row=0, column=col, padx=(8, 0))
         self.chat = ctk.CTkScrollableFrame(main, fg_color="transparent", corner_radius=0,
                                            scrollbar_button_color=BORDER, scrollbar_button_hover_color=MUTED)
         self.chat.grid(row=1, column=0, sticky="nsew", padx=24)
@@ -649,6 +662,8 @@ class App:
                                       border_color=BORDER, command=self.add_anhang)
         self.b_anhang.pack(side="left", padx=(8, 0)); self.buttons.append(self.b_anhang)
         self.anh_box = ctk.CTkFrame(tools, fg_color="transparent", width=1, height=1)   # v98: leer = keine Hoehe
+        self.embed_hint = ctk.CTkLabel(tools, text="⏳ Vektoren werden berechnet – Fragen bitte später nochmals versuchen "
+                                       "(oder links «Pause»).", font=font(11, "bold"), text_color=AMBER)   # v129: nur sichtbar beim Einbetten
         self.status = ctk.CTkLabel(main, text="Enter = senden  ·  Shift+Enter = neue Zeile", font=font(11),
                                    text_color=MUTED, anchor="w")
         self.status.grid(row=3, column=0, sticky="ew", padx=40, pady=(0, 12))
@@ -688,7 +703,8 @@ class App:
         self.close_panel(anim=False); self.show_chat()
         for c in self.chat.winfo_children(): c.destroy()
         self.msgs = []; self.welcome = None; self._welcome()
-        self.w.submit("anhang_leeren")                                   # v97: neuer Chat = ohne Anhang
+        self.w.submit("chat_neu")                                        # v97/v129: neuer Chat = ohne Anhang, ohne Bezug
+        self.chat_id = None
         try: self.chat._parent_canvas.yview_moveto(0)
         except Exception: pass
 
@@ -838,6 +854,87 @@ class App:
         try: os.startfile(p)
         except Exception as e: self.status.configure(text=f"Datei nicht geöffnet: {e}")
 
+    # ------------------------------------------------------------------ v129: Vektor-Sperre, neuer Chat, Verlauf
+    def _embed_state(self, on):
+        if on == self.embedding: return
+        self.embedding = on
+        try:
+            if on:
+                self.b_ask.configure(state="normal", text="⏳", fg_color=AMBER, hover_color=AMBER_HI)
+                self.embed_hint.pack(side="left", padx=(12, 0))
+            else:
+                self.b_ask.configure(text="➤", fg_color=ACCENT, hover_color=ACCENT_HI)
+                self.embed_hint.pack_forget()
+        except Exception: pass
+
+    def new_chat(self):
+        if self.cur: self.status.configure(text="Bitte warten, bis die Antwort fertig ist."); return
+        self.go_home(); self.status.configure(text="Neuer Chat – der bisherige ist unter «🕘 Verlauf» gespeichert."
+                                              if self.s.get("chats_behalten", True) else "Neuer Chat.")
+
+    def _chat_save(self, frage, antwort, hits, tm=None):
+        if not frage or not load_settings().get("chats_behalten", True): return
+        try: self.chat_id = chatlog.add(self.chat_id, frage, antwort, hits)
+        except Exception: log.get().exception("Chat speichern")
+
+    def open_chats(self):
+        """Slide-In: gespeicherte Chats (neueste zuerst), öffnen oder löschen."""
+        body = self.panel("Verlauf", "chats", width=460); body.grid_rowconfigure(1, weight=1)
+        tage = int(self.s.get("chats_tage", 30))
+        ctk.CTkLabel(body, text=(f"Chats werden {tage} Tage lokal gespeichert (data\\chats.db) und danach gelöscht."
+                                 if self.s.get("chats_behalten", True) else "Chats werden nicht gespeichert (chats_behalten aus)."),
+                     font=font(11), text_color=MUTED, anchor="w", justify="left", wraplength=400).grid(row=0, column=0, sticky="ew", padx=20, pady=(0, 6))
+        sf = ctk.CTkScrollableFrame(body, fg_color="transparent"); sf.grid(row=1, column=0, sticky="nsew", padx=12)
+        sf.grid_columnconfigure(0, weight=1)
+        try: chats = chatlog.liste()
+        except Exception as e: chats = []; ctk.CTkLabel(sf, text=f"Verlauf nicht lesbar: {e}", text_color=ERR).grid(row=0, column=0)
+        if not chats: ctk.CTkLabel(sf, text="Noch keine gespeicherten Chats.", font=font(12), text_color=MUTED).grid(row=0, column=0, pady=12)
+        for r, c in enumerate(chats):
+            row = ctk.CTkFrame(sf, fg_color=CARD, corner_radius=10); row.grid(row=r, column=0, sticky="ew", pady=3)
+            row.grid_columnconfigure(0, weight=1)
+            akt = c["id"] == self.chat_id
+            b = ctk.CTkButton(row, text=f"{c['titel'] or '(ohne Titel)'}\n{time.strftime('%d.%m.%Y %H:%M', time.localtime(c['t1']))}"
+                              f"  ·  {c['n']} Frage{'n' if c['n'] != 1 else ''}" + ("  ·  offen" if akt else ""),
+                              anchor="w", height=44, font=font(12), fg_color="transparent", hover_color=BORDER, text_color=INK,
+                              command=lambda i=c["id"]: self.load_chat(i))
+            b.grid(row=0, column=0, sticky="ew", padx=(4, 0), pady=2)
+            ctk.CTkButton(row, text="✕", width=30, height=30, corner_radius=8, fg_color="transparent", hover_color=BORDER,
+                          text_color=MUTED, command=lambda i=c["id"]: self._chat_del(i)).grid(row=0, column=1, padx=6)
+        ft = ctk.CTkFrame(body, fg_color="transparent"); ft.grid(row=2, column=0, sticky="ew", padx=20, pady=10)
+        ctk.CTkButton(ft, text="Alle löschen", height=30, corner_radius=8, font=font(12), fg_color="transparent", hover_color=CARD,
+                      text_color=ERR, border_width=1, border_color=ERR, command=lambda: self._chat_del(None)).pack(side="left")
+
+    def _chat_del(self, chat_id):
+        frage = "Alle gespeicherten Chats löschen?" if chat_id is None else "Diesen Chat löschen?"
+        if not messagebox.askyesno(APP_NAME, frage + "\n\nDas lässt sich nicht rückgängig machen.", parent=self.root): return
+        try: chatlog.loeschen(chat_id)
+        except Exception as e: messagebox.showerror(APP_NAME, f"Nicht gelöscht: {e}", parent=self.root); return
+        if chat_id is None or chat_id == self.chat_id: self.chat_id = None
+        self.open_chats()
+
+    def load_chat(self, chat_id):
+        """Gespeicherten Chat anzeigen; neue Fragen werden an ihn angehängt (ohne automatischen Bezug)."""
+        if self.cur: self.status.configure(text="Bitte warten, bis die Antwort fertig ist."); return
+        try: msgs = chatlog.nachrichten(chat_id)
+        except Exception as e: self.status.configure(text=f"Chat nicht lesbar: {e}"); return
+        self.go_home(); self.close_panel(anim=False)
+        for m in msgs:
+            self.bubble(m["frage"], "q"); b, _ = self.bubble(m["antwort"], "a")
+            foot = ctk.CTkFrame(b, fg_color="transparent"); foot.pack(fill="x", padx=16, pady=(0, 10))
+            ctk.CTkLabel(foot, text=time.strftime("%d.%m.%Y %H:%M", time.localtime(m["t"])) + "  ·  gespeichert",
+                         font=font(10), text_color=MUTED).pack(anchor="w")
+            for i, q in enumerate(m["quellen"][:6], 1):
+                t = (q["label"] if q.get("label") else
+                     f"[{i}]  {str(q.get('ts', ''))[:10]}  ·  {str(q.get('source', '')).replace('_', ' ')}  ·  {q.get('title') or 'Quelle'}")[:100]
+                cmd = (lambda x=q["path"]: self._open_file(x)) if q.get("path") else \
+                      (lambda x=q["item_id"]: self.open_original(x)) if q.get("item_id") else None
+                if cmd:
+                    ctk.CTkButton(foot, text=t, anchor="w", height=22, font=font(11), fg_color="transparent", hover_color=BORDER,
+                                  text_color=ACCENT, command=cmd).pack(anchor="w", fill="x")
+                else: ctk.CTkLabel(foot, text=t, font=font(11), text_color=MUTED, anchor="w").pack(anchor="w")
+        self.chat_id = chat_id
+        self.status.configure(text="Gespeicherter Chat – neue Fragen werden angehängt. Für eine Folgefrage «↳ Bezug zur letzten Frage».")
+
     def open_original(self, item_id):
         self.status.configure(text="Öffne Original ...")
         open_item(item_id, lambda msg: self.w.events.put(("progress", (msg, None, None))))
@@ -968,7 +1065,7 @@ class App:
 
     def _ask_force(self, q, backend, items):
         """v110: items = [id] -> genau diese Quelle zuerst; [] -> ohne Rückfrage suchen."""
-        if self.cur or self.b_ask.cget("state") == "disabled":
+        if self.cur or self.embedding or self.b_ask.cget("state") == "disabled":   # v129
             self.status.configure(text="Bitte warten, bis der laufende Auftrag fertig ist."); return
         self.w.submit("ask", q, backend, False, items)
 
@@ -981,6 +1078,9 @@ class App:
 
     def ask(self):
         q = self.entry.get("1.0", "end").strip()
+        if self.embedding:                                               # v129: Frage bleibt stehen
+            self.status.configure(text="Gerade werden Vektoren berechnet – bitte später nochmals versuchen (oder links «Pause»).")
+            return
         if not q or self.b_ask.cget("state") == "disabled": return
         if re.search(r"\bXY\b", q):                                    # v46: Platzhalter aus der Startfrage
             self.status.configure(text="Bitte «XY» durch ein Thema ersetzen."); return
@@ -1308,13 +1408,14 @@ class App:
                         try: b.configure(state="disabled" if d[0] else "normal")
                         except Exception: pass                           # v46: Slide-In evtl. schon geschlossen
                     self._anon("on_busy", *d)                            # v113
+                    self._embed_state(bool(d[0]) and len(d) > 1 and d[1] == "embed")   # v129
                     if d[0]: self._pb_start()                            # v109: blau = läuft
                     else: self._pb_done()                                # grün = fertig (rot, falls Fehler)
                 elif kind == "stats":
                     self.stats = d[0]; self._show_stats()
                 elif kind == "answer_start":
                     if self.view_cur: self.show_chat()                   # v46: Antwort erscheint im Chat
-                    qb, _ = self.bubble(d[0], "q")
+                    qb, _ = self.bubble(d[0], "q"); self.cur_q = d[0]           # v129: für den Verlauf
                     if len(d) > 2 and d[2]:                              # v67: Folgefrage sichtbar machen
                         ctk.CTkLabel(qb, text=f"↳ Bezug: {d[2][:70]}{'…' if len(d[2]) > 70 else ''}", font=font(11),
                                      text_color="#DCE3FF", anchor="w").pack(padx=16, pady=(0, 9), anchor="w")
@@ -1327,6 +1428,7 @@ class App:
                     self.cur_lbl.configure(text=vis)
                     self.sources(self.cur, d[0], vis, d[1] if len(d) > 1 else None)
                     self.last_ans = self.cur; self.cur = None; self._scroll()       # v110
+                    self._chat_save(self.cur_q, vis, d[0], d[1] if len(d) > 1 else None)   # v129
                 elif kind == "llm_state": self._llm_view(d[0], d[1])
                 elif kind == "anon": self._anon("on_scan", d[0])        # v113
                 elif kind == "anon_absender": self._anon("on_absender", d[0])

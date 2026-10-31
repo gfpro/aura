@@ -1,4 +1,5 @@
-# engine/gpu.py — Version 20261012v70  (AURA)  v44: zweiter Konstantenpuffer mit 16 Werten (64 Bytes)
+# engine/gpu.py — Version 20261029v130  (AURA)  v44: zweiter Konstantenpuffer mit 16 Werten (64 Bytes)
+#   v130: read() beachtet die Elementgroesse (stride) - noetig, um int4/int8-Puffer im Selbsttest zurueckzulesen
 #   v70: buffer(..., stride=16) fuer uint4-Zugriffe (int8-Gewichte); free() gibt einen Puffer sofort frei
 # Native GPU-Engine fuer multilingual-e5-large: DirectX 11 Compute ueber ctypes, keine Installation.
 # Bausteine: Linear(+GELU), Add+LayerNorm, Self-Attention. Batch = 1 Text, max. 512 Tokens.
@@ -162,7 +163,7 @@ class GPU:
         b = self._buf(_BD(n * stride, 0, 0x80, 0, 0x40, stride), init)
         v = c_void_p()
         self._ok(_com(self.dev, 8, [c_void_p, POINTER(_UD), POINTER(c_void_p)], b, byref(_UD(0, 1, 0, n, 0)), byref(v)), "CreateUAV")
-        self._objs.append(v); return {"buf": b, "uav": v, "n": n}
+        self._objs.append(v); return {"buf": b, "uav": v, "n": n, "stride": stride}
 
     def free(self, b):
         """v70: Puffer (und seine Sicht) sofort freigeben, z.B. Zwischenpuffer nach dem Laden."""
@@ -180,9 +181,9 @@ class GPU:
              b["buf"], 0, box, (ctypes.c_char * len(data)).from_buffer_copy(data), 0, 0)
 
     def read(self, b, n=None):
-        n = n or b["n"]; full = b["n"]
-        st = self.staging.get(full)
-        if st is None: st = self.staging[full] = self._buf(_BD(full * 4, 3, 0, 0x20000, 0x40, 4), None)
+        sd = b.get("stride", 4); full = b["n"] * sd // 4; n = n or full   # v130: n und full in 4-Byte-Werten
+        st = self.staging.get((full, sd))                                  # Zuruecklese-Puffer mit gleicher Elementgroesse
+        if st is None: st = self.staging[(full, sd)] = self._buf(_BD(full * 4, 3, 0, 0x20000, 0x40, sd), None)
         _com(self.ctx, 47, [c_void_p, c_void_p], st, b["buf"])
         m = _MS()
         self._ok(_com(self.ctx, 14, [c_void_p, c_uint, c_uint, c_uint, POINTER(_MS)], st, 0, 1, 0, byref(m)), "Map")

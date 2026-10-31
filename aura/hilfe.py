@@ -1,4 +1,4 @@
-# aura/hilfe.py — Infotexte (Tooltips) fuer alle Fenster. Version 20261021v114 (v114: Schalter Nachnamen; v113: Werkzeuge › Text anonymisieren; v109: Menügruppen, Widgets, Log öffnen; v90: Übersicht, Expertenansicht; v82: «Beim Start Widgets zeigen»; v81: Widgets-Ansicht; v80: «▶», Widgets; v79: «⌂», Ablaufband; v75: Position korrigiert (Reihenfolge withdraw/topmost/geometry/deiconify); v74: Tooltip vor dem Hauptfenster; v70: Text «8 Bit»; v68: Info-Leiste rechts; v60: Tooltip verschwindet beim Minimieren/Fensterwechsel, nicht mehr über anderen Programmen; v46: Slide-In, Vollansicht, Startfragen)
+# aura/hilfe.py — Infotexte (Tooltips) fuer alle Fenster. Version 20261030v132 (v132: Ausführlichkeit; v114: Schalter Nachnamen; v113: Werkzeuge › Text anonymisieren; v109: Menügruppen, Widgets, Log öffnen; v90: Übersicht, Expertenansicht; v82: «Beim Start Widgets zeigen»; v81: Widgets-Ansicht; v80: «▶», Widgets; v79: «⌂», Ablaufband; v75: Position korrigiert (Reihenfolge withdraw/topmost/geometry/deiconify); v74: Tooltip vor dem Hauptfenster; v70: Text «8 Bit»; v68: Info-Leiste rechts; v60: Tooltip verschwindet beim Minimieren/Fensterwechsel, nicht mehr über anderen Programmen; v46: Slide-In, Vollansicht, Startfragen)
 # Alle Texte stehen hier an einem Ort. Zuordnung:
 #   auto(fenster, ctx)  - findet Knoepfe/Schalter/Haekchen anhand ihrer Beschriftung (TEXTE[ctx], dann TEXTE["*"])
 #   tip(widget, key)    - fester Text fuer Felder ohne Beschriftung (key beginnt mit "#") oder freier Text
@@ -138,6 +138,11 @@ TEXTE = {
         "#wf_vorlage_tabelle": "Grün = Feld wurde im letzten Lauf gefüllt, grau = leer, rot = Fehler in der Zuordnung. Spaltenbreite durch Ziehen am Spaltenrand anpassen.",
         "#wf_input_files": "Dateien für diesen Lauf. Mit * markierte Eingaben sind Pflicht.",
         "#wf_input_text": "Freie Angabe für diesen Lauf. Ohne * ist das Feld optional.",
+        "#wf_ausf": "Wie viel das Sprachmodell schreibt – gilt ab dem nächsten Lauf und bleibt für diesen Workflow gespeichert.\n"
+                    "knapp ≈ 60 %, ausführlich ≈ 180 % der Länge (und Laufzeit beim Schreiben).\n"
+                    "Wirkt auf freie Antworten und auf Felder mit «Länge folgt der Ausführlichkeit» – nie auf Auswahl- oder "
+                    "Zahlfelder. Bei amtlichen Formularen (z.B. Verfahrensentscheid) besser «normal»: längere Texte enthalten "
+                    "eher Füllsätze oder erfundene Angaben.",
     },
 }
 

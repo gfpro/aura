@@ -1,4 +1,6 @@
-# aura/workflow_gui.py — Ansicht «Workflows»: Pakete anlegen, ausfuehren, Wissen und Vorlagen pflegen. Version 20261015v92
+# aura/workflow_gui.py — Ansicht «Workflows»: Pakete anlegen, ausfuehren, Wissen und Vorlagen pflegen. Version 20261030v133
+# (v133: Regler auch bei Sprachmodell-Schritten innerhalb anderer Schritte, z.B. «Je Thema zusammenfassen»)
+# (v132: Regler «Ausführlichkeit» im Reiter «Ausführen» – knapp / normal / ausführlich, gespeichert in der workflow.json)
 # (v93: Start gesperrt, wenn ein Schritt eine fehlende Eingabe liest; Rückfrage bei Datei-Eingaben, die kein Schritt liest)
 # (v92: Schalter «Expertenansicht» fest rechts ausserhalb der Knopfleiste, «Löschen» zuletzt, Neuaufbau verzögert –
 #  vorher lag nach dem Umschalten «Löschen» unter dem Mauszeiger und wurde beim Loslassen ausgelöst)
@@ -167,6 +169,14 @@ class WorkflowWindow:
                 e = ctk.CTkTextbox(lf, height=48, font=G.font(12), border_width=1, border_color=G.BORDER, wrap="word")
                 e.grid(row=r, column=0, sticky="ew"); r += 1; hilfe.tip(e, itip)
                 self.inputs[inp["id"]] = {"type": "text", "entry": e}
+        if self._ausf_wirkt():                                         # v132
+            af = ctk.CTkFrame(lf, fg_color="transparent"); af.grid(row=r, column=0, sticky="ew", pady=(14, 0)); r += 1
+            ctk.CTkLabel(af, text="Ausführlichkeit", font=G.font(12), text_color=G.INK).pack(side="left", padx=(0, 10))
+            werte = {"knapp": "knapp", "normal": "normal", "ausfuehrlich": "ausführlich"}
+            self.seg_ausf = ctk.CTkSegmentedButton(af, values=list(werte.values()), font=G.font(11),
+                                                   selected_color=G.ACCENT, command=self._ausf_setzen)
+            self.seg_ausf.set(werte.get(str(self.wf.get("ausfuehrlichkeit") or self._raw().get("ausfuehrlichkeit") or "normal"), "normal"))
+            self.seg_ausf.pack(side="left"); hilfe.tip(self.seg_ausf, "#wf_ausf")
         bb = ctk.CTkFrame(lf, fg_color="transparent"); bb.grid(row=r, column=0, sticky="ew", pady=(14, 0)); r += 1
         self.b_start = ctk.CTkButton(bb, text="▶  Starten", height=34, corner_radius=8, font=G.font(13, "bold"), fg_color=G.ACCENT,
                                      hover_color=G.ACCENT_HI, command=self.start); self.b_start.pack(side="left")
@@ -199,6 +209,35 @@ class WorkflowWindow:
         last = latest_state(self.app_runs_dir(), self.wf)
         if last: ctk.CTkLabel(self.res, text=f"Letzter Lauf: {last.parent.name if self.wf.get('_dir') else last.name}",
                               font=G.font(11), text_color=G.MUTED).pack(anchor="w")
+
+    def _ausf_wirkt(self):
+        """v132: Regler nur zeigen, wenn ein Sprachmodell-Schritt frei schreibt oder ein Feld «ausfuehrlich_ok» hat."""
+        def llm_schritte(o):                                           # v133: auch verschachtelt (z.B. in «fuer_jedes»)
+            if isinstance(o, dict):
+                if o.get("type") == "llm": yield o
+                for v in o.values(): yield from llm_schritte(v)
+            elif isinstance(o, list):
+                for v in o: yield from llm_schritte(v)
+        for s in llm_schritte((self.wf or {}).get("steps", [])):
+            fs = s.get("fields")
+            if not fs and s.get("ausfuehrlich_ok", True): return True
+            if any(isinstance(f, dict) and f.get("ausfuehrlich_ok") for f in fs or []): return True
+        return False
+
+    def _ausf_setzen(self, v):
+        if self.running:
+            messagebox.showinfo("Workflows", "Während eines Laufs nicht ändern – gilt ab dem nächsten Lauf.", parent=self.win)
+        wert = {"knapp": "knapp", "normal": "normal", "ausführlich": "ausfuehrlich"}.get(v, "normal")
+        try:
+            raw = self._raw()
+            if wert == "normal": raw.pop("ausfuehrlichkeit", None)
+            else: raw["ausfuehrlichkeit"] = wert
+            tmp = Path(self.cur).with_suffix(".tmp")
+            tmp.write_text(json.dumps(raw, ensure_ascii=False, indent=1), encoding="utf-8"); tmp.replace(self.cur)
+            if isinstance(self.wf, dict):
+                if wert == "normal": self.wf.pop("ausfuehrlichkeit", None)
+                else: self.wf["ausfuehrlichkeit"] = wert
+        except Exception as e: messagebox.showerror("Workflows", f"Nicht gespeichert: {e}", parent=self.win)
 
     def app_runs_dir(self):
         from .workflow.app import RUNS_DIR

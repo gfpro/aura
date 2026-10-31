@@ -1,4 +1,4 @@
-# aura/workflow_editor.py — Reiter «Schritte»: Workflow ohne JSON zusammenstellen. Version 20261011v53
+# aura/workflow_editor.py — Reiter «Schritte»: Workflow ohne JSON zusammenstellen. Version 20261030v132 (v132: Feldoption «Länge folgt der Ausführlichkeit»)
 # Auslöser (Eingaben beim Start) + Liste der Schritte als Karten. Jeder Schritt wird in einem Formular bearbeitet, das aus
 # workflow/schema.py entsteht. «Wert einfügen» zeigt die Ergebnisse früherer Schritte zum Anklicken. Unbekannte Parameter
 # eines Schritts bleiben beim Speichern unverändert. Gespeichert wird nur, wenn die Engine den Workflow danach akzeptiert.
@@ -371,7 +371,7 @@ class SchrittEditor:
             for j, x in enumerate(felder):
                 row = ctk.CTkFrame(lst, fg_color=G.BUBBLE, corner_radius=6); row.grid(row=j, column=0, sticky="ew", pady=2)
                 row.grid_columnconfigure(0, weight=1)
-                extra = [n for n, k in (("Auswahl", "auswahl"), ("Zahl", "zahl"), ("Beleg", "beleg"), ("nur Prüfbericht", "vorschlag")) if x.get(k)]
+                extra = [n for n, k in (("Auswahl", "auswahl"), ("Zahl", "zahl"), ("Beleg", "beleg"), ("nur Prüfbericht", "vorschlag"), ("ausführlich", "ausfuehrlich_ok")) if x.get(k)]
                 ctk.CTkLabel(row, text=f"{x.get('name')}   " + (f"[{', '.join(extra)}]  " if extra else "") + _kurz(x.get("hint", ""), 70),
                              font=G.font(11), anchor="w").grid(row=0, column=0, sticky="w", padx=8, pady=4)
                 bb = ctk.CTkFrame(row, fg_color="transparent"); bb.grid(row=0, column=1, padx=4)
@@ -382,7 +382,7 @@ class SchrittEditor:
             if 0 <= j + d < len(felder): felder[j], felder[j + d] = felder[j + d], felder[j]; fill()
         def one(j):
             x = dict(felder[j]) if j is not None else {"max_tokens": 120}
-            d2 = ctk.CTkToplevel(dlg); d2.title("Feld"); d2.transient(dlg); d2.grab_set(); d2.geometry("620x520"); d2.grid_columnconfigure(1, weight=1)
+            d2 = ctk.CTkToplevel(dlg); d2.title("Feld"); d2.transient(dlg); d2.grab_set(); d2.geometry("620x560"); d2.grid_columnconfigure(1, weight=1)
             def lab(r, t, tip=None):
                 ctk.CTkLabel(d2, text=t, font=G.font(12)).grid(row=r, column=0, sticky="nw", padx=12, pady=(10, 0))
                 if tip: ctk.CTkLabel(d2, text=tip, font=G.font(10), text_color=G.MUTED, wraplength=430, justify="left").grid(row=r + 1, column=1, sticky="w")
@@ -400,7 +400,8 @@ class SchrittEditor:
             ea.grid(row=6, column=1, sticky="ew", padx=(0, 12), pady=(10, 0))
             cz = ctk.CTkCheckBox(d2, text="Zahl (zusätzlich <name>_zahl)"); cb = ctk.CTkCheckBox(d2, text="Mit wörtlichem Beleg aus den Unterlagen")
             cv = ctk.CTkCheckBox(d2, text="Nur als Vorschlag in den Prüfbericht (nie ins Ergebnis)")
-            for c, k, r in ((cz, "zahl", 8), (cb, "beleg", 9), (cv, "vorschlag", 10)):
+            cx = ctk.CTkCheckBox(d2, text="Länge folgt der Ausführlichkeit (Regler im Reiter «Ausführen»)")   # v132
+            for c, k, r in ((cz, "zahl", 8), (cb, "beleg", 9), (cv, "vorschlag", 10), (cx, "ausfuehrlich_ok", 11)):
                 (c.select() if x.get(k) else c.deselect()); c.grid(row=r, column=1, sticky="w", pady=(8, 0))
             def ok():
                 n = re.sub(r"[^\w]", "_", en.get().strip())
@@ -414,13 +415,13 @@ class SchrittEditor:
                     a = [o.strip() for o in ea.get().split("|") if o.strip()]
                     if a: x["auswahl"] = a
                     else: x.pop("auswahl", None)
-                for c, k in ((cz, "zahl"), (cb, "beleg"), (cv, "vorschlag")):
+                for c, k in ((cz, "zahl"), (cb, "beleg"), (cv, "vorschlag"), (cx, "ausfuehrlich_ok")):
                     if c.get(): x[k] = True
                     else: x.pop(k, None)
                 if j is None: felder.append(x)
                 else: felder[j] = x
                 d2.destroy(); fill()
-            ctk.CTkButton(d2, text="Übernehmen", fg_color=G.ACCENT, hover_color=G.ACCENT_HI, command=ok).grid(row=11, column=1, sticky="e", padx=12, pady=16)
+            ctk.CTkButton(d2, text="Übernehmen", fg_color=G.ACCENT, hover_color=G.ACCENT_HI, command=ok).grid(row=12, column=1, sticky="e", padx=12, pady=16)
         bb = ctk.CTkFrame(dlg, fg_color="transparent"); bb.pack(fill="x", padx=14, pady=10)
         self._mini(bb, "+ Feld", lambda: one(None)).pack(side="left")
         ctk.CTkButton(bb, text="Übernehmen", width=110, fg_color=G.ACCENT, hover_color=G.ACCENT_HI,
