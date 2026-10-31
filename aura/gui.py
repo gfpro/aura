@@ -1,9 +1,11 @@
-# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261029v129
+# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261031v147
 # v129: Senden-Knopf orange «⏳» + Hinweis, solange Vektoren berechnet werden (Frage bleibt im Eingabefeld).
 #       «＋ Neuer Chat» und «🕘 Verlauf» über dem Chat; Chats werden 30 Tage gespeichert (chatlog.py, data\chats.db;
 #       Einstellungen chats_behalten, chats_tage). «⌂» startet ebenfalls einen neuen Chat (setzt den Bezug im Worker zurück).
 # v125: Schalter «8 Bit» entfernt (8 Bit ist Standard; Gegenprobe bf16 nur per settings.json "llm_int8": false).
 # v119: Schieberegler «Quellen» (2–12) unter dem Sprachmodell (Einstellung llm_top_k).
+# v147: Taskleisten-Symbol in der Grösse für die aktuelle Skalierung (scharf statt hochskaliert).
+# v146: Workflows › «Skills & Rollen» (skills_gui.py); Auswahl «Rolle» über dem Chat.
 # v142: Werkzeuge › «Code prüfen» (code_gui.py).
 # v113: Gruppe «Werkzeuge» in der Seitenleiste mit «Text anonymisieren» (anon_gui.py, Nachbau tiseR-Anonymisator).
 # v110: Rückfrage «Meintest du …?» mit Knöpfen (Ereignis rueckfrage); Klick fragt mit genau dieser Quelle.
@@ -184,6 +186,8 @@ class App:
         self.b_erg = self._item(b, "Ergebnisse", self.open_ergebnisse, 1)                  # v54
         hilfe.tip(self.b_erg, "Ergebnisse aller Workflows: neueste zuerst, mit Öffnen, Speichern und Laufordner.")
         hilfe.tip(self._item(b, "Widgets", self.open_widgets, 2), hilfe.TEXTE["haupt"]["▶"])
+        hilfe.tip(self._item(b, "Skills & Rollen", self.open_skills, 3),                                   # v146
+                  "Verfügbare Skills und Rollen ansehen, importieren und freigeben. Neues oder Geändertes ist aus, bis du es freigibst.")
 
         # ---- v113: Werkzeuge
         b = self._grp(menu, "Werkzeuge", "Hilfsmittel für den Alltag, z.B. Texte anonymisieren.")
@@ -637,6 +641,13 @@ class App:
         for col, (txt, cmd) in enumerate((("🕘 Verlauf", self.open_chats), ("＋ Neuer Chat", self.new_chat)), start=1):   # v129
             ctk.CTkButton(hd, text=txt, height=30, corner_radius=15, font=font(12), fg_color="transparent", hover_color=BORDER,
                           text_color=INK, border_width=1, border_color=BORDER, command=cmd).grid(row=0, column=col, padx=(8, 0))
+        self.m_rolle = ctk.CTkOptionMenu(hd, values=["Keine Rolle"], height=30, width=170, corner_radius=15, font=font(12),
+                                         dropdown_font=font(12), fg_color=CARD, button_color=CARD, button_hover_color=BORDER,
+                                         text_color=INK, command=self._rolle_gewaehlt)                       # v146
+        self.m_rolle.grid(row=0, column=3, padx=(8, 0))
+        hilfe.tip(self.m_rolle, "Rolle für die Antworten im Chat (freigegeben unter Workflows › Skills & Rollen). Die Regeln von "
+                  "AURA – nur Quellen, mit Belegen – gehen immer vor.")
+        self.refresh_rolle()
         self.chat = ctk.CTkScrollableFrame(main, fg_color="transparent", corner_radius=0,
                                            scrollbar_button_color=BORDER, scrollbar_button_hover_color=MUTED)
         self.chat.grid(row=1, column=0, sticky="nsew", padx=24)
@@ -1051,6 +1062,27 @@ class App:
                      font=font(11), text_color=ACCENT).pack(side="left")
         ctk.CTkButton(self.anh_box, text="✕", width=24, height=22, corner_radius=11, font=font(11), fg_color="transparent",
                       hover_color=BORDER, text_color=MUTED, command=lambda: self.w.submit("anhang_leeren")).pack(side="left", padx=(4, 0))
+        b = ctk.CTkButton(self.anh_box, text="▶ Als Präsentation", height=22, corner_radius=11, font=font(11), fg_color=CARD,
+                          hover_color=BORDER, text_color=INK, command=self._als_praesentation)                     # v152
+        b.pack(side="left", padx=(8, 0))
+        hilfe.tip(b, "Macht aus dem Anhang eine PowerPoint-Präsentation in der Vorlage der Bundesverwaltung. Oder im Chat "
+                  "schreiben, z.B. «Mach daraus eine Präsentation für die Geschäftsleitung».")
+
+    def _als_praesentation(self):
+        q = self.entry.get("1.0", "end").strip()
+        self.entry.delete("1.0", "end"); self.entry.insert("1.0", q if q and re.search(r"pr[äa]sentation|folien", q, re.I)
+                                                          else "Erstelle eine Präsentation aus dem Anhang")
+        self.ask()
+
+    def _datei_knopf(self, pfad):
+        """v152: Knopf «Öffnen» unter der letzten Antwort."""
+        f = getattr(self, "last_ans", None)
+        if f is None or not f.winfo_exists(): return
+        box = ctk.CTkFrame(f, fg_color="transparent"); box.pack(fill="x", padx=16, pady=(0, 12))
+        ctk.CTkButton(box, text=f"Öffnen: {Path(pfad).name}", height=28, corner_radius=8, font=font(11, "bold"), fg_color=ACCENT,
+                      hover_color=ACCENT_HI, command=lambda: os.startfile(pfad)).pack(side="left")
+        ctk.CTkButton(box, text="Im Ordner zeigen", height=28, corner_radius=8, font=font(11), fg_color=CARD, hover_color=BORDER,
+                      text_color=INK, command=lambda: os.startfile(str(Path(pfad).parent))).pack(side="left", padx=6)
 
     def _rueckfrage(self, q, backend, cands):
         """v110: Kandidaten als Knöpfe unter der Rückfrage."""
@@ -1105,6 +1137,29 @@ class App:
     def _wf(self, meth, *a):
         w = getattr(self, "wfwin", None)
         if w is not None and w.alive(): getattr(w, meth)(*a)
+
+    def open_skills(self):                                            # v146
+        from .skills_gui import SkillsFenster
+        w = getattr(self, "skillwin", None)
+        if w is not None and w.alive(): w.win.lift(); w.win.focus_force(); return
+        self.skillwin = SkillsFenster(self)
+
+    def refresh_rolle(self):
+        """v146: Auswahl «Rolle» über dem Chat – nur freigegebene Rollen; ausgeblendet, wenn es keine gibt."""
+        m = getattr(self, "m_rolle", None)
+        if m is None: return
+        try:
+            from . import skills
+            self._rollen = {r["titel"]: r["name"] for r in skills.aktive_rollen()}; cur = skills.chat_rolle()
+            if cur and cur not in self._rollen.values(): skills.setze_chat_rolle(""); cur = ""
+        except Exception: self._rollen, cur = {}, ""
+        if not self._rollen: m.grid_remove(); return
+        titel = next((t for t, n in self._rollen.items() if n == cur), "Keine Rolle")
+        m.configure(values=["Keine Rolle"] + list(self._rollen)); m.set(titel); m.grid()
+
+    def _rolle_gewaehlt(self, v):
+        from . import skills
+        skills.setze_chat_rolle(getattr(self, "_rollen", {}).get(v, ""))
 
     def open_anon(self):                                              # v113
         from .anon_gui import AnonWindow
@@ -1447,6 +1502,7 @@ class App:
                 elif kind == "code": self._code("on_code", d[0])        # v142
                 elif kind == "anon_absender": self._anon("on_absender", d[0])
                 elif kind == "anhang": self._show_anhang(d[0])           # v97
+                elif kind == "datei": self._datei_knopf(d[0])             # v152: z.B. erstellte Präsentation
                 elif kind == "rueckfrage": self._rueckfrage(*d)               # v110
                 elif kind == "folders": self._show_folders(*d)
                 elif kind == "confirm_delete": self._confirm_delete(*d)
@@ -1481,6 +1537,30 @@ class App:
             self.cur_lbl.configure(text=f"…  {time.perf_counter() - self.t_ask:.0f} s")
         self.root.after(150, self.poll)
 
+def _scharfes_icon(root, ico):
+    """v147: Tk setzt das grosse Fenstersymbol in 32 px; Windows vergrössert es in der Taskleiste (bei 125/150 % Skalierung
+    auf 40/48 px) – daher unscharf. Hier wird das Symbol in genau der Grösse aus der .ico geladen, die Windows für die
+    aktuelle Bildschirm-Skalierung verlangt, und per WM_SETICON gesetzt (gross = Taskleiste/Alt+Tab, klein = Titelleiste)."""
+    try:
+        u = ctypes.windll.user32
+        hwnd = u.GetParent(root.winfo_id()) or root.winfo_id()
+        try: dpi = u.GetDpiForWindow(hwnd) or 96
+        except Exception: dpi = 96
+        def mass(idx, std):
+            try: return u.GetSystemMetricsForDpi(idx, dpi) or std
+            except Exception: return round(std * dpi / 96)
+        u.LoadImageW.restype = ctypes.c_void_p
+        u.SendMessageW.argtypes = (ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p)
+        root._aura_icons = []                                            # Handles behalten (sonst gibt Windows sie frei)
+        for art, idx, std in ((1, 11, 32), (0, 49, 16)):                 # ICON_BIG/SM_CXICON, ICON_SMALL/SM_CXSMICON
+            n = mass(idx, std)
+            h = u.LoadImageW(None, str(ico), 1, n, n, 0x10)              # IMAGE_ICON, LR_LOADFROMFILE
+            if h: u.SendMessageW(hwnd, 0x80, art, h); root._aura_icons.append(h)
+        log.get().info(f"DIAG icon dpi={dpi} gross={mass(11, 32)} klein={mass(49, 16)}")
+    except Exception as e:
+        log.get().info(f"DIAG icon nicht gesetzt: {e}")
+
+
 def main():
     try: ctypes.windll.shcore.SetProcessDpiAwareness(1)
     except Exception: pass
@@ -1489,7 +1569,9 @@ def main():
     try: ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("armasuisse.AURA")   # v71: eigenes Taskleisten-Symbol
     except Exception: pass
     root = ctk.CTk()
-    try: root.iconbitmap(str(Path(__file__).resolve().parent / "assets" / "aura.ico"))       # v71
+    ico = Path(__file__).resolve().parent / "assets" / "aura.ico"
+    try: root.iconbitmap(str(ico))                                                            # v71
     except Exception: pass
+    root.after(400, lambda: _scharfes_icon(root, ico))       # v147: nach dem Anzeigen (und nach dem Symbol von CustomTkinter)
     root.report_callback_exception = lambda t, v, tb: lg.error("Fehler in der Oberflaeche", exc_info=(t, v, tb))
     App(root); root.mainloop(); lg.info("AURA beendet")

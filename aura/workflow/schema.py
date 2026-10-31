@@ -1,11 +1,11 @@
-# aura/workflow/schema.py — Beschreibung der Bausteine für den Schritt-Editor (Reiter «Schritte»). Version 20261019v108
+# aura/workflow/schema.py — Beschreibung der Bausteine für den Schritt-Editor (Reiter «Schritte»). Version 20261031v146
 #
 # Jeder Baustein (Schritt-Typ) beschreibt hier seine Felder in Alltagssprache. Die Oberfläche baut daraus das Formular;
 # ein neuer Baustein braucht nur einen Eintrag hier, keine Änderung an der Oberfläche.
 # Feld: key (Parameter im workflow.json), label, typ, hilfe, standard, pflicht, optionen, wert_einfuegen
 #   typ: text | textarea | zahl | ja_nein | auswahl | liste (Komma-getrennt -> Liste) | werte («name = wert» je Zeile -> dict)
 #        | felder (Felder des Sprachmodells, eigener Editor) | json (fortgeschritten) | info (nur Hinweis)
-#   optionen: Liste oder Name einer Quelle: "vorlagen" (Word-Dateien im Paket), "sammlungen", "quellen"
+#   optionen: Liste oder Name einer Quelle: "vorlagen" (Word-Dateien im Paket), "sammlungen", "quellen", "rollen" (v146)
 # ergebnis: was der Schritt liefert (für «Wert einfügen»); bei llm/set/regel kommen die eigenen Namen dazu.
 # Keine Fachinhalte (kein APA, keine Beschaffung) – nur allgemeine Bausteine.
 
@@ -115,7 +115,9 @@ BAUSTEINE = {
              "hilfe": "Was soll das Modell tun? Den zu lesenden Text mit «Wert einfügen» hineinnehmen, z.B. den Text aus «Dateien lesen»."},
             {"key": "fields", "label": "Antwort in Feldern", "typ": "felder",
              "hilfe": "Optional: feste Felder (z.B. «auftragswert», «leistungsart»). Ohne Felder antwortet das Modell frei (Ergebnis «text»)."},
-            {"key": "system", "label": "Rolle", "typ": "textarea", "hoehe": 60, "wert_einfuegen": True,
+            {"key": "rolle", "label": "Rolle (Skills & Rollen)", "typ": "auswahl", "optionen": "rollen",
+             "hilfe": "Optional: eine freigegebene Rolle aus «Workflows › Skills & Rollen». Ihr Text steht vor dem Systemtext."},
+            {"key": "system", "label": "Systemtext", "typ": "textarea", "hoehe": 60, "wert_einfuegen": True,
              "hilfe": "Optional: Wer ist das Modell? Z.B. «Du prüfst Beschaffungsunterlagen.»"},
             {"key": "vorspann", "label": "Fester Text davor", "typ": "textarea", "hoehe": 60, "wert_einfuegen": True,
              "hilfe": "Optional: Text, der bei jedem Lauf gleich ist (z.B. Richtlinie). Wird zwischengespeichert – schneller."},

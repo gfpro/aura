@@ -1,4 +1,4 @@
-# aura/workflow/nodes.py — Bausteine (Schritt-Typen). Version 20261030v137 (v137: Verneinungsliste ohne «nicht anwendbar/entfällt/verzichtet»; v136: Feldoption verneinung_pruefen – Beleg mit Verneinung im Zitat oder im Folgesatz wird verworfen; v135: Feldoption min_sicherheit/unsicher_wert – unsichere Auswahl wird ersetzt statt verwendet; v132: Ausfuehrlichkeit je Workflow (knapp/normal/ausfuehrlich) fuer freie Antworten und Felder mit «ausfuehrlich_ok»; v96: unsichere Auswahlfelder -> Hinweis im Pruefbericht; v41: leer_werte, v43: vorspann; rag liefert text_pin/text_suche)
+# aura/workflow/nodes.py — Bausteine (Schritt-Typen). Version 20261031v146 (v146: Parameter «rolle» im Baustein llm – Text einer freigegebenen Rolle vor dem Systemtext; v137: Verneinungsliste ohne «nicht anwendbar/entfällt/verzichtet»; v136: Feldoption verneinung_pruefen – Beleg mit Verneinung im Zitat oder im Folgesatz wird verworfen; v135: Feldoption min_sicherheit/unsicher_wert – unsichere Auswahl wird ersetzt statt verwendet; v132: Ausfuehrlichkeit je Workflow (knapp/normal/ausfuehrlich) fuer freie Antworten und Felder mit «ausfuehrlich_ok»; v96: unsichere Auswahlfelder -> Hinweis im Pruefbericht; v41: leer_werte, v43: vorspann; rag liefert text_pin/text_suche)
 # v45: word_vorlage sucht nach dem Ausfuellen verbliebene Platzhalter (Parameter platzhalter) -> Warnungen/Pruefbericht.
 # v49: Option beleg_nach (Zitat nach dem Wert, neutral -> «keiner» ohne Modell), Standard aus.
 # v44: Feldoption vorschlag – Text geht NUR in den Pruefbericht (_vorschlaege), nie in das Ergebnis des Schritts.
@@ -170,6 +170,11 @@ def _llm(p, state, ctx):
     s = ctx.settings
     temp = float(p.get("temperature", 0.0)); pen = float(p.get("repetition_penalty", 1.05))
     system, prompt = as_text(p.get("system", "")), as_text(p.get("prompt", ""))
+    if p.get("rolle"):                                                    # v146: Rolle aus C:\aura\rollen (nur freigegeben)
+        from ..skills import rolle_text
+        rt = rolle_text(p["rolle"])
+        if not rt: raise ValueError(f"Rolle «{p['rolle']}» ist nicht freigegeben oder fehlt (Workflows › Skills & Rollen).")
+        system = (rt + "\n\n" + system).strip()
     vorspann = as_text(p.get("vorspann", ""))                           # v43: fester Teil zuerst -> Cache
     think_off = "qwen3" in label.lower() and "instruct" not in label.lower()
     fields = p.get("fields")

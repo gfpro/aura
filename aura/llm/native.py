@@ -1,4 +1,4 @@
-# aura/llm/native.py — Hugging-Face-Sprachmodelle auf der nativen GPU-Engine. Version 20261029v130 (v130: 4-Bit-Gewichte, Einstellung llm_bits 4/8/16; v118: nur noch Qwen3.5, Qwen3-Engine entfernt; v110: Quellen nur mit Link werden genannt; v106: Speicher nach Engine-Aufbau ins Log; v104: System-Prompt ohne Satzgrenze – nur die Frage beantworten, keine Fuellsaetze; v88: Qwen3.5 ueber qwen35.py, Denkmodus aus; v86: gemm fp16; v85: KV-Cache fp16, Einstellung llm_kv16; v84: splitr im Log; v83: Split-K-Varianten im Log; v28: Kontextlaenge aus Einstellungen; v44: Kernel-Wahl ins Log; v70: 8-Bit-Gewichte, Einstellung llm_int8;
+# aura/llm/native.py — Hugging-Face-Sprachmodelle auf der nativen GPU-Engine. Version 20261031v146 (v146: freigegebene Chat-Rolle aus skills.py im Systemtext; v130: 4-Bit-Gewichte, Einstellung llm_bits 4/8/16; v118: nur noch Qwen3.5, Qwen3-Engine entfernt; v110: Quellen nur mit Link werden genannt; v106: Speicher nach Engine-Aufbau ins Log; v104: System-Prompt ohne Satzgrenze – nur die Frage beantworten, keine Fuellsaetze; v88: Qwen3.5 ueber qwen35.py, Denkmodus aus; v86: gemm fp16; v85: KV-Cache fp16, Einstellung llm_kv16; v84: splitr im Log; v83: Split-K-Varianten im Log; v28: Kontextlaenge aus Einstellungen; v44: Kernel-Wahl ins Log; v70: 8-Bit-Gewichte, Einstellung llm_int8;
 #   v72: Schweizer Rechtschreibung (ß -> ss) und ohne Vorspann «Antwort:»)
 # Unterstuetzt: Qwen3.5 (Qwen3_5ForConditionalGeneration / Qwen3_5ForCausalLM, z.B. Qwen3.5-4B), Gewichte bf16 oder int8.
 import json, time
@@ -7,6 +7,13 @@ from .base import LLMBackend, build_prompt
 
 SUPPORTED = {"Qwen3_5ForConditionalGeneration", "Qwen3_5ForCausalLM"}   # v118: Qwen3 entfernt
 Q35 = {"Qwen3_5ForConditionalGeneration", "Qwen3_5ForCausalLM"}
+def _rolle():                                                          # v146: freigegebene Chat-Rolle (skills.py)
+    try:
+        from ..skills import chat_zusatz
+        return chat_zusatz()
+    except Exception: return ""
+
+
 NO_THINK = "<think>\n\n</think>\n\n"                                # v88: Qwen3.5 ohne Denkmodus
 SYSTEM = ("Du bist AURA, ein lokaler Assistent. Antworte auf Deutsch, sachlich und knapp: nur was gefragt ist, ohne "
           "Fuellsaetze, einfacher Text ohne Markdown (keine Sternchen, keine Rauten). Nenne zuerst die direkte Antwort. "
@@ -106,7 +113,7 @@ class NativeCausalLM(LLMBackend):
         hits = list(hits)
         while True:
             user = build_prompt(question, hits)
-            text = f"<|im_start|>system\n{SYSTEM}<|im_end|>\n<|im_start|>user\n{user}<|im_end|>\n<|im_start|>assistant\n{self.chat_suffix()}"
+            text = f"<|im_start|>system\n{SYSTEM}{_rolle()}<|im_end|>\n<|im_start|>user\n{user}<|im_end|>\n<|im_start|>assistant\n{self.chat_suffix()}"
             ids = self.tok.encode(text)
             if len(ids) <= budget or not hits: return ids, len(hits)
             hits = hits[:-1]

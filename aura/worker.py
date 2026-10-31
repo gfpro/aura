@@ -580,6 +580,8 @@ class Worker(threading.Thread):
 
     def job_ask(self, question, backend_id, follow=None, force=None):
         t_start = time.perf_counter()
+        from .praesentation import WUNSCH                               # v152: «Mach eine Präsentation …» mit Anhang
+        if self.anhang and WUNSCH.search(question): return self.job_praesentation(question, backend_id)
         prev = self._followup(question, load_settings(), follow)         # v65/v67
         ref = prev[-1] if prev else ""                                   # v67: Anzeige «Bezug: …» in der Oberflaeche
         asked = question                                                 # Originalfrage (Anzeige, Modell)
@@ -766,6 +768,38 @@ class Worker(threading.Thread):
             self.anhang.append({"name": name, "path": p, "text": text, "chunks": list(zip(ch, vecs))})
         self.emit("anhang", [{"name": a["name"], "zeichen": len(a["text"])} for a in self.anhang])
         self.progress(f"Anhang bereit: {len(self.anhang)} Datei(en) – gilt nur für diesen Chat")
+
+    def job_praesentation(self, auftrag, backend_id):
+        """v152: Präsentation aus den Anhängen dieses Chats (praesentation.py, pptx_bau.py). Antwort im Chat + Knopf «Öffnen»."""
+        from . import praesentation as P
+        from .workflow import llmio
+        t0 = time.perf_counter(); s = load_settings()
+        self.emit("answer_start", auftrag, "praesentation", "")
+        def fertig(text, datei=None):
+            self.emit("token", text)
+            self.emit("sources", [], {"search": 0, "total": time.perf_counter() - t0, "list": True})
+            if datei: self.emit("datei", str(datei))
+        if not self.anhang: return fertig("Für eine Präsentation zuerst eine Datei anhängen (📎).")
+        bid = backend_id
+        if s.get("praes_9b"):                                           # grösseres Modell, falls vorhanden
+            bid = next((i for i, l, _ in discover(MODELS) if "9b" in (l + " " + i).lower()), backend_id)
+        if bid == "extractive": return fertig("Für eine Präsentation braucht es ein Sprachmodell (Einstellungen › Sprachmodell).")
+        try:
+            be = self._llm(bid); think = self._think_off(bid)
+            def feld(system, user, fields):
+                res, _ = llmio.structured(be, system, user, fields, cancelled=self.cancel.is_set, think_off=think)
+                return res
+            text = "\n\n".join(a["text"] for a in self.anhang)
+            ziel, folien, hinweise = P.erstellen(text, self.anhang[0]["name"], auftrag, feld, self.progress, self.cancel.is_set)
+        except Exception as e:
+            log.get().error("Praesentation", exc_info=True); return fertig(f"Präsentation nicht erstellt: {e}")
+        self._llm_state()
+        zeilen = [f"Präsentation erstellt: {len(folien)} Folien, {time.perf_counter() - t0:.0f} s.", ""]
+        zeilen += [f"{i + 1}. {f['titel']}" for i, f in enumerate(folien)]
+        if hinweise: zeilen += ["", "Bitte prüfen:"] + [f"- {h}" for h in hinweise]
+        zeilen += ["", "Stichpunkte sind verdichtet, nicht geprüft – vor dem Weitergeben durchsehen. Gespeichert unter " + str(ziel)]
+        fertig("\n".join(zeilen), ziel)
+        log.get().info(f"Praesentation: {len(folien)} Folien -> {ziel}")
 
     def job_anhang_leeren(self):
         self.anhang = []; self.emit("anhang", [])

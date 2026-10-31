@@ -4,6 +4,93 @@ Neueste Version zuerst. Versionsnummern entsprechen `VERSION` in `aura/__init__.
 
 ---
 
+## v156 – 31.10.2026 · Präsentation: Einschränkungen nicht unterschlagen
+
+- Leitplanke ohne Sprachmodell: Behauptet ein Stichpunkt unbedingt «zulässig / erlaubt / verboten / muss …», steht im passenden Quellsatz aber «grundsätzlich», «unter Voraussetzungen», «sofern/soweit», «in der Regel» oder «nur wenn», ergänzt AURA die Einschränkung in Klammern und nennt die Folie in der Antwort unter «Bitte prüfen».
+- Am Bericht «Rechtlicher Rahmen Public Cloud» geprüft: «Datenübermittlung an Cloud-Anbieter bleibt rechtlich zulässig» → «… (grundsätzlich)»; bereits eingeschränkte oder nicht absolute Stichpunkte bleiben unverändert.
+
+## v155 – 31.10.2026 · Präsentation: kürzere Stichpunkte
+
+- Ein Gedanke pro Stichpunkt: «A; B» wird in zwei Stichpunkte geteilt (höchstens 5 je Folie); kürzere Längengrenze.
+- Zweispaltige Folie nur noch mit kurzen Spaltentiteln (höchstens 5 Wörter), sonst Aufzählung – keine abgeschnittenen Titel mehr.
+
+## v154 – 31.10.2026 · Präsentation: Kernaussagen statt Inhaltsangabe
+
+- Lange Kapitel: statt der ersten Sätze je Unterkapitel gehen die aussagekräftigsten Sätze ans Modell (Pflichten, Verbote, Voraussetzungen, Risiken, Folgen – «muss», «nicht zulässig», «strafbar», «daher» …); Unterkapitel «Schlussfolgerung/Fazit» ganz.
+- Auftrag ans Modell: Kernaussagen und Folgen nennen statt beschreiben, wovon der Text handelt; möglichst jedes Unterkapitel abdecken.
+- Umbrochene Überschriften werden ergänzt («Bestimmungen zur Informationssicherheit des» → «… des Bundes»).
+- Stichpunkte in Schweizer Schreibung (ß → ss).
+
+## v153 – 31.10.2026 · Präsentation: Gliederung nach Kapiteln
+
+- Nummerierte Überschriften zählen nur, wenn die Nummer in die Folge passt (1 → 1.1 → 1.2 → 2 …, Neubeginn bei 1 für einen neuen Teil). Fussnoten («12 Siehe …») und Seitenköpfe («Bundeskanzlei BK») werden so nicht mehr zu Folientiteln; ein Inhaltsverzeichnis wird übersprungen.
+- Fussnoten werden aus dem Folientext entfernt; wiederkehrende Kopf-/Fusszeilen ebenso.
+- Lange Kapitel: je Unterkapitel Titel und erste Sätze statt nur der Kapitelanfang – das Modell sieht den ganzen Inhalt.
+- Titel und Fazit stützen sich auf die «Zusammenfassung» des Dokuments (oder Management Summary, Fazit), nicht mehr auf den Textanfang.
+- Test am Bericht «Rechtlicher Rahmen Public Cloud» (38 Seiten): 8 Folien = die 8 Kapitel (vorher Fussnoten als Titel).
+
+## v152 – 31.10.2026 · Präsentation aus dem Chat, Verbindung löschen, lxml-Test
+
+**Präsentation im Chat**
+- Datei anhängen (📎) und «▶ Als Präsentation» klicken – oder schreiben, z.B. «Mach daraus eine Präsentation für die Geschäftsleitung». Ergebnis: PowerPoint in der Vorlage der Bundesverwaltung (16:9), Knöpfe «Öffnen» und «Im Ordner zeigen» unter der Antwort; gespeichert in `data\praesentationen`.
+- Ablauf: Gliederung ohne Sprachmodell (Überschriften, sonst Blöcke à ~1800 Zeichen, höchstens 10 Inhaltsfolien) → je Abschnitt verdichtet das Modell zu Titel, Folienart (Aufzählung / Gegenüberstellung / Kernaussage) und 2–4 Stichpunkten → Titelfolie, Inhalt und Fazit setzt AURA zusammen.
+- Leitplanken ohne Modell: Stichpunkte mit Zahlen, die im Text nicht vorkommen, werden verworfen; zu lange gekürzt; Doppelte entfernt; Überschriften aus dem Text haben Vorrang.
+- Einstellungen: `praes_9b` (true = grösseres Modell verwenden, falls vorhanden), `praes_vorlage` (eigene .pptx), `praes_max_folien`.
+- Neuer PowerPoint-Baustein **ohne Zusatzpakete** (`aura/pptx_bau.py`, nur zipfile + XML wie bei Word): Folien verweisen auf die Layouts der Vorlage (Titelseite, Inhaltsseite, Zwei Inhalte), Design und Logo bleiben erhalten.
+- Neue Dateien `aura/praesentation.py`, `aura/pptx_bau.py`, `aura/assets/Praesentation_16-9.pptx`.
+
+**Leinwand**
+- Klick auf einen Pfeil → «Verbindung löschen» entfernt im Ziel alle `{{quelle.…}}` (bei «Start»: `{{input.…}}`); «Nur wenn» wird nicht angefasst.
+
+**lxml-Test**
+- `py tools\lxml_test.py` prüft, ob lxml, Pillow und python-pptx auf diesem Rechner laden (drei Ordner: `vendor\bin_test`, `%LOCALAPPDATA%`, `%TEMP%`). Pakete für Python 3.11–3.13 in `tools\lxml_test\`. Ändert nichts an AURA.
+
+## v151 – 31.10.2026 · Verbinden: klarere Auswahl
+
+- Menü nennt Quelle und Ziel («Von … nach …»); der gelesene Text steht zuerst und zeigt, aus welcher Eingabe er stammt (z.B. «dateien.text – der gelesene Text – Leistungsbeschrieb»).
+
+## v150 – 31.10.2026 · Leinwand: Verbinden per Ziehen
+
+- Jeder Knoten hat rechts einen Anschluss ●. Von dort auf einen anderen Knoten ziehen → Menü «In … übernehmen»: Feld des Ziels und Wert der Quelle wählen (z.B. → Dateien: input.checkliste). AURA schreibt den Ausdruck `{{quelle.wert}}` ins Feld – die Verbindung *ist* der Verweis, es entsteht keine zweite Wahrheit.
+- Steht im Feld schon etwas: ersetzen oder anhängen. Läuft die Quelle später als das Ziel, wird sie automatisch davor geschoben.
+- Vom «▶ Start» lassen sich Eingaben (`input.…`) auf Schritte ziehen.
+- Schrift auf der Leinwand in Pixeln statt Punkten: passt bei jeder Windows-Skalierung in die Knoten.
+
+## v149 – 31.10.2026 · Workflows: zwei Reiter statt sieben
+
+- Nur noch **«Bauen»** (Leinwand) und **«Ausführen»**. «Übersicht» und «Ablauf» entfallen – Struktur, fehlende Verweise und Status des letzten Laufs zeigt die Leinwand. Der Schalter «Expertenansicht» entfällt.
+- **Wissen**, **Vorlagen & Feldplan** und **Prüfliste** öffnen sich als Fenster: über die Knöpfe über der Leinwand oder am passenden Knoten («Wissen durchsuchen», «Word-Vorlage ausfüllen», «Prüfliste»). Offene Fenster werden nach dem Speichern aufgefrischt; alte Sprünge auf diese Reiter führen dorthin.
+- Kasten «Auslöser» entfällt auf der Leinwand: Klick auf **«▶ Start»** zeigt Eingaben und Zeitplan rechts (bearbeiten, hinzufügen, entfernen). Start-Knoten näher an der ersten Spalte, mit Anzahl Eingaben.
+- Kopfzeile: nur «☆ Als Widget» und **«⋯»** (Neu laden, Ordner öffnen, Exportieren, workflow.json bearbeiten, Löschen).
+- «+ Schritt hinzufügen» nur noch in der Ansicht «Liste» – auf der Leinwand übernimmt das die Palette.
+
+## v148 – 31.10.2026 · Leinwand: Zoom und Verschieben
+
+- Mausrad = Zoom um den Mauszeiger (40–250 %, bleibt beim Neuzeichnen erhalten); rechte oder mittlere Maustaste halten = Leinwand verschieben.
+- Text in Anführungszeichen innerhalb von `{{ … }}` und «Nur wenn» (z.B. «Art. 21 Abs. 2») gilt nicht mehr als Verweis – keine falschen «unbekannter Wert».
+
+## v147 – 31.10.2026 · Scharfes Taskleisten-Symbol
+
+- Das Fenstersymbol wird in der Grösse geladen, die Windows für die aktuelle Skalierung verlangt (z.B. 40 px bei 125 %, 48 px bei 150 %), statt das 32-px-Symbol von Tk hochzuskalieren. Grösse und DPI im Log (`DIAG icon`).
+
+## v146 – 31.10.2026 · Leinwand für Workflows, Skills & Rollen
+
+**Leinwand (Reiter «Schritte»)**
+- Neue Standardansicht **«Leinwand»**, Umschalter «Leinwand | Liste» (gespeichert als `schritte_ansicht`).
+- Links die Palette mit allen Bausteinen (Holen, Verarbeiten, Ausgeben): Klick = neuer Schritt hinter dem gewählten.
+- In der Mitte der Workflow als Bild: Spalte = Tiefe im Datenfluss (was ein Schritt verwendet, steht links davon), Farbe = Gruppe, Nummer = Reihenfolge des Laufs. Raute = «Nur wenn», ↻ = «Für jedes …», Punkt = Ergebnis des letzten Laufs.
+- **Pfeile werden aus den Verweisen `{{schritt.wert}}` abgeleitet**, nicht gespeichert – keine zweite Wahrheit neben der `workflow.json`. Rot gestrichelt = verwendet einen Schritt, der erst später läuft; roter Rand = unbekannter Wert oder fehlende Eingabe.
+- Rechts die Details des gewählten Schritts: verwendet / wird verwendet von, Probleme, Bearbeiten, Testen, Löschen, «◀ früher / später ▶». Doppelklick öffnet das Formular.
+- Neue Dateien `aura/workflow/graph.py` (ohne Oberfläche, testbar) und `aura/workflow_canvas.py`.
+
+**Skills & Rollen**
+- Neu unter **Workflows › Skills & Rollen**: verfügbare Skills und Rollen mit Beschreibung, Rechten, Version und Autor; Schalter «Freigegeben».
+- **Rolle** = Markdown in `C:\aura\rollen\`. Verwendung im Chat (Auswahl «Rolle» über dem Chat; die AURA-Regeln – nur Quellen, mit Belegen – gehen vor) und im Baustein «Anweisung ans Sprachmodell» (Feld «Rolle», der bisherige Text heisst jetzt «Systemtext»).
+- **Skill** = Workflow-Paket mit `skill.json` (Titel, Beschreibung, Rolle, Rechte, Version, Autor, Stand). «Als neuen Workflow …» kopiert ihn ohne Läufe.
+- **Freigabe mit Prüfsumme** (`skills_freigabe`): Neu importierte und seit der Freigabe geänderte Einträge sind aus (orange markiert), bis man sie prüft. Kein Sprachmodell wählt Skills aus.
+- **Markdown importieren …**: Rollen-Dateien werden Rollen, Aufgaben-/Skill-Dateien ein Workflow-Paket im Rohbau mit `anleitung.md`; «Arbeite nach `ROLLE_….md`» verknüpft die Rolle. Feldplan, Regeln und Wissen richtet man danach ein.
+- Neue Dateien `aura/skills.py`, `aura/skills_gui.py`.
+
 ## v145 – 31.10.2026 · Code prüfen: Bericht in AURA
 
 - «Bericht öffnen» zeigt den Bericht in einem eigenen Fenster in AURA statt über die Windows-Dateizuordnung für `.md` (scheiterte bei App-V-Programmen); Knopf «Im Ordner zeigen».

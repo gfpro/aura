@@ -1,4 +1,7 @@
-# aura/workflow_editor.py — Reiter «Schritte»: Workflow ohne JSON zusammenstellen. Version 20261030v132 (v132: Feldoption «Länge folgt der Ausführlichkeit»)
+# aura/workflow_editor.py — Reiter «Bauen»: Workflow ohne JSON zusammenstellen. Version 20261031v149
+# (v149: Reiter heisst «Bauen»; auf der Leinwand stehen Eingaben und Zeitplan beim Start-Knoten statt im Kasten «Auslöser»;
+#  Knöpfe Wissen, Vorlagen & Feldplan, Prüfliste über der Leinwand)
+# (v146: Ansicht «Leinwand» (workflow_canvas.py) als Standard, Umschalter Leinwand | Liste; v132: Feldoption «Länge folgt der Ausführlichkeit»)
 # Auslöser (Eingaben beim Start) + Liste der Schritte als Karten. Jeder Schritt wird in einem Formular bearbeitet, das aus
 # workflow/schema.py entsteht. «Wert einfügen» zeigt die Ergebnisse früherer Schritte zum Anklicken. Unbekannte Parameter
 # eines Schritts bleiben beim Speichern unverändert. Gespeichert wird nur, wenn die Engine den Workflow danach akzeptiert.
@@ -23,13 +26,27 @@ def _refs(obj, name):
     return bool(re.search(rf"(?<![\w.]){re.escape(name)}\.", json.dumps(obj, ensure_ascii=False)))
 
 
+def _gespeicherte_ansicht():
+    try:
+        from .config import load_settings
+        return "Liste" if load_settings().get("schritte_ansicht") == "Liste" else "Leinwand"
+    except Exception: return "Leinwand"
+
+
 class SchrittEditor:
+    ansicht = _gespeicherte_ansicht()                     # v146: «Leinwand» (Standard) oder «Liste»
+
     def __init__(self, ww, tab):
         self.ww, self.G = ww, ww.G
         self.raw = json.loads(Path(ww.cur).read_text(encoding="utf-8"))
         self.state = self._last_state()
         G = self.G; t = tab; t.grid_columnconfigure(0, weight=1); t.grid_rowconfigure(3, weight=1)
-        # ---- Auslöser
+        leinwand = SchrittEditor.ansicht == "Leinwand"
+        if not leinwand: self._ausloeser(t)                    # v149: auf der Leinwand stehen Eingaben/Zeitplan beim Start-Knoten
+        self._kopf(t, leinwand)
+
+    def _ausloeser(self, t):
+        G = self.G
         ctk.CTkLabel(t, text="AUSLÖSER", font=G.font(10, "bold"), text_color=G.MUTED, anchor="w").grid(row=0, column=0, sticky="w")
         af = ctk.CTkFrame(t, fg_color=G.BUBBLE, corner_radius=8); af.grid(row=1, column=0, sticky="ew", pady=(4, 10))
         af.grid_columnconfigure(0, weight=1)
@@ -48,14 +65,45 @@ class SchrittEditor:
             self._mini(row, "✕", lambda i=i: self._inp_del(i)).pack(side="right")
             self._mini(row, "Bearbeiten", lambda i=i: self._inp_edit(i)).pack(side="right", padx=4)
         self._mini(af, "+ Eingabe", lambda: self._inp_edit(None)).grid(row=r, column=0, sticky="w", padx=10, pady=(4, 8))
-        # ---- Schritte
+
+    def _kopf(self, t, leinwand):
+        G = self.G
         hd = ctk.CTkFrame(t, fg_color="transparent"); hd.grid(row=2, column=0, sticky="ew")
-        ctk.CTkLabel(hd, text="SCHRITTE (laufen von oben nach unten)", font=G.font(10, "bold"), text_color=G.MUTED).pack(side="left")
-        ctk.CTkButton(hd, text="+ Schritt hinzufügen", height=28, corner_radius=8, font=G.font(11, "bold"), fg_color=G.ACCENT,
-                      hover_color=G.ACCENT_HI, command=lambda: self._add(len(self.raw.get("steps", [])))).pack(side="right")
-        self.lst = ctk.CTkScrollableFrame(t, fg_color="transparent"); self.lst.grid(row=3, column=0, sticky="nsew", pady=(6, 0))
-        self.lst.grid_columnconfigure(0, weight=1)
-        self._cards()
+        if Path(self.ww.cur).name == "workflow.json":                  # v149: Hilfsmittel des Workflows als Fenster
+            for name, txt in (("Wissen", "📚 Wissen"), ("Vorlage", "📄 Vorlagen & Feldplan"), ("Prüfliste", "✓ Prüfliste")):
+                b = ctk.CTkButton(hd, text=txt, height=28, width=0, corner_radius=8, font=G.font(11), fg_color=G.BUBBLE,
+                                  hover_color=G.BORDER, text_color=G.INK, command=lambda n=name: self.ww.ressource(n))
+                b.pack(side="left", padx=(0, 6))
+        else:
+            ctk.CTkLabel(hd, text="SCHRITTE", font=G.font(10, "bold"), text_color=G.MUTED).pack(side="left")
+        if not leinwand:                                               # v149: auf der Leinwand übernimmt das die Palette
+            ctk.CTkButton(hd, text="+ Schritt hinzufügen", height=28, corner_radius=8, font=G.font(11, "bold"), fg_color=G.ACCENT,
+                          hover_color=G.ACCENT_HI, command=lambda: self._add(len(self.raw.get("steps", [])))).pack(side="right")
+        sw = ctk.CTkSegmentedButton(hd, values=["Leinwand", "Liste"], height=28, font=G.font(11), command=self._ansicht,
+                                    selected_color=G.ACCENT, selected_hover_color=G.ACCENT_HI)          # v146
+        sw.set(SchrittEditor.ansicht); sw.pack(side="right", padx=8)
+        self.lst = None; self.canvas = None
+        if leinwand:
+            fr = ctk.CTkFrame(t, fg_color="transparent"); fr.grid(row=3, column=0, sticky="nsew", pady=(6, 0))
+            try:
+                from .workflow_canvas import Leinwand
+                self.canvas = Leinwand(self, fr)
+            except Exception as e:
+                ctk.CTkLabel(fr, text=f"Leinwand nicht verfügbar: {e}", text_color=G.ERR).grid(row=0, column=0, sticky="w")
+        else:
+            self.lst = ctk.CTkScrollableFrame(t, fg_color="transparent"); self.lst.grid(row=3, column=0, sticky="nsew", pady=(6, 0))
+            self.lst.grid_columnconfigure(0, weight=1)
+            self._cards()
+
+    def _ansicht(self, wert):
+        """v146: Leinwand oder Liste; die Wahl bleibt gespeichert (Einstellung «schritte_ansicht»)."""
+        if wert == SchrittEditor.ansicht: return
+        SchrittEditor.ansicht = wert
+        try:
+            from .config import load_settings, save_settings
+            st = load_settings(); st["schritte_ansicht"] = wert; save_settings(st)
+        except Exception: pass
+        self.ww.show(self.ww.cur); self.ww.tabs.set("Bauen")
 
     # ------------------------------------------------------------------ Hilfen
     def _mini(self, parent, text, cmd):
@@ -69,7 +117,7 @@ class SchrittEditor:
             return json.loads(sf.read_text(encoding="utf-8")) if sf else None
         except Exception: return None
 
-    def _save(self, tab="Schritte"):
+    def _save(self, tab="Bauen"):
         """workflow.json schreiben; lehnt die Engine den Workflow ab, wird die alte Fassung zurückgeschrieben."""
         if self.ww.running: messagebox.showinfo("Schritte", "Während eines Laufs nicht ändern.", parent=self.ww.win); return False
         p = Path(self.ww.cur); old = p.read_text(encoding="utf-8")
@@ -191,7 +239,7 @@ class SchrittEditor:
 
     def _new(self, typ, pos):
         if typ == "pruefliste":
-            messagebox.showinfo("Schritte", "Die Prüfliste legst du im Reiter «Prüfliste» an – der Schritt entsteht mit dem ersten "
+            messagebox.showinfo("Schritte", "Die Prüfliste legst du im Fenster «Prüfliste» an – der Schritt entsteht mit dem ersten "
                                 "Prüfpunkt.", parent=self.ww.win)
             self.ww.tabs.set("Prüfliste"); return
         meta = S.BAUSTEINE[typ]; ids = {s["id"] for s in self.raw.get("steps", [])}
@@ -287,6 +335,12 @@ class SchrittEditor:
                 o += sorted(Wissen(lambda: None, lambda *a: None).names())
             except Exception: pass
         elif o == "quellen": o = S.QUELLEN
+        elif o == "rollen":                                                # v146: freigegebene Rollen
+            o = [""]
+            try:
+                from .skills import aktive_rollen
+                o += [r["name"] for r in aktive_rollen()]
+            except Exception: pass
         o = list(o)
         if cur not in (None, "") and str(cur) not in o: o.append(str(cur))
         return o or [""]
@@ -312,7 +366,7 @@ class SchrittEditor:
             fr = ctk.CTkFrame(parent, fg_color="transparent")
             n = len(cur) if isinstance(cur, list) else 0
             ctk.CTkLabel(fr, text=f"{n} Einträge", font=G.font(11)).pack(side="left")
-            self._mini(fr, "Zum Reiter «Prüfliste»", lambda: (dlg.destroy(), self.ww.tabs.set("Prüfliste"))).pack(side="left", padx=8)
+            self._mini(fr, "Prüfliste öffnen …", lambda: (dlg.destroy(), self.ww.tabs.set("Prüfliste"))).pack(side="left", padx=8)
             return fr
         if typ == "felder":
             fr = ctk.CTkFrame(parent, fg_color="transparent"); fr._felder = [dict(x) for x in (cur or [])]

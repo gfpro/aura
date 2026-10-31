@@ -1,4 +1,6 @@
-# aura/workflow_gui.py — Ansicht «Workflows»: Pakete anlegen, ausfuehren, Wissen und Vorlagen pflegen. Version 20261030v133
+# aura/workflow_gui.py — Ansicht «Workflows»: Pakete anlegen, ausfuehren, Wissen und Vorlagen pflegen. Version 20261031v149
+# (v149: nur noch Reiter «Bauen» (Leinwand) und «Ausführen»; Übersicht, Ablauf und Expertenansicht entfallen; Wissen, Vorlagen &
+#  Feldplan und Prüfliste öffnen sich als Fenster; Neu laden, Ordner, Exportieren, workflow.json, Löschen im Menü «⋯»)
 # (v133: Regler auch bei Sprachmodell-Schritten innerhalb anderer Schritte, z.B. «Je Thema zusammenfassen»)
 # (v132: Regler «Ausführlichkeit» im Reiter «Ausführen» – knapp / normal / ausführlich, gespeichert in der workflow.json)
 # (v93: Start gesperrt, wenn ein Schritt eine fehlende Eingabe liest; Rückfrage bei Datei-Eingaben, die kein Schritt liest)
@@ -26,10 +28,14 @@ def _open(p):
         try: os.startfile(str(p))
         except Exception as e: messagebox.showerror("AURA", f"Öffnen fehlgeschlagen: {e}")
 
+RESSOURCEN = {"Wissen": "Wissen", "Vorlage": "Vorlagen & Feldplan", "Prüfliste": "Prüfliste"}   # v149
+
+
 class WorkflowWindow:
     def __init__(self, app):
         from . import gui as G
         self.G, self.app = G, app
+        self._ress = {}
         self.cur, self.wf, self.inputs, self.step_lbl, self.running = None, None, {}, {}, False
         win = self.win = app.view("workflows", "Workflows")          # v46: Rahmen im Hauptfenster
         win.grid_columnconfigure(1, weight=1); win.grid_rowconfigure(0, weight=1)
@@ -91,63 +97,81 @@ class WorkflowWindow:
         hd = ctk.CTkFrame(self.right, fg_color="transparent"); hd.grid(row=0, column=0, sticky="ew"); hd.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(hd, text=(self.wf or {}).get("name", Path(path).stem), font=G.font(18, "bold"), text_color=G.INK, anchor="w",
                      justify="left", wraplength=700).grid(row=0, column=0, sticky="w")
-        bar = ctk.CTkFrame(hd, fg_color="transparent"); bar.grid(row=1, column=0, sticky="w", pady=(4, 0))   # v48: Knoepfe unter dem Titel
-        b = lambda t, c: ctk.CTkButton(bar, text=t, height=28, width=0, corner_radius=8, font=G.font(11), fg_color=G.CARD,
-                                       hover_color=G.BORDER, text_color=G.INK, command=c).pack(side="left", padx=(0, 6))
+        bar = ctk.CTkFrame(hd, fg_color="transparent"); bar.grid(row=0, column=1, sticky="ne", padx=(8, 0))   # v149: Knöpfe rechts
         pkg = path.endswith("workflow.json")
-        self.experte = bool(self.app.s.get("wf_experte"))                   # v90
-        b("Neu laden", lambda: self.show(path))
         if pkg:
-            b("Ordner öffnen", lambda: _open(Path(path).parent)); b("Exportieren …", self.exportieren)
             from .dashboard import ist_angeheftet                        # v80
             pin = ist_angeheftet(self.app, path)
             ctk.CTkButton(bar, text="★ Als Widget" if pin else "☆ Als Widget", height=28, width=0, corner_radius=8,
                           font=G.font(11, "bold"), fg_color=G.ACCENT if pin else G.CARD, hover_color=G.ACCENT_HI if pin else G.BORDER,
                           text_color="white" if pin else G.INK, command=self.pin_toggle).pack(side="left", padx=(0, 6))
-        else: b("In Paket umwandeln", self.migrate)
-        if self.experte: b("workflow.json bearbeiten", lambda: _open(path))      # v92: hinten, verschiebt nichts davor
-        if pkg: b("Löschen", self.delete)                                      # v92: zuletzt
-        self.sw_exp = ctk.CTkSwitch(hd, text="Expertenansicht", font=G.font(11), command=self._experte_umschalten)   # v92: fester Platz
-        (self.sw_exp.select() if self.experte else self.sw_exp.deselect()); self.sw_exp.grid(row=0, column=1, sticky="ne", padx=(8, 0))
+        mehr = ctk.CTkButton(bar, text="⋯", height=28, width=36, corner_radius=8, font=G.font(14, "bold"), fg_color=G.CARD,
+                             hover_color=G.BORDER, text_color=G.INK)                                     # v149: Seltenes ins Menü
+        mehr.configure(command=lambda: self._mehr_menu(mehr, path, pkg)); mehr.pack(side="left")
+        hilfe.tip(mehr, "Neu laden, Ordner öffnen, Exportieren, workflow.json bearbeiten, Löschen")
         if self.wf and self.wf.get("description"):
             ctk.CTkLabel(hd, text=self.wf["description"], font=G.font(11), text_color=G.MUTED, anchor="w", justify="left",
-                         wraplength=700).grid(row=2, column=0, sticky="w", pady=(4, 0))
+                         wraplength=900).grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 0))
         if err:
             ctk.CTkLabel(self.right, text=f"Workflow fehlerhaft:\n{err}", font=G.font(12), text_color=G.ERR, justify="left",
                          anchor="nw").grid(row=1, column=0, sticky="nw", pady=20); hilfe.auto(self.right, "workflow"); return
+        # v149: nur noch zwei Reiter. Übersicht und Ablauf zeigt die Leinwand; Wissen, Vorlagen und Prüfliste öffnen sich als
+        # Fenster am passenden Knoten (oder über die Knöpfe über der Leinwand). Alte Reiternamen leiten dorthin weiter.
         tabs = self.tabs = ctk.CTkTabview(self.right, fg_color=G.CARD, segmented_button_selected_color=G.ACCENT)
         tabs.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
-        self._tabnamen = []; _set = tabs.set                                 # v90: nur angezeigte Reiter; Rest = Expertenansicht
+        self._tabnamen = []; _set = tabs.set
         def add(n): self._tabnamen.append(n); return tabs.add(n)
         def sicher(n):
-            if n in self._tabnamen: _set(n)
-            else: self._experte_an(n)
+            if n in RESSOURCEN and pkg: _set("Bauen"); self.ressource(n)
+            elif n in self._tabnamen: _set(n)
+            else: _set("Bauen")                                          # «Übersicht», «Schritte», «Ablauf»
         tabs.set = sicher
-        try:                                                             # v90: drei Bereiche
-            from .zonen_gui import ZonenAnsicht
-            self.zonen = ZonenAnsicht(self, add("Übersicht"))
+        self.band = None; self.editor = None
+        try:
+            from .workflow_editor import SchrittEditor
+            self.editor = SchrittEditor(self, add("Bauen"))
         except Exception as e:
-            ctk.CTkLabel(tabs.tab("Übersicht"), text=f"Übersicht nicht verfügbar: {e}", text_color=G.ERR).pack(anchor="w")
+            ctk.CTkLabel(tabs.tab("Bauen"), text=f"Bauen nicht verfügbar: {e}", text_color=G.ERR).pack(anchor="w")
         self._tab_run(add("Ausführen"))
-        self.band = None
-        if self.experte:
-            try:                                                         # v80: Ablaufband
-                from .dashboard import FlowBand
-                t = add("Ablauf"); t.grid_columnconfigure(0, weight=1)
-                self.band = FlowBand(self.app, t, path); self.band.frame.grid(row=0, column=0, sticky="ew", padx=4, pady=4)
-            except Exception as e:
-                self.band = None; ctk.CTkLabel(tabs.tab("Ablauf"), text=f"Ablauf nicht verfügbar: {e}", text_color=G.ERR).pack(anchor="w")
-            try:                                                         # v52: Schritte ohne JSON
-                from .workflow_editor import SchrittEditor
-                self.editor = SchrittEditor(self, add("Schritte"))
-            except Exception as e:
-                ctk.CTkLabel(tabs.tab("Schritte"), text=f"Schritt-Editor nicht verfügbar: {e}", text_color=G.ERR).pack(anchor="w")
-            if pkg: self._tab_pruefliste(add("Prüfliste"))               # v50
-        if pkg: self._tab_wissen(add("Wissen"))
-        if self.experte: self._tab_vorlage(add("Vorlage"))
-        _set("Übersicht")
-        hilfe.SCHRITTE.setdefault("pruefliste", "Prüft die Eingabedateien gegen die Punkte im Reiter «Prüfliste».")
-        hilfe.auto(self.right, "workflow")              # Wissen-Reiter hat seine Texte schon (Kontext «wissen»)
+        _set("Bauen")
+        for n, w in list(self._ress.items()):                            # offene Fenster nach dem Speichern auffrischen
+            if self._ress_alive(n): self.ressource(n, neu=False)
+        hilfe.SCHRITTE.setdefault("pruefliste", "Prüft die Eingabedateien gegen die Punkte im Fenster «Prüfliste».")
+        hilfe.auto(self.right, "workflow")
+
+    # ------------------------------------------------------------------ v149: Menü «⋯» und Fenster Wissen/Vorlagen/Prüfliste
+    def _mehr_menu(self, btn, path, pkg):
+        m = tk.Menu(btn, tearoff=0)
+        m.add_command(label="Neu laden", command=lambda: self.show(path))
+        if pkg:
+            m.add_command(label="Ordner öffnen", command=lambda: _open(Path(path).parent))
+            m.add_command(label="Exportieren …", command=self.exportieren)
+        else: m.add_command(label="In Paket umwandeln", command=self.migrate)
+        m.add_command(label="workflow.json bearbeiten", command=lambda: _open(path))
+        if pkg: m.add_separator(); m.add_command(label="Löschen …", command=self.delete)
+        m.tk_popup(btn.winfo_rootx(), btn.winfo_rooty() + btn.winfo_height())
+
+    def _ress_alive(self, n):
+        w = self._ress.get(n)
+        try: return w is not None and bool(w.winfo_exists())
+        except Exception: return False
+
+    def ressource(self, n, neu=True):
+        """Wissen, Vorlagen oder Prüfliste in einem eigenen Fenster; ist es schon offen, wird es neu aufgebaut."""
+        if not self.cur or not self.cur.endswith("workflow.json"): return
+        G = self.G
+        if self._ress_alive(n):
+            w = self._ress[n]
+            for c in w.winfo_children(): c.destroy()
+        else:
+            if not neu: return
+            w = ctk.CTkToplevel(self.win); w.title(f"{RESSOURCEN[n]} – {(self.wf or {}).get('name', '')}")
+            w.geometry("1100x640"); w.transient(self.win); self._ress[n] = w
+        fr = ctk.CTkFrame(w, fg_color="transparent"); fr.pack(fill="both", expand=True, padx=12, pady=12)
+        {"Wissen": self._tab_wissen, "Vorlage": self._tab_vorlage, "Prüfliste": self._tab_pruefliste}[n](fr)
+        hilfe.auto(fr, "workflow")
+        try: w.lift(); w.focus_force()
+        except Exception: pass
 
     # ------------------------------------------------------------------ Reiter Ausfuehren
     def _tab_run(self, t):
@@ -273,8 +297,9 @@ class WorkflowWindow:
             fehlend, ungelesen = verweise(self.wf)
             if fehlend:
                 messagebox.showerror("Workflows", "Nicht gestartet: Ein Schritt liest eine Eingabe, die es nicht mehr gibt ("
-                                     + ", ".join(fehlend) + "). Das Sprachmodell bekäme keine Unterlagen.\n\nIm Reiter «Übersicht» "
-                                     "bei «① Was kommt rein?» → «Reparieren …».", parent=self.win); self.tabs.set("Übersicht"); return
+                                     + ", ".join(fehlend) + "). Das Sprachmodell bekäme keine Unterlagen.\n\nIm Reiter «Bauen» "
+                                     "den rot markierten Schritt öffnen oder beim Start-Knoten die Eingabe ergänzen.", parent=self.win)
+                self.tabs.set("Bauen"); return
             leer = [i.get("label", i["id"]) for i in self.wf["inputs"] if i["id"] in ungelesen and inputs.get(i["id"])]
             if leer and not messagebox.askyesno("Workflows", "Diese Dateien liest kein Schritt – sie werden nicht verwendet:\n- "
                                                 + "\n- ".join(leer) + "\n\nTrotzdem starten?", default="no", parent=self.win): return
@@ -308,10 +333,8 @@ class WorkflowWindow:
         self.win.after(150, lambda: self.show(self.cur))                       # v92: erst nach dem Loslassen der Maus neu aufbauen
 
     def _experte_an(self, ziel=None):
-        """Sprung auf einen Reiter der Expertenansicht (z.B. aus dem Feldplan oder «Schritte im Detail …»)."""
-        if self.running: messagebox.showinfo("Workflows", "Während eines Laufs bitte nicht wechseln.", parent=self.win); return
-        self._set_experte(True); self.show(self.cur)
-        if ziel in self._tabnamen: self.tabs.set(ziel)
+        """v149: Expertenansicht gibt es nicht mehr – leitet nur noch auf den passenden Reiter bzw. das Fenster."""
+        self.tabs.set(ziel or "Bauen")
 
     def pin_toggle(self):
         """v80: Workflow als Widget auf der Startseite anheften / entfernen."""
@@ -319,7 +342,7 @@ class WorkflowWindow:
         an = not ist_angeheftet(self.app, self.cur)
         if an and not hat_anzeige(self.wf):
             if not messagebox.askyesno("Widget", "Dieser Workflow hat keine Ausgabe «Anzeige in AURA» – das Widget bliebe leer.\n\n"
-                                       "Trotzdem anheften? (Ausgabe im Reiter «Schritte» ergänzen)", parent=self.win): return
+                                       "Trotzdem anheften? (Ausgabe im Reiter «Bauen» ergänzen)", parent=self.win): return
         anheften(self.app, self.cur, an); self.show(self.cur)
         try: self.app._welcome_erg()
         except Exception: pass
@@ -409,7 +432,7 @@ class WorkflowWindow:
         tv.grid(row=0, column=0, sticky="nsew"); sb.grid(row=0, column=1, sticky="ns"); hilfe.tip(tv, "#wf_vorlage_tabelle")
         ctk.CTkLabel(t, text="Nur nötig, wenn AURA ein Word-Dokument AUSFÜLLEN soll (wie beim Verfahrensentscheid). "
                              "Soll AURA ein Dokument PRÜFEN, gehört das zu prüfende Dokument in «Ausführen» und der Massstab "
-                             "(Richtlinien, leere Vorlage) in «Wissen»; die Prüfpunkte stehen im Reiter «Prüfliste».",
+                             "(Richtlinien, leere Vorlage) in «Wissen»; die Prüfpunkte stehen in der «Prüfliste».",
                      font=G.font(11), text_color=G.MUTED, anchor="w", justify="left", wraplength=900).grid(row=3, column=0, sticky="w", pady=(8, 0))
         self.fill_table()
 
