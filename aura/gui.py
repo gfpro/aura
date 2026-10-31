@@ -4,6 +4,7 @@
 #       Einstellungen chats_behalten, chats_tage). «⌂» startet ebenfalls einen neuen Chat (setzt den Bezug im Worker zurück).
 # v125: Schalter «8 Bit» entfernt (8 Bit ist Standard; Gegenprobe bf16 nur per settings.json "llm_int8": false).
 # v119: Schieberegler «Quellen» (2–12) unter dem Sprachmodell (Einstellung llm_top_k).
+# v142: Werkzeuge › «Code prüfen» (code_gui.py).
 # v113: Gruppe «Werkzeuge» in der Seitenleiste mit «Text anonymisieren» (anon_gui.py, Nachbau tiseR-Anonymisator).
 # v110: Rückfrage «Meintest du …?» mit Knöpfen (Ereignis rueckfrage); Klick fragt mit genau dieser Quelle.
 # v109: Seitenleiste neu: aufklappbare Gruppen Chat · Wissen · Workflows · Einstellungen (nur eine offen, gemerkt in menu_offen);
@@ -187,6 +188,8 @@ class App:
         # ---- v113: Werkzeuge
         b = self._grp(menu, "Werkzeuge", "Hilfsmittel für den Alltag, z.B. Texte anonymisieren.")
         hilfe.tip(self._item(b, "Text anonymisieren", self.open_anon, 0), hilfe.TEXTE["haupt"]["Text anonymisieren"])
+        hilfe.tip(self._item(b, "Code prüfen", self.open_code, 1),                                         # v142
+                  "Projektordner einlesen, Code ohne und mit Sprachmodell prüfen, Vorschläge als Diff übernehmen (mit Sicherung).")
 
         # ---- Einstellungen
         b = self._grp(menu, "Einstellungen", "Abgleich, Anzeige und Protokoll.")
@@ -1108,6 +1111,15 @@ class App:
         if getattr(self, "anonwin", None) and self.anonwin.alive(): self.show_view("anon"); return
         self.anonwin = AnonWindow(self)
 
+    def open_code(self):                                              # v142
+        from .code_gui import CodeWindow
+        if getattr(self, "codewin", None) and self.codewin.alive(): self.show_view("code"); return
+        self.codewin = CodeWindow(self)
+
+    def _code(self, meth, *a):
+        w = getattr(self, "codewin", None)
+        if w is not None and w.alive(): getattr(w, meth)(*a)
+
     def _anon(self, meth, *a):
         w = getattr(self, "anonwin", None)
         if w is not None and w.alive(): getattr(w, meth)(*a)
@@ -1399,6 +1411,7 @@ class App:
                     self.prog.configure(text=d[0]); self.status.configure(text=d[0])
                     self._wf("on_progress", d[0])
                     self._anon("on_progress", d[0])                     # v113
+                    self._code("on_progress", d[0])                     # v142
                     if d[1] is not None and d[2]: self._pb_value(d[1] / d[2])     # v109
                 elif kind == "busy":
                     self.busy = d[0]
@@ -1431,6 +1444,7 @@ class App:
                     self._chat_save(self.cur_q, vis, d[0], d[1] if len(d) > 1 else None)   # v129
                 elif kind == "llm_state": self._llm_view(d[0], d[1])
                 elif kind == "anon": self._anon("on_scan", d[0])        # v113
+                elif kind == "code": self._code("on_code", d[0])        # v142
                 elif kind == "anon_absender": self._anon("on_absender", d[0])
                 elif kind == "anhang": self._show_anhang(d[0])           # v97
                 elif kind == "rueckfrage": self._rueckfrage(*d)               # v110

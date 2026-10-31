@@ -4,6 +4,33 @@ Neueste Version zuerst. Versionsnummern entsprechen `VERSION` in `aura/__init__.
 
 ---
 
+## v145 – 31.10.2026 · Code prüfen: Bericht in AURA
+
+- «Bericht öffnen» zeigt den Bericht in einem eigenen Fenster in AURA statt über die Windows-Dateizuordnung für `.md` (scheiterte bei App-V-Programmen); Knopf «Im Ordner zeigen».
+
+## v144 – 31.10.2026 · Code prüfen: Sprachmodell nur als Zweite Meinung
+
+- Tests mit Qwen3.5-4B und -9B: Modell-Befunde zu Code sind überwiegend falsch (9B: höchstens 1 von 8 geprüften «hoch»-Befunden zutreffend). Die Prüfung ohne Sprachmodell war in allen Läufen korrekt und bleibt die Hauptprüfung.
+- Modellprüfung standardmässig aus; Schalter «Zweite Meinung (experimentell)» mit Warnhinweis (Einstellung `code_llm`).
+- Modell-Befunde heissen «Modell (ungeprüft)», sind grau dargestellt, nie Stufe «hoch» und stehen im Bericht in einem eigenen Abschnitt am Ende.
+- Weitere Widerlegungen: «wird nicht verwendet» (AURA zählt Vorkommen), «self.x nicht definiert/AttributeError» (Zuweisung gesucht); höchstens ein Befund je Zeile.
+
+## v143 – 31.10.2026 · Code prüfen: weniger Rauschen
+
+- Modell-Befunde werden deterministisch gefiltert: kein Lob («ist korrekt»), keine Kommentar-/Versions-/Rechtschreib-Kosmetik, keine Format-Echos, keine Dubletten, Zeile und Stufe sind Pflicht; höchstens 3 Befunde je Abschnitt.
+- Behauptungen «undefiniert/NameError» werden gegen die Datei geprüft (Definitionen, Zuweisungen, Importe) und verworfen, wenn ein genannter Name existiert.
+- Abschnitte aus überwiegend String-Daten (Shader, SQL, Prompts) oder nur Kommentaren gehen nicht ans Modell (schneller, kein Unsinn).
+- Prompt mit Beispiel und klaren Ausschlüssen; Dateiliste mit höheren Zeilen (Unterstriche sichtbar).
+
+## v142 – 31.10.2026 · Werkzeug «Code prüfen»
+
+- Neu unter **Werkzeuge › Code prüfen**: Projektordner wählen (gespeichert als `code_folder`) und einlesen; Ausschlüsse wie `.git`, `venv`, `node_modules`, `vendor`, `models` sowie einfache `.gitignore`-Einträge; Dateien über 300 KB werden übersprungen.
+- **Prüfung ohne Sprachmodell** (Sekunden): Syntaxfehler, mögliche Passwörter/Schlüssel im Klartext, `eval/exec`, `shell=True`, `except:` ohne Typ, verschluckte Fehler, veränderbare Standardwerte, lange Funktionen, viele Parameter, ungenutzte Importe, doppelte Codeblöcke, TODO/FIXME.
+- **Prüfung mit Sprachmodell**: Abschnitt für Abschnitt (Python je Funktion/Klasse, sonst ~140-Zeilen-Fenster); Befunde mit Zeile, Stufe und Vorschlag; Bericht als Markdown unter `data\code\berichte`.
+- **Vorschläge**: Doppelklick auf einen Befund → Auftrag anpassen → Diff. Übernehmen nur nach Klick, vorher Sicherung unter `data\code\sicherung\<zeit>\`. Python/JSON werden vor dem Schreiben auf Syntax geprüft; wurde die Datei inzwischen geändert, wird nicht geschrieben. «Sicherungen …» setzt einzelne Dateien zurück.
+- Git wird nur lesend angezeigt (Zweig, offene Änderungen). Kein Push, kein Netzwerk.
+- Neue Dateien `aura/code.py`, `aura/code_gui.py`; Jobs `code_scan`, `code_pruefen`, `code_vorschlag` in `worker.py`.
+
 ## v130–v141 – 29.–31.10.2026 · 4 Bit, Ausführlichkeit, sicherere Workflows
 
 **Sprachmodell**

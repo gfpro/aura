@@ -18,6 +18,7 @@
 #       letzten confluence_hinweis_tage (14) geaendert wurden (Datum + Bearbeiter).
 # v119: Quellen 2–12 (llm_top_k): Suche holt mind. 2x so viele Kandidaten. (Je Objekt liefert die Suche ohnehin nur
 #       1 Stueck; _streuen greift erst bei Nachbarn/Wissen/Folgefragen.)
+# v143: Werkzeug «Code prüfen» (job_code_scan, job_code_pruefen, job_code_vorschlag) – Ereignis «code».
 # v114: Anonymisator – PDF-Text wird zu Absaetzen zusammengefuegt (Einstellung anon_umbruch).
 # v113: Anonymisator (job_anon_scan, job_anon_absender) – Ergebnis nur als Ereignis «anon», nichts wird gespeichert.
 # v112: Mail-Anhaenge (pdf/docx/txt/md) als eigene Textstuecke «Betreff › Anhang name»; gleicher Anhang nur einmal
@@ -848,6 +849,69 @@ class Worker(threading.Thread):
             add = anon.alle_vorkommen(text, n, hits, "llm", "[NAME]")
             hits += add; neu += len(add)
         return neu
+
+    # ------------------------------------------------------------------ v143: Werkzeug «Code prüfen» (aura/code.py)
+    def _think_off(self, backend_id):
+        lab = (dict((i, l) for i, l, _ in discover(MODELS)).get(backend_id, "") + " " + backend_id).lower()
+        return "qwen3" in lab and "instruct" not in lab
+
+    def job_code_scan(self, root):
+        """Dateiliste + statische Prüfung (ohne Modell). Ereignis «code» {art: scan}."""
+        from . import code
+        try:
+            self.progress("Code: Dateien einlesen …")
+            liste = code.dateien(root)
+            self.progress(f"Code: {len(liste)} Dateien – statische Prüfung …")
+            bef = code.statisch(root, liste)
+            self.emit("code", {"art": "scan", "root": root, "dateien": liste, "befunde": bef, "git": code.git_info(root)})
+            self.progress(f"Code: {len(liste)} Dateien, {len(bef)} Hinweise (ohne Sprachmodell)")
+        except Exception as e:
+            log.get().exception("Code-Scan"); self.emit("code", {"art": "fehler", "text": f"Einlesen fehlgeschlagen: {e}"})
+
+    def job_code_pruefen(self, root, rels, backend_id, statik=None):
+        """Sprachmodell prüft jede Datei Abschnitt für Abschnitt. Ereignis «code» {art: befunde} je Datei, am Ende Bericht."""
+        from . import code
+        from .workflow import llmio
+        alle = list(statik or [])
+        try:
+            be = self._llm(backend_id); self._llm_state(); think_off = self._think_off(backend_id)
+            plan = []
+            for rel in rels:
+                txt = code.lesen(root, rel)
+                plan += [(rel, txt, a) for a in code.abschnitte(rel, txt)]
+            for k, (rel, txt, a) in enumerate(plan):
+                if self.cancel.is_set(): break
+                self.progress(f"Code: {rel} › {a['name']} ({k + 1}/{len(plan)})", k, len(plan))
+                if code.ueberspringen(rel, txt, a["start"], a["ende"]): continue      # v143: Shader-/Textdaten, nur Kommentare
+                out, _ = llmio.generate(be, code.PRUEF_SYSTEM, code.pruef_prompt(rel, txt, a["start"], a["ende"], code.kontext(rel, txt)),
+                                        max_new=400, temperature=0.0, penalty=1.05, cancelled=self.cancel.is_set, think_off=think_off)
+                bef = code.befunde_lesen(code.code_block(out) if "```" in out else out, rel, a["start"], a["ende"], txt)
+                alle += bef
+                self.emit("code", {"art": "befunde", "pfad": rel, "abschnitt": a, "befunde": bef})
+            p = code.bericht(root, [{"pfad": r, "zeilen": code.lesen(root, r).count("\n") + 1} for r in rels], alle, code.git_info(root))
+            self.emit("code", {"art": "fertig", "bericht": str(p), "abgebrochen": self.cancel.is_set()})
+            self.progress(f"Code: Prüfung {'abgebrochen' if self.cancel.is_set() else 'fertig'} – Bericht {p.name}")
+        except llmio.Cancelled: self.emit("code", {"art": "fertig", "bericht": "", "abgebrochen": True})
+        except Exception as e:
+            log.get().exception("Code-Prüfung"); self.emit("code", {"art": "fehler", "text": f"Prüfung fehlgeschlagen: {e}"})
+
+    def job_code_vorschlag(self, root, rel, a, e, auftrag, backend_id):
+        """Neuer Wortlaut für EINEN Abschnitt -> Diff. Geschrieben wird erst nach Freigabe in der Oberfläche."""
+        from . import code
+        from .workflow import llmio
+        try:
+            be = self._llm(backend_id); self._llm_state(); txt = code.lesen(root, rel)
+            self.progress(f"Code: Vorschlag für {rel} Zeilen {a}–{e} …")
+            out, _ = llmio.generate(be, code.AENDERN_SYSTEM, code.aendern_prompt(rel, txt, a, e, auftrag),
+                                    max_new=min(3000, 200 + 16 * (e - a + 1)), temperature=0.0, penalty=1.0,
+                                    cancelled=self.cancel.is_set, think_off=self._think_off(backend_id))
+            v = code.vorschlag_bauen(root, rel, a, e, code.code_block(out))
+            v["art"], v["root"], v["auftrag"] = "vorschlag", root, auftrag
+            self.emit("code", v)
+            self.progress("Code: Vorschlag bereit – bitte Diff prüfen")
+        except llmio.Cancelled: self.progress("Code: Vorschlag abgebrochen")
+        except Exception as ex:
+            log.get().exception("Code-Vorschlag"); self.emit("code", {"art": "fehler", "text": f"Vorschlag fehlgeschlagen: {ex}"})
 
     def job_anon_absender(self, n=60):
         """Vorschlaege fuer den Assistenten: haeufigste Absender (ohne Mailadressen, Organisationskuerzel abgetrennt)."""
