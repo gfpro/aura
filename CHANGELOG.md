@@ -4,6 +4,60 @@ Neueste Version zuerst. Versionsnummern entsprechen `VERSION` in `aura/__init__.
 
 ---
 
+## v130–v141 – 29.–31.10.2026 · 4 Bit, Ausführlichkeit, sicherere Workflows
+
+**Sprachmodell**
+- **4-Bit-Gewichte** als Test-Funktion: Einstellung `"llm_bits"` (4, 8 oder 16) in `data\settings.json`; ohne Eintrag gilt wie bisher `llm_int8`. Umrechnung beim Laden auf der Grafikkarte, eigener Selbsttest, bei Fehlern Rückfall auf 8 Bit.
+- Gemessen auf Intel-Grafik: 4 Bit spart Speicher, ist aber **nicht schneller** (kurze Textblöcke sogar langsamer). Standard bleibt **8 Bit**.
+- Fehler beim Laden des 4-Bit-Modus stehen im Log (`DIAG int4_fehler`).
+
+**Workflows**
+- Regler **«Ausführlichkeit»** (knapp / normal / ausführlich) im Reiter «Ausführen», gespeichert je Workflow. Wirkt auf freie Antworten und auf Felder mit dem Häkchen «Länge folgt der Ausführlichkeit» – nie auf Auswahl- oder Zahlfelder.
+- Neue **Schutz-Optionen für Felder**, damit das Sprachmodell nicht rät:
+  - `min_sicherheit` / `unsicher_wert`: Ist das Modell bei einer Auswahl unsicher, setzt AURA einen Ersatzwert (z.B. «unklar») und schreibt einen Prüfhinweis.
+  - `verneinung_pruefen`: Das Zitat und die folgenden Sätze werden ohne Modell auf Verneinungen geprüft («liegt nicht vor», «bietet … nicht an», «kommt nicht in Frage» …). Verneinte Werte werden verworfen.
+  - Empfehlung: Zitat **nach** dem Wert (`beleg_nach`) – mit Zitat zuerst legt sich ein kleines Modell unzuverlässig fest.
+- Grundsatz: **Das Sprachmodell erfasst nur Fakten, Entscheidungen trifft eine Regel.** Lieber «unklar» mit Hinweis als ein falscher Wert.
+
+**Oberfläche**
+- Neues, schärferes Programm-Icon (je Grösse eigens gezeichnet, 16–256 px).
+
+## v119–v129 – 24.–29.10.2026 · Suche, Confluence, Chat-Verlauf
+
+- Schieberegler **«Quellen»** (2–12): wie viele Quellen das Sprachmodell liest.
+- Befehls- und Zeitwörter («nenne», «zeig», «letzte») verfälschen die Suche nicht mehr; Begriffe mit Bindestrich werden auch mit Leerzeichen gefunden.
+- **Confluence:** mehrere Benachrichtigungsmails zur selben Seite zählen als eine Quelle; Hinweis unter der Antwort, wenn eine passende Seite kürzlich geändert wurde; Änderungen zwischen zwei Fassungen werden als eigenes Textstück gespeichert («Was wurde geändert?»).
+- Quellenangabe in Klartext («Confluence-Seite, zuletzt geändert am …», «Termin am …»).
+- 8 Bit ist Standard, der Schalter entfällt (bf16 nur noch zur Gegenprobe).
+- **Chat-Verlauf** (v129): «＋ Neuer Chat», «🕘 Verlauf»; Chats werden 30 Tage gespeichert (`data\chats.db`). Senden-Knopf zeigt «⏳», solange Vektoren berechnet werden.
+
+## v106–v118 – 16.–24.10.2026 · Tempo, Werkzeuge, Menü
+
+- **Tempo** (v115–v118): Einlesen rund 2,5× schneller, kurze Blöcke zwischen JSON-Feldern rund 4× schneller, Aufmerksamkeit beim Schreiben knapp 2× schneller; AURA belegt rund 7 GB weniger Arbeitsspeicher.
+- **Nur noch Qwen3.5** (v118): Qwen3 entfernt; Qwen3.5-9B lässt sich laden (bessere Antworten, langsamer).
+- **Werkzeuge › Text anonymisieren** (v113): ersetzt Namen, AHV-Nummern, IBAN, Mailadressen, Telefonnummern, Koordinaten und eigene heikle Begriffe durch Platzhalter; geführte Begriffsliste (bleibt lokal).
+- Seitenleiste mit Menügruppen (Chat, Wissen, Workflows, Werkzeuge, Einstellungen), «Log öffnen» (v109).
+- Speicherverbrauch im Log (v106).
+
+## v86–v105 – 14.–16.10.2026 · Qwen3.5, OneNote, bessere Antworten
+
+- **Qwen3.5-4B** mit eigener Engine (v88/v89), 8 Bit und Denkblock aus.
+- **OneNote** als Quelle (v87): Auswahl je Abschnitt, nur geänderte Seiten werden neu gelesen, Klick öffnet die Seite in OneNote.
+- KV-Cache in 16 Bit (v85/v86): halber Speicher für langen Kontext.
+- **Workflows:** Auswahlfelder werden «bewertet» statt geschrieben – das Modell darf nur erlaubte Werte wählen; Sicherheit je Feld im Log, unsichere Felder im Prüfbericht (v96).
+- **Datei im Chat** (📎, v97–v99): gilt nur für den aktuellen Chat, wird nie in die Datenbank übernommen.
+- **Vektorsuche auf der Grafikkarte** (v98): Suche 2,3 s → 0,1 s.
+- Bessere Antworten (v101–v105): Personen und Quellen nur noch als Bonus statt harter Filter, kein Zusatzwissen, bester Treffer mit Nachbarstücken. Testwerkzeuge `tools\suche_test.py` und `tools\antwort_test.py` mit eigenen Testfragen.
+- **Übersicht mit drei Bereichen** (v90): Eingabe – Wissen/Verarbeitung – Ergebnis; Schalter «Expertenansicht» für Schritte, Prüfliste, Vorlage.
+
+## v65–v85 – 12.–14.10.2026 · 8 Bit, Widgets, Austausch
+
+- **8-Bit-Gewichte** (v70): halber Grafikspeicher, schnelleres Schreiben; Umrechnung beim Laden, Selbsttest gegen bf16.
+- Schweizer Rechtschreibung (ß → ss) in allen Antworten (v72).
+- **Workflows exportieren/importieren** als `.aurawf.zip` inkl. Wissen und Vorlagen (v78).
+- **Widgets** (v80–v82): Workflow-Ergebnisse auf der Startseite anheften; Ablaufband mit dem Ergebnis jedes Schritts.
+- Info-Leiste rechts (Sprachmodell, Wissen, letzte Läufe, v68).
+
 ## v64 – 11.10.2026 · Feldplan und Regel-Editor
 
 **Feldplan (v64a)**
