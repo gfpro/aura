@@ -1,5 +1,5 @@
 # aura/workflow/llmio.py — Sprachmodell fuer Workflows: eigener Chat-Prompt, freie Antwort und erzwungenes JSON.
-# Version 20261016v96 (v96: Auswahlfelder «bewerten» statt schreiben (System-One-Prinzip): das Modell darf nur
+# Version 20261102v159 (v159: LFM3 (v158) wieder entfernt, Stand wie v96; v96: Auswahlfelder «bewerten» statt schreiben (System-One-Prinzip): das Modell darf nur
 #                     Tokens erlaubter Werte waehlen; Sicherheit je Feld ins Log und in statistik["unsicher"];
 #                     v89: Qwen3.5 – Denkblock immer aus, Vorspann-Schnappschuss fuer den rekurrenten Zustand;
 #                     v40: Feldgrenzen bis Satzende; v43: Vorspann mit Festplatten-Cache des KV-Caches;

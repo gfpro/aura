@@ -1,6 +1,7 @@
 # aura/connectors/outlook_mail.py — Mail-Ordner des Hauptpostfachs (klassisches Outlook, nur lesen).
 # v23: Ordnerauswahl (settings["mail_folders"] = {EntryID: true/false}); neue Unterordner erben vom Elternordner.
 #      Beim Sync werden alle EntryIDs der gewaehlten Ordner gesammelt (ctx.seen) -> Worker loescht Verschwundenes.
+# v112: Anhaenge (pdf/docx/txt/md, bis anhang_max_mb) als Text: it["anhaenge"] = [(name, text)]; anhang_texte() auch fuer Nachtrag.
 # v73: zusaetzlich «zitat» = zitierter Verlauf (der Worker behaelt daraus nur Neues).
 from .base import Connector, outlook_namespace, outlook_available, iso
 from ..text import split_mail
@@ -9,6 +10,33 @@ SKIP_DEFAULT = (3, 4, 16, 20, 23)   # Geloescht, Postausgang, Entwuerfe, Sync-Pr
 SKIP_NAMES = {"aufgezeichnete unterhaltungen", "conversation history", "suchordner", "search folders",
               "rss-feeds", "rss feeds", "synchronisierungsprobleme", "sync issues"}
 ENCRYPTED = -2146893792             # 0x80090020
+ANH_EXT = (".pdf", ".docx", ".txt", ".md")
+
+def anhang_texte(it, settings, progress=lambda *a: None):
+    """v112: Text der Datei-Anhaenge einer Mail. Nur olByValue (1), erlaubte Endungen, bis anhang_max_mb.
+    Speichert kurz in %TEMP%\\aura_anh und loescht danach."""
+    if not settings.get("mail_anhaenge", True): return []
+    import os, re, tempfile
+    from pathlib import Path
+    from ..workflow.nodes import read_file
+    try: att = it.Attachments; n = att.Count
+    except Exception: return []
+    if not n: return []
+    maxb = float(settings.get("anhang_max_mb", 5)) * 1e6; maxc = int(settings.get("anhang_max_zeichen", 60000))
+    d = Path(tempfile.gettempdir()) / "aura_anh"; d.mkdir(exist_ok=True); out = []
+    for i in range(1, n + 1):
+        try:
+            a = att.Item(i); name = a.FileName or ""
+            if a.Type != 1 or not name.lower().endswith(ANH_EXT) or (a.Size or 0) > maxb: continue
+            f = d / re.sub(r'[\\/:*?"<>|]', "_", name)
+            a.SaveAsFile(str(f))
+            try: txt = re.sub(r"\n{3,}", "\n\n", read_file(str(f))).strip()[:maxc]
+            finally:
+                try: os.remove(f)
+                except OSError: pass
+            if len(txt) >= 50: out.append((name, txt))
+        except Exception as e: progress(f"Anhang uebersprungen: {e}")
+    return out
 
 def list_folders(ns, progress=lambda *a: None, counts=True):
     """Alle Mail-Ordner des Hauptpostfachs als Liste (Baumreihenfolge):
@@ -84,7 +112,8 @@ class OutlookMail(Connector):
                     except Exception: addr = ""
                     ts = iso(it.ReceivedTime) or iso(it.SentOn) or iso(it.CreationTime)
                     own, zit = split_mail(body, subj)
-                    yield {"ext_id": eid, "title": subj, "author": it.SenderName or "",
+                    anh = anhang_texte(it, ctx.settings, ctx.progress)                     # v112
+                    yield {"anhaenge": anh, "ext_id": eid, "title": subj, "author": it.SenderName or "",
                            "recipients": "; ".join(x for x in (it.To or "", it.CC or "") if x), "ts": ts,
                            "body": body, "text": own, "zitat": zit,
                            "meta": {"folder": fname, "folder_id": f["eid"], "sender_addr": addr or "",

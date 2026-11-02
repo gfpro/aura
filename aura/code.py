@@ -1,4 +1,4 @@
-# aura/code.py — Werkzeug «Code prüfen»: Projektordner einlesen, prüfen, Vorschläge als Diff. Version 20261031v144
+# aura/code.py — Werkzeug «Code prüfen»: Projektordner einlesen, prüfen, Vorschläge als Diff. Version 20261102v146
 # Grundsätze:
 #   * Nur lesend, bis der Benutzer einen Vorschlag ausdrücklich übernimmt.
 #   * Vor jedem Schreiben: Sicherung nach data\code\sicherung\<zeit>\<relativer pfad> (ausserhalb des Projekts).
@@ -20,6 +20,8 @@ ENDUNGEN = {".py", ".pyw", ".js", ".mjs", ".ts", ".tsx", ".jsx", ".java", ".cs",
 AUSSCHLUSS = {".git", ".hg", ".svn", "venv", ".venv", "env", "node_modules", "__pycache__", ".mypy_cache", ".pytest_cache",
               ".idea", ".vscode", "dist", "build", "target", "bin", "obj", "vendor", "site-packages", "models", "logs",
               ".aura_backup", ".tox", ".next", "coverage"}
+QUELLCODE = {".py", ".pyw", ".js", ".mjs", ".ts", ".tsx", ".jsx", ".java", ".cs", ".go", ".rs", ".php", ".rb", ".ps1",
+             ".psm1", ".sh", ".vue", ".r", ".kt", ".swift", ".c", ".h", ".cpp", ".hpp", ".sql"}
 MAX_BYTES = 300_000                     # grössere Dateien sind meist generiert oder Daten
 ABSCHNITT_ZEILEN = 140                  # passt mit Prompt bequem in ein 4–8K-Kontextfenster
 
@@ -78,18 +80,34 @@ def statisch(root, liste):
         add = lambda z, art, stufe, t: bef.append({"pfad": rel, "zeile": z, "art": art, "stufe": stufe, "text": t})
         for i, z in enumerate(zeilen, 1):
             if GEHEIM.search(z) or SCHLUESSEL.search(z): add(i, "Geheimnis", "hoch", "Mögliches Passwort/Schlüssel im Klartext")
-            if re.search(r"\b(TODO|FIXME|XXX|HACK)\b", z): add(i, "Offen", "tief", z.strip()[:90])
-        if rel.endswith((".py", ".pyw")): _python(txt, add)
-        _dubletten(rel, zeilen, bloecke)
+            k = re.search(r"(#|//)(.*)$", z)                             # v146: nur in Kommentaren, nicht in Texten/Regex
+            if k and Path(rel).suffix.lower() in QUELLCODE and re.search(r"\b(TODO|FIXME|XXX|HACK)\b", k.group(2)) \
+                    and not re.search(r"[\"'][^\"']*$", z[:k.start()]): add(i, "Offen", "tief", z.strip()[:90])
+        if rel.endswith((".py", ".pyw")): _python(txt, add, rel)
+        if Path(rel).suffix.lower() in QUELLCODE: _dubletten(rel, zeilen, bloecke)    # v146: nicht in Daten (JSON, MD …)
     for h, orte in bloecke.items():                                     # gleiche 8-Zeilen-Blöcke an mehreren Orten
         if len(orte) > 1:
             (p0, z0), rest = orte[0], orte[1:]
             ziel = ", ".join(f"{p}:{z}" for p, z in rest[:3]) + (" …" if len(rest) > 3 else "")
             bef.append({"pfad": p0, "zeile": z0, "art": "Dublette", "stufe": "mittel", "text": f"Gleicher Code auch in {ziel}"})
+    bef = _zusammenfassen(bef, "Fehlerbehandlung", "except …: pass")   # v146: eine Zeile je Datei statt je Stelle
     rang = {"hoch": 0, "mittel": 1, "tief": 2}
     return sorted(bef, key=lambda b: (rang[b["stufe"]], b["pfad"], b["zeile"]))
 
-def _python(txt, add):
+def _zusammenfassen(bef, art, merkmal, ab=3):
+    """Gleichartige Hinweise einer Datei ab `ab` Stellen zu einer Zeile zusammenfassen (Zeilen werden aufgezählt)."""
+    gruppe = {}
+    for b in bef:
+        if b["art"] == art and merkmal in b["text"]: gruppe.setdefault(b["pfad"], []).append(b)
+    out = [b for b in bef if not (b["art"] == art and merkmal in b["text"] and len(gruppe[b["pfad"]]) >= ab)]
+    for pfad, g in gruppe.items():
+        g = sorted(g, key=lambda b: b["zeile"])
+        if len(g) >= ab:
+            z = ", ".join(str(b["zeile"]) for b in g[:12]) + (" …" if len(g) > 12 else "")
+            out.append(dict(g[0], text=f"{len(g)}× Fehler stillschweigend verschluckt (except …: pass) – Zeilen {z}"))
+    return out
+
+def _python(txt, add, rel=""):
     try: baum = ast.parse(txt)
     except SyntaxError as e: add(e.lineno or 1, "Syntax", "hoch", f"Syntaxfehler: {e.msg}"); return
     importiert, benutzt = {}, set()
@@ -118,7 +136,7 @@ def _python(txt, add):
             b = n
             while isinstance(b, ast.Attribute): b = b.value
             if isinstance(b, ast.Name): benutzt.add(b.id)
-    alle = re.search(r"__all__", txt)
+    alle = re.search(r"__all__", txt) or rel.endswith("__init__.py")    # v146: __init__.py stellt Namen bereit (Re-Export)
     for name, z in importiert.items():
         if name != "*" and name not in benutzt and not alle and name not in txt.split("import", 1)[-1].split("\n", 1)[-1]:
             add(z, "Aufräumen", "tief", f"Import «{name}» wird nicht verwendet")

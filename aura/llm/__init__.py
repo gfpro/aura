@@ -1,4 +1,4 @@
-# aura/llm/__init__.py — Version 20261015v89 (v89: Qwen3.5 in der Modellliste)
+# aura/llm/__init__.py — Version 20261102v159 (v159: LFM3 (v158) wieder entfernt; v89: Qwen3.5 in der Modellliste)
 # Sprachmodell-Steckplaetze. discover() findet Modelle in models\ anhand ihrer config.json.
 import json
 from pathlib import Path
