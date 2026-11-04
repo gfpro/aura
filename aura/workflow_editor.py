@@ -1,4 +1,5 @@
-# aura/workflow_editor.py — Reiter «Bauen»: Workflow ohne JSON zusammenstellen. Version 20261031v149
+# aura/workflow_editor.py — Reiter «Bauen»: Workflow ohne JSON zusammenstellen. Version 20261103v173
+# (v173: Rueckgaengig – vor jedem Speichern eine Version in _versionen, Ctrl+Z, Knopf, fruehere Versionen)
 # (v149: Reiter heisst «Bauen»; auf der Leinwand stehen Eingaben und Zeitplan beim Start-Knoten statt im Kasten «Auslöser»;
 #  Knöpfe Wissen, Vorlagen & Feldplan, Prüfliste über der Leinwand)
 # (v146: Ansicht «Leinwand» (workflow_canvas.py) als Standard, Umschalter Leinwand | Liste; v132: Feldoption «Länge folgt der Ausführlichkeit»)
@@ -44,6 +45,62 @@ class SchrittEditor:
         leinwand = SchrittEditor.ansicht == "Leinwand"
         if not leinwand: self._ausloeser(t)                    # v149: auf der Leinwand stehen Eingaben/Zeitplan beim Start-Knoten
         self._kopf(t, leinwand)
+        try: self.ww.win.bind("<Control-z>", self._ctrl_z)             # v173
+        except Exception: pass
+
+    # ------------------------------------------------------------------ v173: Versionen
+    VERSIONEN_MAX = 50
+
+    def _vdir(self): return Path(self.ww.cur).parent / "_versionen"
+
+    def _versionen(self):
+        d = self._vdir(); stem = Path(self.ww.cur).stem
+        return sorted(d.glob(f"{stem}_*.json.bak"), reverse=True) if d.exists() else []
+
+    def _version_ablegen(self, text):
+        from datetime import datetime
+        d = self._vdir(); d.mkdir(exist_ok=True)
+        (d / f"{Path(self.ww.cur).stem}_{datetime.now():%Y%m%d_%H%M%S_%f}.json.bak").write_text(text, encoding="utf-8")
+        for alt in self._versionen()[self.VERSIONEN_MAX:]:
+            try: alt.unlink()
+            except Exception: pass
+
+    def _laden(self, text):
+        load_probe = Path(self.ww.cur); aktuell = load_probe.read_text(encoding="utf-8")
+        try: load_probe.write_text(text, encoding="utf-8"); load_workflow(load_probe)
+        except Exception as e:
+            load_probe.write_text(aktuell, encoding="utf-8")
+            messagebox.showerror("Versionen", f"Diese Fassung lässt sich nicht laden:\n\n{e}", parent=self.ww.win); return None
+        self.ww.show(self.ww.cur); self.ww.tabs.set("Bauen"); return aktuell
+
+    def _rueckgaengig(self):
+        if self.ww.running: messagebox.showinfo("Versionen", "Während eines Laufs nicht ändern.", parent=self.ww.win); return
+        v = self._versionen()
+        if not v: messagebox.showinfo("Versionen", "Noch nichts zum Rückgängigmachen.", parent=self.ww.win); return
+        if self._laden(v[0].read_text(encoding="utf-8")) is not None: v[0].unlink()
+
+    def _ctrl_z(self, e=None):
+        w = self.ww.win.focus_get()
+        if isinstance(w, (tk.Text, tk.Entry)): return                  # dort gilt das normale Rueckgaengig im Textfeld
+        try:
+            if self.ww.tabs.get() != "Bauen": return
+        except Exception: pass
+        self._rueckgaengig()
+
+    def _versionen_fenster(self):
+        G = self.G; dlg = ctk.CTkToplevel(self.ww.win); dlg.title("Frühere Versionen"); dlg.transient(self.ww.win); dlg.grab_set(); dlg.geometry("460x520")
+        lst = ctk.CTkScrollableFrame(dlg, fg_color="transparent"); lst.pack(fill="both", expand=True, padx=10, pady=10)
+        v = self._versionen()
+        if not v: ctk.CTkLabel(lst, text="Noch keine Versionen.", font=G.font(12), text_color=G.MUTED).pack(anchor="w")
+        def zurueck(p):
+            if self.ww.running: messagebox.showinfo("Versionen", "Während eines Laufs nicht ändern.", parent=dlg); return
+            t = p.read_text(encoding="utf-8"); dlg.destroy(); a = self._laden(t)
+            if a is not None: self._version_ablegen(a)                 # auch das Wiederherstellen laesst sich rueckgaengig machen
+        for p in v:
+            d = p.name[len(Path(self.ww.cur).stem) + 1:]
+            row = ctk.CTkFrame(lst, fg_color=G.BUBBLE, corner_radius=6); row.pack(fill="x", pady=2)
+            ctk.CTkLabel(row, text=f"{d[6:8]}.{d[4:6]}.{d[:4]}  {d[9:11]}:{d[11:13]}:{d[13:15]}", font=G.font(12), text_color=G.INK).pack(side="left", padx=10, pady=5)
+            self._mini(row, "Wiederherstellen", lambda p=p: zurueck(p)).pack(side="right", padx=6)
 
     def _ausloeser(self, t):
         G = self.G
@@ -79,6 +136,8 @@ class SchrittEditor:
         if not leinwand:                                               # v149: auf der Leinwand übernimmt das die Palette
             ctk.CTkButton(hd, text="+ Schritt hinzufügen", height=28, corner_radius=8, font=G.font(11, "bold"), fg_color=G.ACCENT,
                           hover_color=G.ACCENT_HI, command=lambda: self._add(len(self.raw.get("steps", [])))).pack(side="right")
+        self._mini(hd, "↶ Rückgängig", self._rueckgaengig).pack(side="left", padx=(6, 2))   # v173
+        self._mini(hd, "Versionen …", self._versionen_fenster).pack(side="left", padx=2)
         sw = ctk.CTkSegmentedButton(hd, values=["Leinwand", "Liste"], height=28, font=G.font(11), command=self._ansicht,
                                     selected_color=G.ACCENT, selected_hover_color=G.ACCENT_HI)          # v146
         sw.set(SchrittEditor.ansicht); sw.pack(side="right", padx=8)
@@ -127,6 +186,9 @@ class SchrittEditor:
             p.write_text(old, encoding="utf-8"); self.raw = json.loads(old)
             messagebox.showerror("Schritte", f"Nicht gespeichert – der Workflow wäre so fehlerhaft:\n\n{e}", parent=self.ww.win)
             return False
+        if p.read_text(encoding="utf-8") != old:                       # v173
+            try: self._version_ablegen(old)
+            except Exception: pass
         self.ww.show(self.ww.cur); self.ww.tabs.set(tab)
         warn = self._order_warnings()
         if warn: messagebox.showwarning("Schritte", "Achtung, Reihenfolge:\n- " + "\n- ".join(warn), parent=self.ww.win)

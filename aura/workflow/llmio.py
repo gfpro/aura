@@ -1,5 +1,5 @@
 # aura/workflow/llmio.py — Sprachmodell fuer Workflows: eigener Chat-Prompt, freie Antwort und erzwungenes JSON.
-# Version 20261102v159 (v159: LFM3 (v158) wieder entfernt, Stand wie v96; v96: Auswahlfelder «bewerten» statt schreiben (System-One-Prinzip): das Modell darf nur
+# Version 20261103v164 (v164: Chat-Vorlage aus dem Backend, Apertus-Denkmarker ausgefiltert; v159: LFM3 (v158) wieder entfernt, Stand wie v96; v96: Auswahlfelder «bewerten» statt schreiben (System-One-Prinzip): das Modell darf nur
 #                     Tokens erlaubter Werte waehlen; Sicherheit je Feld ins Log und in statistik["unsicher"];
 #                     v89: Qwen3.5 – Denkblock immer aus, Vorspann-Schnappschuss fuer den rekurrenten Zustand;
 #                     v40: Feldgrenzen bis Satzende; v43: Vorspann mit Festplatten-Cache des KV-Caches;
@@ -32,8 +32,9 @@ class Parts:
                                + ", ".join(sorted(k for k in vars(be) if not k.startswith("__"))))
         self.maxT = int(getattr(self.eng, "maxT", 4096))
         self.chunk = int(getattr(sys.modules.get(type(self.eng).__module__), "CHUNK", 512))
-        self.im_start, self.im_end = self.special("<|im_start|>"), self.special("<|im_end|>")
-        stop = {self.im_end} | set(getattr(be, "stop_ids", None) or ())
+        add = getattr(self.tok, "added", None) or {}; self.im_start, self.im_end = add.get("<|im_start|>"), add.get("<|im_end|>")
+        stop = set(getattr(be, "stop_ids", None) or ())                 # v164: keine festen ChatML-Marker mehr
+        if isinstance(getattr(self.tok, "added", None), dict) and "<|im_end|>" in self.tok.added: stop.add(self.tok.added["<|im_end|>"])
         eos = (getattr(self.eng, "cfg", {}) or {}).get("eos_token_id")
         stop.update(eos if isinstance(eos, list) else [eos] if isinstance(eos, int) else [])
         try: stop.add(self.special("<|endoftext|>"))
@@ -42,7 +43,7 @@ class Parts:
 
     def encode(self, s): return list(self.tok.encode(s))
     def decode(self, ids):
-        if hasattr(self.tok, "decode"): return self.tok.decode(list(ids))
+        if hasattr(self.tok, "decode"): return ohne_denken(self.tok.decode(list(ids)))
         from ..llm.bpe_tokenizer import StreamDecoder               # native.py: Tokenizer ohne decode()
         d = StreamDecoder(self.tok); return "".join(d.push(t) or "" for t in ids)
     def special(self, s):
@@ -52,12 +53,21 @@ class Parts:
         if len(ids) != 1: raise RuntimeError(f"Tokenizer kennt {s} nicht als Spezialtoken (ergibt {ids[:6]})")
         return ids[0]
 
+def ohne_denken(s):
+    """v164: Apertus-Denkteil entfernen (die Marker sind keine Spezialtokens und blieben sonst im Text)."""
+    if "<|inner_prefix|>" not in s and "<|inner_suffix|>" not in s: return s
+    s = re.sub(r"<\|inner_prefix\|>.*?(<\|inner_suffix\|>|$)", "", s, flags=re.S)
+    return s.replace("<|inner_suffix|>", "")
+
 def parts(be): return Parts(be)
 
 def chat_ids(P, system, user, think_off, vorspann=""):
     """Qwen3-Chatvorlage. think_off: leerer Denkteil (wie enable_thinking=False) fuer Hybrid-Modelle.
     v43: vorspann = fester Anfang der Benutzernachricht; wird getrennt kodiert, damit der Anfang immer gleich bleibt.
     Rueckgabe: ids (und P.head = Anzahl Tokens von System + Vorspann)."""
+    if hasattr(P.be, "chat_head"):                                   # v164: Vorlage je Modell (native.py)
+        h = P.encode(P.be.chat_head(system, vorspann)); P.head = len(h)
+        return h + P.encode(P.be.chat_tail(user))
     think_off = think_off or bool(getattr(P.be, "chat_suffix", lambda: "")())   # v89: Qwen3.5 verlangt leeren Denkblock
     head = f"<|im_start|>system\n{system.strip()}<|im_end|>\n" if system else ""
     head += "<|im_start|>user\n" + (vorspann.strip() + "\n\n" if vorspann and vorspann.strip() else "")

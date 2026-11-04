@@ -1,4 +1,4 @@
-# aura/skills.py — Skills und Rollen: finden, freigeben, importieren. Version 20261031v146
+# aura/skills.py — Skills und Rollen: finden, freigeben, importieren. Version 20261103v172 (v172: Inhalt speichern mit Sicherungskopie)
 # Rolle  = Markdown-Datei in C:\aura\rollen\<name>.md (Haltung, Arbeitsgrundsätze). Wird als Zusatz zum Systemtext verwendet:
 #          im Chat (Auswahl «Rolle» über dem Chat) oder im Baustein «Anweisung ans Sprachmodell» (Feld «Rolle»).
 # Skill  = Workflow-Paket mit skill.json (Anzeigename, Beschreibung, Rolle, Rechte, Version, Autor). Erscheint in der Palette
@@ -157,6 +157,14 @@ def importieren(pfad, art=None):
         "status": "Rohbau – Schritte, Feldplan und Regeln noch einrichten (siehe anleitung.md)"},
         ensure_ascii=False, indent=1), encoding="utf-8")
     return art, d
+
+
+def speichern(pfad, text):
+    """v172: Inhalt ersetzen; die alte Fassung kommt nach _versionen. Die Pruefsumme aendert sich, die Freigabe faellt also weg."""
+    from datetime import datetime
+    p = Path(pfad); v = p.parent / "_versionen"; v.mkdir(exist_ok=True)
+    shutil.copy2(p, v / f"{p.stem}_{datetime.now():%Y%m%d_%H%M%S}{p.suffix}")
+    p.write_text(text, encoding="utf-8")
 
 
 def entfernen(e):

@@ -1,4 +1,4 @@
-# aura/worker.py — Version 20261029v129 (v129: job_chat_neu)
+# aura/worker.py — Version 20261103v168 (v168: Teiltreffer seltener Woerter als Quellen statt Rueckfrage; v129: job_chat_neu)
 # aura/worker.py — EIN Hintergrund-Thread fuer alles Schwere (Outlook, GPU, Suche).
 # DirectX 11 und Outlook-COM vertragen keinen parallelen Zugriff aus mehreren Threads.
 # Die Oberflaeche schickt Auftraege (jobs) und liest Ereignisse (events).
@@ -471,6 +471,22 @@ class Worker(threading.Thread):
         self.progress("Sprachmodell entladen - GPU-Speicher freigegeben"); self._llm_state()
 
     @staticmethod
+    def _offene_kandidaten(cand, rare_all, top):
+        """v163: Rueckfrage nur, wenn ein seltenes Wort noch in keiner gewaehlten Quelle steckt."""
+        drin = {w for c in rare_all if c["item_id"] in top for w in c["rare"]}
+        return [c for c in cand if set(c["rare"]) - drin]
+
+    @staticmethod
+    def _vorschau(hits, n):
+        """v160: Die Quellen, die das Modell liest, je Objekt einmal (Anzeige vor der Antwort; keine Aussage über die Antwort)."""
+        out, seen = [], set()
+        for h in hits[:n]:
+            key = h.get("item_id") or h.get("path") or h.get("title")
+            if key in seen: continue
+            seen.add(key); out.append(h)
+        return out
+
+    @staticmethod
     def _drop_weak(hits, mode, s):
         """Schwache Treffer nicht ans Modell: nur im Hybrid-Modus, relativ zum besten RRF-Wert.
         Treffer in beiden Listen ~0,033, Platz 1 in nur einer Liste ~0,016 (= Haelfte, bleibt drin)."""
@@ -673,8 +689,13 @@ class Worker(threading.Thread):
                 add = R.chunk_hits(self.conn, [c["chunk_id"] for c in full[:2]]); ids = {a["item_id"] for a in add}
                 hits = add + [h for h in hits if h["item_id"] not in ids]
                 self.progress(f"Seltenes Wort: {len(add)} Treffer vorgezogen")
-            elif cand:
-                return self._rueckfrage(asked, backend_id, cand[:4], ref, prev, t_start)
+            elif self._offene_kandidaten(cand, rare_all, top):                # v163
+                if s.get("rueckfrage_fragen", False):                    # v168: alte Rueckfrage nur noch auf Wunsch
+                    return self._rueckfrage(asked, backend_id, cand[:4], ref, prev, t_start)
+                offen = self._offene_kandidaten(cand, rare_all, top)     # v168: beste Teiltreffer direkt mitlesen
+                add = R.chunk_hits(self.conn, [c["chunk_id"] for c in offen[:2]]); ids = {a["item_id"] for a in add}
+                hits = hits[:2] + add + [h for h in hits[2:] if h["item_id"] not in ids]
+                self.progress(f"Seltenes Wort: {len(add)} Teiltreffer als Quelle eingesetzt")
         if force:                                                        # v110: Quelle per Knopf gewaehlt
             add = R.item_hits(self.conn, list(force), len(force)); ids = set(force)
             hits = add + [h for h in hits if h["item_id"] not in ids]
@@ -691,10 +712,17 @@ class Worker(threading.Thread):
                     hits[:n] = sorted(hits[:n], key=lambda h: h["ts"], reverse=not CHRONO.search(asked))
         self.emit("answer_start", asked, mode, ref)
         t_search = time.perf_counter() - t_start
+        if not hits:                                                     # v160: nichts gefunden -> kein Modelllauf
+            self.emit("token", "Dazu habe ich in deinen Quellen nichts gefunden.")
+            self.emit("sources", [], {"search": t_search, "total": t_search}); return
+        if s.get("sofort_treffer", True):                                # v160: sofort zeigen, was gelesen wird
+            self.emit("vorschau", self._vorschau(hits, max(int(s.get("llm_top_k", 4)), len(ah))))
         be = self._llm(backend_id); be.settings = s; be.used = None; be.timing = None
         if ah:                                                           # v97: Fragen zum Dokument brauchen mehr Platz
             be.settings = dict(s, llm_max_new=max(int(s.get("llm_max_new", 250)), int(s.get("anhang_max_new", 600))),
                                llm_top_k=max(int(s.get("llm_top_k", 4)), len(ah) + 2))
+        tok = {"Normal": 500, "Ausführlich": 900}.get(s.get("antwort_stufe"))          # v163: Antwortlänge
+        if tok: be.settings = dict(be.settings, llm_max_new=max(int(be.settings.get("llm_max_new", 250)), tok))
         t_gen = time.perf_counter()
         # Das Modell kennt weder Datum noch Uhrzeit -> mitgeben (sonst «heute» = Datum der Quelle)
         ctx_q = f"(Folgefrage. Vorherige Frage: {prev[-1]})\n" if prev else ""          # v65: nur die Frage, nie die Antwort

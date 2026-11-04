@@ -1,4 +1,4 @@
-# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261031v147
+# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261103v166 (v166: Antwortlaenge als Schieberegler)
 # v129: Senden-Knopf orange «⏳» + Hinweis, solange Vektoren berechnet werden (Frage bleibt im Eingabefeld).
 #       «＋ Neuer Chat» und «🕘 Verlauf» über dem Chat; Chats werden 30 Tage gespeichert (chatlog.py, data\chats.db;
 #       Einstellungen chats_behalten, chats_tage). «⌂» startet ebenfalls einen neuen Chat (setzt den Bezug im Worker zurück).
@@ -165,11 +165,20 @@ class App:
         qrow = ctk.CTkFrame(b, fg_color="transparent"); qrow.grid(row=3, column=0, sticky="ew", pady=(8, 0))   # v119
         qrow.grid_columnconfigure(1, weight=1)
         nq = max(2, min(12, int(self.s.get("llm_top_k", 4))))
-        self.q_lbl = ctk.CTkLabel(qrow, text=f"Quellen {nq}", font=font(11), text_color=INK, width=70, anchor="w")
+        self.q_lbl = ctk.CTkLabel(qrow, text=f"Max. Quellen {nq}", font=font(11), text_color=INK, width=92, anchor="w")
         self.q_lbl.grid(row=0, column=0, sticky="w", padx=(2, 0))
         self.q_sl = ctk.CTkSlider(qrow, from_=2, to=12, number_of_steps=10, height=16, progress_color=ACCENT,
                                   button_color=ACCENT, button_hover_color=ACCENT_HI, command=self.set_quellen)
         self.q_sl.set(nq); self.q_sl.grid(row=0, column=1, sticky="ew", padx=(4, 2))
+        arow = ctk.CTkFrame(qrow, fg_color="transparent"); arow.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0))   # v163
+        arow.grid_columnconfigure(1, weight=1); st = self.s.get("antwort_stufe", "Kurz")   # v166: Schieberegler
+        if st not in self.STUFEN: st = "Kurz"
+        self.a_lbl = ctk.CTkLabel(arow, text=st, font=font(11), text_color=INK, width=92, anchor="w")
+        self.a_lbl.grid(row=0, column=0, sticky="w", padx=(2, 0))
+        self.a_seg = ctk.CTkSlider(arow, from_=0, to=2, number_of_steps=2, height=16, progress_color=ACCENT,
+                                   button_color=ACCENT, button_hover_color=ACCENT_HI, command=self.set_stufe)
+        self.a_seg.set(self.STUFEN.index(st)); self.a_seg.grid(row=0, column=1, sticky="ew", padx=(4, 2))
+        hilfe.tip(self.a_seg, "Antwortlänge. Kurz für Fakten, Ausführlich z.B. für Zusammenfassungen – dauert länger.")
         hilfe.tip(self.q_sl, "Wie viele Quellen das Sprachmodell liest. Mehr Quellen = vollständigere Antworten, aber je Quelle "
                              "etwa 3–5 s länger. Höchstens 2 Textstücke je Mail/Dokument.")
         self._llm_view("none" if self.s["llm"] == "extractive" else "off",
@@ -795,6 +804,21 @@ class App:
         lbl.pack(padx=16, pady=11, anchor="w"); self.msgs.append(lbl)
         self._scroll(); return b, lbl
 
+    def _vorschau(self, hits):
+        """v160: Sofort anklickbar zeigen, welche Quellen das Modell gerade liest."""
+        f = ctk.CTkFrame(self.cur, fg_color="transparent"); f.pack(fill="x", padx=16, pady=(10, 0), before=self.cur_lbl)
+        self.cur_vor = f
+        ctk.CTkLabel(f, text="VORSELEKTION WIRD GEPRÜFT  (Klick öffnet das Original)", font=font(10, "bold"), text_color=MUTED).pack(anchor="w")
+        for h in hits:
+            lb = ctk.CTkLabel(f, text=f"{(h.get('ts') or '')[:10]}  ·  {(h.get('title') or '')[:80]}", font=font(12),
+                              text_color=INK, anchor="w", height=20, cursor="hand2")
+            lb.pack(anchor="w")
+            if h.get("path"): lb.bind("<Button-1>", lambda e, p=h["path"]: self._open_file(p))
+            elif h.get("item_id"): lb.bind("<Button-1>", lambda e, iid=h["item_id"]: self.open_original(iid))
+            lb.bind("<Enter>", lambda e, l=lb: l.configure(text_color=ACCENT))
+            lb.bind("<Leave>", lambda e, l=lb: l.configure(text_color=INK))
+        self._scroll()
+
     def sources(self, frame, hits, answer, tm=None):
         foot = ctk.CTkFrame(frame, fg_color="transparent"); foot.pack(fill="x", padx=16, pady=(0, 12))
         is_list = bool(tm and tm.get("list"))
@@ -1018,8 +1042,15 @@ class App:
         self._llm_view("none" if self.s["llm"] == "extractive" else "off",
                        "kein Laden noetig" if self.s["llm"] == "extractive" else "nicht geladen")
 
+    STUFEN = ["Kurz", "Normal", "Ausführlich"]                         # v166
+
+    def set_stufe(self, v):                                            # v163
+        st = self.STUFEN[int(round(float(v)))]; self.a_lbl.configure(text=st)
+        self.s = load_settings()
+        if self.s.get("antwort_stufe") != st: self.s["antwort_stufe"] = st; save_settings(self.s)
+
     def set_quellen(self, v):                                          # v119
-        n = int(round(float(v))); self.q_lbl.configure(text=f"Quellen {n}")
+        n = int(round(float(v))); self.q_lbl.configure(text=f"Max. Quellen {n}")
         self.s = load_settings()
         if self.s.get("llm_top_k") != n: self.s["llm_top_k"] = n; save_settings(self.s)
 
@@ -1489,11 +1520,13 @@ class App:
                                      text_color="#DCE3FF", anchor="w").pack(padx=16, pady=(0, 9), anchor="w")
                     self.cur, lbl = self.bubble("…", "a"); self.cur_lbl = lbl; self.cur_text = ""
                     self.t_ask = time.perf_counter()
+                elif kind == "vorschau" and self.cur: self._vorschau(d[0])      # v160
                 elif kind == "token" and self.cur:
                     self.cur_text += d[0]
                 elif kind == "sources" and self.cur:
                     vis = visible(self.cur_text) or "(Keine Antwort – Token-Grenze im Denkteil erreicht)"
                     self.cur_lbl.configure(text=vis)
+                    if getattr(self, "cur_vor", None): self.cur_vor.destroy(); self.cur_vor = None   # v160: Quellen folgen unten
                     self.sources(self.cur, d[0], vis, d[1] if len(d) > 1 else None)
                     self.last_ans = self.cur; self.cur = None; self._scroll()       # v110
                     self._chat_save(self.cur_q, vis, d[0], d[1] if len(d) > 1 else None)   # v129
@@ -1561,7 +1594,25 @@ def _scharfes_icon(root, ico):
         log.get().info(f"DIAG icon nicht gesetzt: {e}")
 
 
+_sperre = None                                                      # v164: Griff bleibt bis Programmende offen
+
+def _schon_offen():
+    """v164: Nur eine Instanz. Läuft AURA schon, dessen Fenster nach vorne holen. Windows gibt die Sperre auch nach Absturz frei."""
+    global _sperre
+    try:
+        k = ctypes.windll.kernel32
+        k.CreateMutexW.restype = ctypes.c_void_p
+        _sperre = k.CreateMutexW(None, False, "Local\\AURA_eine_Instanz")
+        if k.GetLastError() != 183: return False                      # 183 = ERROR_ALREADY_EXISTS
+        u = ctypes.windll.user32; u.FindWindowW.restype = ctypes.c_void_p
+        h = u.FindWindowW(None, f"{APP_NAME} – {SUBTITLE}")
+        if h:
+            h = ctypes.c_void_p(h); u.ShowWindow(h, 9); u.SetForegroundWindow(h)   # 9 = SW_RESTORE
+        return True
+    except Exception: return False                                    # Im Zweifel normal starten
+
 def main():
+    if _schon_offen(): return
     try: ctypes.windll.shcore.SetProcessDpiAwareness(1)
     except Exception: pass
     ctk.set_appearance_mode(load_settings().get("darstellung", "system"))   # v69: Hell/Dunkel/System aus den Einstellungen

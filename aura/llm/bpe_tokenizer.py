@@ -1,4 +1,5 @@
-# aura/llm/bpe_tokenizer.py — Version 20261015v88  (AURA)
+# aura/llm/bpe_tokenizer.py — Version 20261103v164  (AURA)
+#   v164: Apertus: Normalizer-Sequenz (Replace), ignore_merges, Spezialtokens nach Normalisierung, ohne Bild-/Audio-Tokens im Suchmuster
 #   v88: \p{X} allgemein uebersetzt (auch \p{M} fuer Qwen3.5), innerhalb und ausserhalb von [...]
 # Reiner-Python-Tokenizer fuer Byte-Level-BPE-Modelle (Qwen2/Qwen3, Llama-3-Stil).
 # Liest tokenizer.json. Keine Abhaengigkeiten.
@@ -54,23 +55,42 @@ class BPETokenizer:
         self.vocab = m["vocab"]
         merges = m["merges"]
         self.ranks = {(tuple(x) if isinstance(x, list) else tuple(x.split(" ", 1))): i for i, x in enumerate(merges)}
-        self.added = {t["content"]: t["id"] for t in j.get("added_tokens", [])}
+        self.ignore_merges = bool(m.get("ignore_merges"))                # v164: ganzes Wort im Vokabular -> direkt
+        at = j.get("added_tokens", [])
+        self.added = {t["content"]: t["id"] for t in at}
+        self.added_ids = set(self.added.values())                        # v164: decode ohne Listensuche
         self.special_ids = {t["id"] for t in j.get("added_tokens", []) if t.get("special")}
         self.id2tok = {i: t for t, i in self.vocab.items()}
         self.id2tok.update({i: t for t, i in self.added.items()})
         pre = j.get("pre_tokenizer") or {}
         pats = [p for p in (pre.get("pretokenizers") or [pre]) if p.get("type") == "Split"]
         self.split = _translate_regex(pats[0]["pattern"]["Regex"]) if pats else re.compile(r"\S+|\s+")
-        norm = (j.get("normalizer") or {}).get("type")
+        nj = j.get("normalizer") or {}
+        norm = nj.get("type")
         self.nfc = norm == "NFC"
+        self.repl = []                                                   # v164: Sequence aus Replace-Regeln
+        for n in (nj.get("normalizers") or [] if norm == "Sequence" else []):
+            if n.get("type") == "NFC": self.repl.append(None)
+            elif n.get("type") == "Replace":
+                p = n["pattern"]
+                rx = _translate_regex(p["Regex"]) if "Regex" in p else re.compile(re.escape(p["String"]))
+                self.repl.append((rx, n["content"]))
+            else: raise ValueError(f"Normalizer {n.get('type')} nicht unterstuetzt")
         self.b2u = _bytes_to_unicode(); self.u2b = {v: k for k, v in self.b2u.items()}
-        alt = "|".join(re.escape(t) for t in sorted(self.added, key=len, reverse=True))
-        self.added_rx = re.compile(f"({alt})") if alt else None
+        # v164: Bild-/Audio-Tokens (Apertus: 135'000 Stueck) kommen im Text nie vor; normalized-Tokens erst nach dem Normalizer
+        def rx(ts):
+            alt = "|".join(re.escape(t) for t in sorted(ts, key=len, reverse=True))
+            return re.compile(f"({alt})") if alt else None
+        text = [t for t in at if not t["content"].startswith(("<|visual token ", "<|audio token "))]
+        self.added_rx = rx(t["content"] for t in text if not t.get("normalized"))
+        self.added_norm_rx = rx(t["content"] for t in text if t.get("normalized")) if self.repl else None
+        if not self.repl: self.added_rx = rx(t["content"] for t in text)
         self._cache = {}
 
     def _bpe(self, word):
         hit = self._cache.get(word)
         if hit is not None: return hit
+        if self.ignore_merges and word in self.vocab: return [self.vocab[word]]   # v164
         parts = list(word)
         while len(parts) > 1:
             best, idx = None, -1
@@ -87,8 +107,21 @@ class BPETokenizer:
         if len(self._cache) < 100000: self._cache[word] = ids
         return ids
 
-    def _encode_plain(self, text, out):
+    def _normalize(self, text):                                          # v164
         if self.nfc: text = unicodedata.normalize("NFC", text)
+        for r in self.repl:
+            text = unicodedata.normalize("NFC", text) if r is None else r[0].sub(lambda _m, c=r[1]: c, text)
+        return text
+
+    def _encode_plain(self, text, out):
+        text = self._normalize(text)
+        if self.added_norm_rx:                                           # v164: z.B. <|inner_prefix|> nach Normalizer
+            for i, seg in enumerate(self.added_norm_rx.split(text)):
+                if i % 2: out.append(self.added[seg])
+                elif seg: self._split_bpe(seg, out)
+        else: self._split_bpe(text, out)
+
+    def _split_bpe(self, text, out):
         for piece in self.split.findall(text):
             out.extend(self._bpe("".join(self.b2u[b] for b in piece.encode("utf-8"))))
 
@@ -105,7 +138,7 @@ class BPETokenizer:
 
     def token_bytes(self, tid):
         t = self.id2tok.get(tid, "")
-        if tid in self.added.values(): return t.encode("utf-8")
+        if tid in self.added_ids: return t.encode("utf-8")
         return bytes(self.u2b.get(c, 0) for c in t)
 
     def decode(self, ids, skip_special=True):

@@ -130,7 +130,8 @@ class Retriever:
             "thema", "alle", "nachrichten", "gesendet", "bekommen", "erhalten", "dem", "den", "des", "ich", "du",
             "wen", "wem", "wessen", "uns", "ihn", "ihm", "ihr", "ihnen", "sie", "ihm", "allen", "einem", "einer"}   # v101
 
-    STOP_Q = STOP | {"informationen", "information", "infos", "info", "suche", "such", "finde", "finden", "zeige", "gibt", "gab",
+    STOP_Q = STOP | {"bis", "muss", "musst", "müssen", "wann", "soll", "sollen", "kann", "können", "wird", "werden",   # v163
+                     "informationen", "information", "infos", "info", "suche", "such", "finde", "finden", "zeige", "gibt", "gab",
                      "über", "ueber", "dazu", "bitte", "kannst", "können", "koennen", "weisst", "weißt", "noch", "auch", "für",
                      "fuer", "bei", "aus", "nach", "vor", "ein", "auf", "oder", "sich", "etwas", "alles", "welches", "vom",
                      "mit", "an", "im", "in", "zu", "wo", "gibt's", "steht", "stand", "worum", "geht"}   # v110

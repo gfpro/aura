@@ -1,4 +1,4 @@
-# aura/skills_gui.py — Fenster «Skills & Rollen» (Workflows › Skills & Rollen). Version 20261031v146
+# aura/skills_gui.py — Fenster «Skills & Rollen» (Workflows › Skills & Rollen). Version 20261103v172 (v172: Inhalt direkt bearbeiten)
 # Zeigt, was verfügbar ist, mit Rechten, Version und Autor; Schalter «Freigegeben». Neu importierte oder geänderte Einträge sind
 # aus, bis sie hier geprüft und freigegeben werden. Logik in skills.py – hier nur die Oberfläche.
 import tkinter as tk
@@ -83,7 +83,7 @@ class SkillsFenster:
         ctk.CTkSwitch(rechts, text="Freigegeben", variable=var, font=G.font(11), text_color=G.INK, progress_color=G.ACCENT,
                       command=lambda: self._freigabe(e, var.get())).pack(anchor="e")
         bb = ctk.CTkFrame(rechts, fg_color="transparent"); bb.pack(anchor="e", pady=(6, 0))
-        self._knopf(bb, "Inhalt ansehen", lambda: self._ansehen(e))
+        self._knopf(bb, "Inhalt bearbeiten", lambda: self._ansehen(e))
         if e["art"] == "skill":
             self._knopf(bb, "Workflow öffnen", lambda: self._oeffnen(e["pfad"]))
             if e["aktiv"]: self._knopf(bb, "Als neuen Workflow …", lambda: self._vorlage(e))
@@ -107,8 +107,25 @@ class SkillsFenster:
         p = e["pfad"] if e["art"] == "rolle" else Path(e["pfad"]) / "anleitung.md"
         if not Path(p).is_file(): p = Path(e["pfad"]) / "skill.json"
         d = ctk.CTkToplevel(self.win); d.title(e["titel"]); d.geometry("760x640"); d.transient(self.win)
+        alt = Path(p).read_text(encoding="utf-8", errors="replace")
+        fuss = ctk.CTkFrame(d, fg_color="transparent"); fuss.pack(side="bottom", fill="x", padx=10, pady=(0, 10))
         tb = ctk.CTkTextbox(d, font=ctk.CTkFont(family="Consolas", size=12), wrap="word"); tb.pack(fill="both", expand=True, padx=10, pady=10)
-        tb.insert("1.0", Path(p).read_text(encoding="utf-8", errors="replace")); tb.configure(state="disabled")
+        tb.insert("1.0", alt)
+        def speichern():                                               # v172
+            neu = tb.get("1.0", "end-1c")
+            if neu == alt: d.destroy(); return
+            war_aktiv = e["aktiv"]
+            try: SK.speichern(p, neu)
+            except Exception as ex: messagebox.showerror("Skills & Rollen", str(ex), parent=d); return
+            if war_aktiv and messagebox.askyesno("Skills & Rollen", "Gespeichert. Die alte Fassung liegt im Ordner _versionen.\n\n"
+                                                 "Du hast den Inhalt geändert, die Freigabe ist deshalb aufgehoben. Geänderte Fassung jetzt "
+                                                 "freigeben? Sonst stoppen Workflows mit dieser Rolle.", parent=d):
+                SK.freigeben(e["key"], True)
+            d.destroy(); self.fuellen()
+        ctk.CTkButton(fuss, text="Speichern", height=30, fg_color=G.ACCENT, hover_color=G.ACCENT_HI, font=G.font(12, "bold"),
+                      command=speichern).pack(side="right")
+        ctk.CTkButton(fuss, text="Abbrechen", height=30, fg_color=G.BORDER, hover_color=G.MUTED, text_color=G.INK, font=G.font(12),
+                      command=d.destroy).pack(side="right", padx=6)
 
     def _oeffnen(self, pfad):
         self.schliessen(); self.app.open_workflows()
@@ -149,4 +166,4 @@ class SkillsFenster:
         if meld:
             messagebox.showinfo("Importieren", "\n".join(meld) + "\n\nNeue Einträge sind aus, bis du sie freigibst. Ein importierter Skill "
                                 "ist ein Rohbau: Schritte, Feldplan und Regeln richtest du im Workflow ein (Anleitung unter «Inhalt "
-                                "ansehen»).", parent=self.win)
+                                "bearbeiten»).", parent=self.win)

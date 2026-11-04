@@ -4,6 +4,64 @@ Neueste Version zuerst. Versionsnummern entsprechen `VERSION` in `aura/__init__.
 
 ---
 
+## v174 – 03.11.2026 · Apertus: längerer Kontext
+
+- Kontext für Apertus von 8'192 auf 13'312 Tokens erhöht, damit lange Workflows laufen. Anpassbar mit `llm_context_apertus` in `data\settings.json`.
+
+## v173 – 03.11.2026 · Workflows: Rückgängig und Versionen
+
+- Im Reiter «Bauen»: Knopf «↶ Rückgängig» und Ctrl+Z (mehrfach), Knopf «Versionen …» mit früheren Ständen zum Wiederherstellen.
+- Vor jedem erfolgreichen Speichern legt AURA eine Version unter `_versionen` im Workflow-Ordner ab (höchstens 50). Gilt für die `workflow.json`, nicht für Wissen, Vorlagen und Feldplan.
+
+## v172 – 03.11.2026 · Skills & Rollen direkt bearbeiten
+
+- Knopf «Inhalt bearbeiten» mit Speichern und Abbrechen statt reiner Ansicht; die alte Fassung kommt nach `_versionen`.
+- Eine Änderung hebt die Freigabe auf; AURA fragt nach dem Speichern, ob die neue Fassung gleich freigegeben werden soll.
+
+## v169–v171 – 03.11.2026 · Chat: Belegpflicht
+
+- Nach jeder Chat-Frage steht eine Belegpflicht: nur nennen, was ausdrücklich in den Quellen steht; das Datum einer Quelle zählt als Beleg; sonst «Dazu steht in den Quellen nichts.».
+- Drei Fassungen an 30 Testfragen verglichen (v170 verworfen). Gemessen mit v171 (Apertus): 18 richtig, 6 teilweise, 6 falsch, 3 statt 5 falsche Behauptungen gegenüber v168.
+- Bekannte Grenze: Das Modell antwortet teils «nichts», obwohl die Quellen das Thema enthalten.
+
+## v168 – 03.11.2026 · Chat: Quellen statt Rückfrage
+
+- Passen seltene Wörter nur teilweise, liest das Modell die zwei besten Teiltreffer mit (Plätze 3 und 4), statt «Meintest du …?» zu fragen. Alte Rückfrage mit `"rueckfrage_fragen": true`.
+
+## v166–v167 – 03.11.2026 · Antwortlänge als Schieberegler, Modellvergleich
+
+- Kurz / Normal / Ausführlich als Schieberegler; dazu eine Längenanweisung direkt nach der Frage. Tokengrenzen bleiben 250 / 500 / 900 (v166 hatte sie irrtümlich geändert, v167 korrigiert).
+- Neu: `tools\modell_vergleich.py` vergleicht zwei Modelle mit `eval\fragen.txt`, mit blinder Bewertungsdatei und Schlüsseldatei.
+
+## v165 – 03.11.2026 · Apertus 1.5 als Sprachmodell
+
+- Neue Engine `aura/llm/apertus.py` für Apertus 1.5 (nur Text): 8-Bit-Gewichte, KV-Cache fp16, xIELU, RoPE `llama3`, Selbsttest gegen Python beim Laden. Apertus 1.5-8B erscheint in der Modellliste.
+- Tokenizer und Chat-Vorlage (v164-Vorbereitung): Normalizer-Regeln, `ignore_merges`, keine Bild-/Audio-Tokens im Suchmuster, Chat-Vorlage je Modell, Denkmarker werden ausgefiltert. Prüfung: `tools\apertus_tok_test.py`.
+- Vergleich mit Qwen3.5-9B: Chat mit 30 Testfragen praktisch gleichauf und schneller. Im Workflow Verfahrensentscheid nicht brauchbar (falscher Staatsvertragsbereich), deshalb für Workflows Qwen3.5-9B verwenden.
+
+## v164 – 03.11.2026 · Nur eine AURA-Instanz, Messung Relevanzprüfung
+
+- Zweiter Start öffnet keine neue Instanz, sondern holt das offene Fenster nach vorn.
+- Neu: `tools\relevanz_test.py` misst eine Ja/Nein-Prüfung pro Quelle (ohne Eingriff in AURA).
+
+## v163 – 03.11.2026 · Chat: Antwortlänge wählbar, weniger falsche Rückfragen
+
+- Schalter Kurz / Normal / Ausführlich unter «Max. Quellen» (Anweisung ans Modell und 250 / 500 / 900 Tokens).
+- Rückfrage nur noch, wenn ein seltenes Wort in keiner gewählten Quelle vorkommt; Füllwörter wie «bis» und «muss» zählen nicht mehr.
+
+## v162 – 03.11.2026 · Chat: Regler «Max. Quellen», Vorselektion vollständig
+
+- Der Regler heisst «Max. Quellen»: Er ist eine Obergrenze, schwache Treffer filtert `min_rel_score` weiterhin aus.
+- Die Vorselektion zeigt alle ausgewählten Quellen statt höchstens 4.
+
+## v161 – 03.11.2026 · Chat: Anzeige heisst «Vorselektion wird geprüft»
+
+## v160 – 03.11.2026 · Chat: Quellen sofort sichtbar
+
+- Sobald die Suche fertig ist, zeigt die Antwort die Vorselektion mit bis zu 4 anklickbaren Quellen – noch vor dem Laden des Modells. Am Ende ersetzt die Quellenliste diese Anzeige.
+- Keine Treffer: kurze Meldung ohne Modelllauf.
+- Einstellung `sofort_treffer` (Standard: an).
+
 ## v156 – 31.10.2026 · Präsentation: Einschränkungen nicht unterschlagen
 
 - Leitplanke ohne Sprachmodell: Behauptet ein Stichpunkt unbedingt «zulässig / erlaubt / verboten / muss …», steht im passenden Quellsatz aber «grundsätzlich», «unter Voraussetzungen», «sofern/soweit», «in der Regel» oder «nur wenn», ergänzt AURA die Einschränkung in Klammern und nennt die Folie in der Antwort unter «Bitte prüfen».

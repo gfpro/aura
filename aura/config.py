@@ -14,6 +14,7 @@ DEFAULTS = {
     "calendar_past_days": 365, "calendar_future_days": 180,
     "docs_folder": "",                       # Dokumentordner fuer den Datei-Connector
     "llm_top_k": 4,                          # Quellen fuer das Sprachmodell (mehr = langsamer)
+    "antwort_stufe": "Kurz",                 # v163: Kurz | Normal | Ausführlich
     "llm_max_new": 250,                      # maximale Antwortlaenge in Tokens
     "llm_temperature": 0.0,                  # 0 = immer das wahrscheinlichste Wort (schnell, sachlich)
     "llm_int8": True,                        # v125: 8-Bit-Gewichte (Standard); false nur als Gegenprobe
