@@ -63,9 +63,10 @@ Stand: v156 (Oktober 2026) · Änderungen: [CHANGELOG.md](CHANGELOG.md)
    | [intfloat/multilingual-e5-large](https://huggingface.co/intfloat/multilingual-e5-large) | Suche nach Bedeutung (Pflicht) | `models\multilingual-e5-large\` |
    | [Qwen/Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) | Schneller für Chat | `models\Qwen3.5-4B\` |
    | [Qwen/Qwen3.5-9B](https://huggingface.co/Qwen/Qwen3.5-9B) | Besser für Workflow | `models\Qwen3.5-9B\` |
+   | [swiss-ai/Apertus-v1.5-8B](https://huggingface.co/swiss-ai/Apertus-v1.5-8B) | Gut für den Chat | `models\Apertus1.5-8B\` |
 
    Jeder Modellordner braucht `config.json`, `tokenizer.json` und die `*.safetensors`-Dateien.
-5. Doppelklick auf `AURA.pyw`. Beim ersten Start legt AURA Datenbank und Einstellungen an.
+6. Doppelklick auf `AURA.pyw`. Beim ersten Start legt AURA Datenbank und Einstellungen an.
 
 Ohne Sprachmodell funktioniert AURA ebenfalls und zeigt statt ausformulierter Antworten die besten Fundstellen.
 
