@@ -26,7 +26,8 @@ def build_prompt(question, hits):
                        f"Betreff: {h['title']}\n{h['text']}" for i, h in enumerate(hits))
     return (f"Heute ist {WOCHENTAG[d.weekday()]}, {d.strftime('%d.%m.%Y')}.\n"
             "Beantworte die Frage ausschliesslich anhand der Quellen. Belege jede Aussage mit der Quellennummer, "
-            "z.B. [1] oder [2]. Steht die Antwort nicht in den Quellen, schreibe nur: «Dazu habe ich in den Quellen nichts "
+            "z.B. [1] oder [2]. Enthalten die Quellen nur Teilinformationen oder blosse Erwähnungen des Gefragten, gib genau diese "
+            "wieder. Nur wenn keine Quelle das Gefragte betrifft, schreibe: «Dazu habe ich in den Quellen nichts "
             "gefunden.» Rate nicht und verneine nichts, was die Quellen nicht ausdruecklich verneinen.\n\n"
             f"Quellen:\n{ctx}\n\nFrage: {question}\n"
             "Beantworte genau diese Frage – vollstaendig, aber ohne Zusatzinformationen, die nicht gefragt sind.\nAntwort:")

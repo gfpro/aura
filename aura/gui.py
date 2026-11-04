@@ -148,7 +148,7 @@ class App:
         b = self._grp(menu, "Chat", "Sprachmodell wählen und laden, Anzahl Quellen.")
         self.models = discover(MODELS); ids = [m[0] for m in self.models]
         self.om = ctk.CTkOptionMenu(b, values=[m[1] for m in self.models], height=32, corner_radius=8,
-                                    font=font(12), dropdown_font=font(12), fg_color=CARD, button_color=CARD,
+                                    font=font(12), dropdown_font=font(12), fg_color=SIDE, button_color=SIDE,
                                     button_hover_color=BORDER, text_color=INK, command=self.pick_model, dynamic_resizing=False)
         self.om.set(self.models[ids.index(self.s["llm"])][1] if self.s["llm"] in ids else self.models[0][1])
         self.om.grid(row=0, column=0, sticky="ew"); hilfe.tip(self.om, "#modell")
@@ -195,8 +195,6 @@ class App:
         self.b_erg = self._item(b, "Ergebnisse", self.open_ergebnisse, 1)                  # v54
         hilfe.tip(self.b_erg, "Ergebnisse aller Workflows: neueste zuerst, mit Öffnen, Speichern und Laufordner.")
         hilfe.tip(self._item(b, "Widgets", self.open_widgets, 2), hilfe.TEXTE["haupt"]["▶"])
-        hilfe.tip(self._item(b, "Skills & Rollen", self.open_skills, 3),                                   # v146
-                  "Verfügbare Skills und Rollen ansehen, importieren und freigeben. Neues oder Geändertes ist aus, bis du es freigibst.")
 
         # ---- v113: Werkzeuge
         b = self._grp(menu, "Werkzeuge", "Hilfsmittel für den Alltag, z.B. Texte anonymisieren.")
@@ -216,13 +214,15 @@ class App:
         self._switch(b, "Info-Leiste rechts", self.rb_var, self.toggle_rb, 3)
         self.start_var = tk.BooleanVar(value=self.s.get("startseite") == "widgets")          # v82
         self._switch(b, "Beim Start Widgets zeigen", self.start_var, self.set_start, 4)
+        hilfe.tip(self._item(b, "Skills & Rollen", self.open_skills, 5),                                   # v146
+                  "Verfügbare Skills und Rollen ansehen, importieren und freigeben. Neues oder Geändertes ist aus, bis du es freigibst.")
         self.sb_mode = ctk.CTkSegmentedButton(b, values=list(MODI), height=26, font=font(11), command=self.set_mode,  # v69
-                                              selected_color=ACCENT, selected_hover_color=ACCENT_HI, unselected_color=CARD,
-                                              unselected_hover_color=BORDER, fg_color=CARD, text_color=INK)
+                                              selected_color=ACCENT, selected_hover_color=ACCENT_HI, unselected_color=SIDE,
+                                              unselected_hover_color=BORDER, fg_color=SIDE, text_color=INK)
         self.sb_mode.set(next((k for k, v in MODI.items() if v == self.s.get("darstellung", "system")), "System"))
-        self.sb_mode.grid(row=5, column=0, sticky="ew", pady=(10, 4))
+        self.sb_mode.grid(row=6, column=0, sticky="ew", pady=(10, 4))
         hilfe.tip(self.sb_mode, "Darstellung: Hell, Dunkel oder wie Windows (System). Wird gespeichert.")
-        hilfe.tip(self._item(b, "Log öffnen", self.open_log, 6), hilfe.TEXTE["*"]["#version"])
+        hilfe.tip(self._item(b, "Log öffnen", self.open_log, 7), hilfe.TEXTE["*"]["#version"])
 
         self._grp_open(self.s.get("menu_offen", "Chat") or None, save=False)
 
@@ -248,25 +248,30 @@ class App:
 
     def _grp(self, menu, name, tiptext):
         """v109: Gruppenkopf (Wort ohne Pfeil) + Inhalt; Klick klappt auf/zu."""
-        h = ctk.CTkButton(menu, text=name, anchor="w", height=34, corner_radius=8, font=font(14, "bold"), fg_color="transparent",
+        w = ctk.CTkFrame(menu, fg_color="transparent", corner_radius=10); w.pack(fill="x", pady=(2, 0))   # v187: Rechteck der offenen Gruppe
+        w.grid_columnconfigure(0, weight=1)
+        h = ctk.CTkButton(w, text=name, anchor="w", height=34, corner_radius=8, font=font(14, "bold"), fg_color="transparent",
                           hover_color=CARD, text_color=INK, command=lambda: self._grp_open(name))
-        h.pack(fill="x", pady=(2, 0)); hilfe.tip(h, tiptext)
-        b = ctk.CTkFrame(menu, fg_color="transparent"); b.grid_columnconfigure(0, weight=1)
-        self.grp[name] = (h, b); return b
+        h.pack(fill="x"); hilfe.tip(h, tiptext)
+        b = ctk.CTkFrame(w, fg_color="transparent"); b.grid_columnconfigure(0, weight=1)
+        self.grp[name] = (h, b); self.grp_box = getattr(self, "grp_box", {}); self.grp_box[name] = w; return b
 
     def _grp_open(self, name, save=True):
         if name == self.grp_cur: name = None                           # zweiter Klick schliesst
         if name not in self.grp: name = None
         for n, (h, b) in self.grp.items():
-            if n == name: b.pack(fill="x", after=h, padx=(10, 2), pady=(2, 10)); h.configure(text_color=ACCENT)
-            else: b.pack_forget(); h.configure(text_color=INK)
+            if n == name:
+                b.pack(fill="x", after=h, padx=(10, 8), pady=(2, 10)); h.configure(text_color=ACCENT, hover_color=BORDER)
+                self.grp_box[n].configure(fg_color=CARD)
+            else:
+                b.pack_forget(); h.configure(text_color=INK, hover_color=CARD); self.grp_box[n].configure(fg_color="transparent")
         self.grp_cur = name
         if save:
             self.s = load_settings(); self.s["menu_offen"] = name or ""; save_settings(self.s)
 
     def _item(self, parent, text, cmd, r):
         b = ctk.CTkButton(parent, text=text, anchor="w", height=30, corner_radius=8, font=font(12), fg_color="transparent",
-                          hover_color=CARD, text_color=INK, command=cmd)
+                          hover_color=BORDER, text_color=INK, command=cmd)
         b.grid(row=r, column=0, sticky="ew", pady=1); return b
 
     def _switch(self, parent, text, var, cmd, r, pady=(8, 0)):
@@ -654,7 +659,7 @@ class App:
                                          dropdown_font=font(12), fg_color=CARD, button_color=CARD, button_hover_color=BORDER,
                                          text_color=INK, command=self._rolle_gewaehlt)                       # v146
         self.m_rolle.grid(row=0, column=3, padx=(8, 0))
-        hilfe.tip(self.m_rolle, "Rolle für die Antworten im Chat (freigegeben unter Workflows › Skills & Rollen). Die Regeln von "
+        hilfe.tip(self.m_rolle, "Rolle für die Antworten im Chat (freigegeben unter Einstellungen › Skills & Rollen). Die Regeln von "
                   "AURA – nur Quellen, mit Belegen – gehen immer vor.")
         self.refresh_rolle()
         self.chat = ctk.CTkScrollableFrame(main, fg_color="transparent", corner_radius=0,
@@ -666,16 +671,23 @@ class App:
         # Eingabe: mehrzeilig, Enter = senden, Shift+Enter = neue Zeile
         bar = ctk.CTkFrame(main, fg_color=BUBBLE, corner_radius=16, border_width=1, border_color=BORDER)
         bar.grid(row=2, column=0, sticky="ew", padx=36, pady=(10, 6)); bar.grid_columnconfigure(0, weight=1)
-        self.entry = ctk.CTkTextbox(bar, height=84, font=font(14), fg_color="transparent", text_color=INK,
+        self.entry = ctk.CTkTextbox(bar, height=52, font=font(14), fg_color="transparent", text_color=INK,
                                     wrap="word", border_width=0, activate_scrollbars=False)
         self.entry.grid(row=0, column=0, sticky="ew", padx=(14, 6), pady=10)
         self.entry.bind("<Return>", self._enter); self.entry.focus_set(); hilfe.tip(self.entry, "#frage")
-        self.b_ask = ctk.CTkButton(bar, text="➤", width=46, height=46, corner_radius=23, font=font(18, "bold"),
+        self.b_ask = ctk.CTkButton(bar, text="\uE724", width=34, height=34, corner_radius=17, font=ctk.CTkFont(family="Segoe MDL2 Assets", size=14),
                                    fg_color=ACCENT, hover_color=ACCENT_HI, command=self.ask)
-        self.b_ask.grid(row=0, column=1, padx=(0, 12), pady=10, sticky="se"); self.buttons.append(self.b_ask)
+        self.b_ask.grid(row=0, column=2, padx=(0, 12), pady=10, sticky="se"); self.buttons.append(self.b_ask)
+        from .mikrofon import Mikrofon                                   # v182: Spracheingabe im Chat
+        self.b_mic = ctk.CTkButton(bar, text="\uE720", width=34, height=34, corner_radius=17,
+                                   font=ctk.CTkFont(family="Segoe MDL2 Assets", size=14), fg_color="transparent",
+                                   hover_color=BORDER, text_color=MUTED)
+        self.b_mic.grid(row=0, column=1, padx=(0, 6), pady=10, sticky="se"); self.buttons.append(self.b_mic)
+        self.mic = Mikrofon(self); self.b_mic.configure(command=self.mic.toggle)
+        hilfe.tip(self.b_mic, "Klicken, sprechen, nochmals klicken (max. 30 s). Der Text erscheint im Eingabefeld. Alles bleibt lokal.")
         self.follow = False                                              # v67: Bezug zur letzten Frage (einmalig)
         tools = ctk.CTkFrame(bar, fg_color="transparent", height=24)     # v98: Werkzeugzeile (Bezug, Anhang) links unten
-        tools.grid(row=1, column=0, columnspan=2, sticky="w", padx=(14, 12), pady=(0, 10))
+        tools.grid(row=1, column=0, columnspan=3, sticky="w", padx=(14, 12), pady=(0, 10))
         self.b_follow = ctk.CTkButton(tools, text="↳ Bezug zur letzten Frage", height=24, corner_radius=12, font=font(11),
                                       fg_color="transparent", hover_color=BORDER, text_color=MUTED, border_width=1,
                                       border_color=BORDER, command=self.toggle_follow)

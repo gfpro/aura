@@ -1,7 +1,7 @@
-# aura/llm/native.py — Hugging-Face-Sprachmodelle auf der nativen GPU-Engine. Version 20261103v174 (v174: Apertus-Kontext 13312, Einstellung llm_context_apertus; v171: strenge Belegpflicht, Datum der Quelle zaehlt; v170: abgeschwaecht, verworfen; v169: Belegpflicht; v167: Tokengrenze wieder aus worker.py; v166: Anweisung je Stufe; v165: Apertus-Engine, Kontext hoechstens 8192; v164: Apertus-Chat-Vorlage und Erkennung, Engine folgt; v159: LFM3 (v158) wieder entfernt, Stand wie v146; v146: freigegebene Chat-Rolle aus skills.py im Systemtext; v130: 4-Bit-Gewichte, Einstellung llm_bits 4/8/16; v118: nur noch Qwen3.5, Qwen3-Engine entfernt; v110: Quellen nur mit Link werden genannt; v106: Speicher nach Engine-Aufbau ins Log; v104: System-Prompt ohne Satzgrenze – nur die Frage beantworten, keine Fuellsaetze; v88: Qwen3.5 ueber qwen35.py, Denkmodus aus; v86: gemm fp16; v85: KV-Cache fp16, Einstellung llm_kv16; v84: splitr im Log; v83: Split-K-Varianten im Log; v28: Kontextlaenge aus Einstellungen; v44: Kernel-Wahl ins Log; v70: 8-Bit-Gewichte, Einstellung llm_int8;
+# aura/llm/native.py — Hugging-Face-Sprachmodelle auf der nativen GPU-Engine. Version 20261104v186 (v186: offene Fragen mit eigener Belegregel; v174: Apertus-Kontext 13312, Einstellung llm_context_apertus; v171: strenge Belegpflicht, Datum der Quelle zaehlt; v170: abgeschwaecht, verworfen; v169: Belegpflicht; v167: Tokengrenze wieder aus worker.py; v166: Anweisung je Stufe; v165: Apertus-Engine, Kontext hoechstens 8192; v164: Apertus-Chat-Vorlage und Erkennung, Engine folgt; v159: LFM3 (v158) wieder entfernt, Stand wie v146; v146: freigegebene Chat-Rolle aus skills.py im Systemtext; v130: 4-Bit-Gewichte, Einstellung llm_bits 4/8/16; v118: nur noch Qwen3.5, Qwen3-Engine entfernt; v110: Quellen nur mit Link werden genannt; v106: Speicher nach Engine-Aufbau ins Log; v104: System-Prompt ohne Satzgrenze – nur die Frage beantworten, keine Fuellsaetze; v88: Qwen3.5 ueber qwen35.py, Denkmodus aus; v86: gemm fp16; v85: KV-Cache fp16, Einstellung llm_kv16; v84: splitr im Log; v83: Split-K-Varianten im Log; v28: Kontextlaenge aus Einstellungen; v44: Kernel-Wahl ins Log; v70: 8-Bit-Gewichte, Einstellung llm_int8;
 #   v72: Schweizer Rechtschreibung (ß -> ss) und ohne Vorspann «Antwort:»)
 # Unterstuetzt: Qwen3.5 (Qwen3_5ForConditionalGeneration / Qwen3_5ForCausalLM, z.B. Qwen3.5-4B), Gewichte bf16 oder int8.
-import json, time
+import json, re, time
 from pathlib import Path
 from .base import LLMBackend, build_prompt
 
@@ -33,6 +33,13 @@ STUFEN = {"Normal": "sachlich: zuerst die direkte Antwort, dann die wichtigen De
 BELEG = ("Nenne nur, was ausdruecklich in den Quellen steht. Das Datum einer Quelle zaehlt als Beleg. Schliesse nicht aus Teilnahme, "
          "Betreff oder Zufall auf Gruende oder Zustaendigkeiten. Steht die gefragte Angabe nicht in den Quellen, antworte: "
          "Dazu steht in den Quellen nichts.")   # v171
+# v186: offene Fragen («Welche Informationen ...», «Fasse ... zusammen») haben keine einzelne «gefragte Angabe».
+OFFEN = re.compile(r"\b(welche\s+(infos?|informationen)|was\s+(weisst|weißt|wissen|ist\s+bekannt|steht)|was\s+gibt\s+es|fass\w*\b.*\bzusammen|"
+                   r"zusammenfass\w*|[üu]berblick|erz[äa]hl\w*)\b", re.I)
+BELEG_OFFEN = ("Gib wieder, was die Quellen zum Thema ausdruecklich sagen, auch wenn es nur Teilinformationen sind, jede Aussage mit Quellennummer. "
+               "Beginne direkt mit dem Inhalt. Sage nicht, was die Quellen nicht enthalten. "
+               "Schliesse nicht aus Teilnahme, Betreff oder Zufall auf Gruende oder Zustaendigkeiten. Erfinde nichts dazu. "
+               "Nur wenn keine Quelle das Thema erwaehnt, antworte: Dazu steht in den Quellen nichts.")
 LAENGE = {"Kurz": "Antworte in hoechstens zwei Saetzen.",                       # v166: Anweisung direkt nach der Frage
           "Normal": "Antworte in einem Absatz mit den wichtigsten Details.",
           "Ausführlich": "Antworte ausfuehrlich in mehreren Absaetzen und gehe alle relevanten Punkte aus den Quellen einzeln durch."}
@@ -150,7 +157,7 @@ class NativeCausalLM(LLMBackend):
             user = build_prompt(question, hits)
             sys_ = SYSTEM.replace(KNAPP, STUFEN.get((self.settings or {}).get("antwort_stufe"), KNAPP))   # v163
             hint = LAENGE.get((self.settings or {}).get("antwort_stufe"), "")   # v166
-            text = self.chat_head(sys_ + _rolle()) + self.chat_tail(f"{user}\n\n{BELEG} {hint}".rstrip())   # v164: Vorlage je Modell
+            text = self.chat_head(sys_ + _rolle()) + self.chat_tail(f"{user}\n\n{BELEG_OFFEN if OFFEN.search(question) else BELEG} {hint}".rstrip())   # v164: Vorlage je Modell
             ids = self.tok.encode(text)
             if len(ids) <= budget or not hits: return ids, len(hits)
             hits = hits[:-1]

@@ -4,6 +4,41 @@ Neueste Version zuerst. Versionsnummern entsprechen `VERSION` in `aura/__init__.
 
 ---
 
+## v185–v188 – 04.11.2026 · Chat: offene Fragen, Seitenleiste
+
+**Antworten**
+- «Fasse … zusammen» (getrennt geschrieben) gilt als Inhaltsfrage und geht nicht mehr in den Listenmodus (vorher «0 Mails mit «Fasse» «zusammen»»).
+- Ursache für «Dazu steht in den Quellen nichts», obwohl die Quellen das Thema enthalten: Die Belegpflicht aus v171 kennt nur eine einzelne «gefragte Angabe».
+- Offene Fragen («Welche Informationen …», «Was weisst du …», «Fasse … zusammen», «Überblick») erhalten eine eigene Belegregel: wiedergeben, was die Quellen zum Thema sagen, auch Teilinformationen, mit Quellennummer; direkt mit dem Inhalt beginnen und nicht aufzählen, was fehlt. Absage nur, wenn keine Quelle das Thema erwähnt.
+- Konkrete Fragen behalten die strenge Regel von v171.
+- Bekannte Grenze: Je Mail geht nur ein Textstück ans Modell, auch nicht alle angezeigten Quellen. Zusammenfassungen «aller Mails» sehen daher nur einen Ausschnitt.
+
+**Oberfläche**
+- Skills & Rollen liegt neu unter **Einstellungen**, direkt nach «Beim Start Widgets zeigen».
+- Die geöffnete Menügruppe steht in einem eigenen farbigen Rechteck, wie der Kasten «Aufgaben».
+
+## v183–v184 – 04.11.2026 · Eingabefeld und Knöpfe
+
+- Senden und Mikrofon als kleinere Knöpfe (34 statt 46 Pixel) mit Symbolen aus der Windows-Schrift Segoe MDL2; Mikrofon dezent links vom Senden-Knopf.
+- Eingabefeld niedriger (52 statt 84 Pixel).
+
+## v182 – 04.11.2026 · Spracheingabe im Chat
+
+- Mikrofonknopf im Chat: klicken, sprechen, nochmals klicken (höchstens 30 s). Der Text erscheint im Eingabefeld und wird nie automatisch gesendet.
+- Während einer Antwort ist der Knopf gesperrt. Whisper wird beim ersten Diktat geladen und bleibt geladen; die Aufnahme wird nach der Auswertung gelöscht.
+- Modell: `models\whisper-small`, sonst `models\whisper-base`.
+- Testeintrag unter Werkzeuge entfernt, `aura/stt_gui.py` entfällt. Diagnose-Pausen beim Laden nur noch mit Umgebungsvariable `AURA_DIAG`.
+- Neue Datei `aura/mikrofon.py`.
+
+## v175–v181 – 04.11.2026 · Whisper auf der Grafikkarte
+
+- Neue Engine `aura/engine/whisper_dml.py`: Whisper über DirectML in FP16, ohne Zusatzpakete. Faltungen als versetzte Matrixmultiplikationen, Decoder mit K/V-Cache (höchstens 224 Tokens je 30 s).
+- Neu `aura/engine/mel.py`: WAV lesen und Log-Mel-Spektrogramm in reinem Python. Aufnahme über Windows-MCI (winmm).
+- Rechenweg gegen Hugging Face geprüft (Encoder, Decoder, Mel) an einem kleinen Zufallsmodell.
+- Treiber-Absturz `0x887A0005` beim Vorbereiten behoben: `gemm` mit krummer Zeilenzahl der Wort-Matrix stürzte ab. Die Matrix wird in Stücken von 4096 Zeilen gerechnet und mit Nullzeilen aufgefüllt; Decoder ohne Metacommands; Encoder in Teil-Listen.
+- Neu `tools\whisper_test.py`: Messung ohne Oberfläche, mit Mikrofon oder WAV-Datei.
+- Gemessen mit Whisper base: 10 s Audio in 1,4 s (Mel 1,0 s, Encoder 0,14 s). Hochdeutsch brauchbar, Berndeutsch mit base nicht.
+
 ## v174 – 03.11.2026 · Apertus: längerer Kontext
 
 - Kontext für Apertus von 8'192 auf 13'312 Tokens erhöht, damit lange Workflows laufen. Anpassbar mit `llm_context_apertus` in `data\settings.json`.

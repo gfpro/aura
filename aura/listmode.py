@@ -35,7 +35,7 @@ def date_range(q, now=None):
     return None
 
 CAL_WORDS = re.compile(r"\b(termin\w*|meeting\w*|sitzung\w*|kalender|agenda|besprechung\w*)\b", re.I)
-CONTENT = re.compile(r"\b(worum|warum|wieso|inhalt|agenda von|traktand\w*|vorbereiten|zusammenfass\w*|was steht)\b", re.I)
+CONTENT = re.compile(r"\b(worum|warum|wieso|inhalt|agenda von|traktand\w*|vorbereiten|zusammenfass\w*|was steht|fass\w*\b.*\bzusammen)\b", re.I)
 MAIL_LIST = re.compile(r"\b(alle|liste|auflisten|zeig\w*)\b.*\b(mails?|nachrichten)\b", re.I)
 
 def calendar_list(conn, q, items=None, now=None):
