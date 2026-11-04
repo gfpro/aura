@@ -45,11 +45,11 @@ class WorkflowWindow:
             row=0, column=0, sticky="w", padx=16, pady=(16, 6))
         self.lst = ctk.CTkScrollableFrame(left, fg_color="transparent"); self.lst.grid(row=1, column=0, sticky="nsew", padx=6)
         self.lst.grid_columnconfigure(0, weight=1)
-        ctk.CTkButton(left, text="+ Neuer Workflow", height=32, corner_radius=8, font=G.font(12, "bold"), fg_color=G.ACCENT,
+        ctk.CTkButton(left, text="+ Neuer Workflow", height=32, corner_radius=0, font=G.font(12, "bold"), fg_color=G.ACCENT,
                       hover_color=G.ACCENT_HI, command=self.new).grid(row=2, column=0, sticky="ew", padx=12, pady=(12, 4))
-        ctk.CTkButton(left, text="Gemeinsame Sammlungen …", height=28, corner_radius=8, font=G.font(11), fg_color=G.BORDER,
+        ctk.CTkButton(left, text="Gemeinsame Sammlungen …", height=28, corner_radius=0, font=G.font(11), fg_color=G.BORDER,
                       hover_color=G.MUTED, text_color=G.INK, command=self.app.open_wissen).grid(row=3, column=0, sticky="ew", padx=12, pady=(0, 4))
-        ctk.CTkButton(left, text="Importieren …", height=28, corner_radius=8, font=G.font(11), fg_color=G.BORDER,
+        ctk.CTkButton(left, text="Importieren …", height=28, corner_radius=0, font=G.font(11), fg_color=G.BORDER,
                       hover_color=G.MUTED, text_color=G.INK, command=self.importieren).grid(row=4, column=0, sticky="ew", padx=12, pady=(0, 12))
         hilfe.auto(left, "workflow")
         self.right = ctk.CTkFrame(win, fg_color="transparent"); self.right.grid(row=0, column=1, sticky="nsew", padx=18, pady=12)
@@ -69,7 +69,7 @@ class WorkflowWindow:
         self.items = list_workflows(WF_DIR)
         for i, it in enumerate(self.items):
             pkg = it["path"].endswith("workflow.json"); sel = it["path"] == self.cur
-            ctk.CTkButton(self.lst, text=it["name"] + ("" if pkg else "  (Einzeldatei)"), anchor="w", height=30, corner_radius=8,
+            ctk.CTkButton(self.lst, text=it["name"] + ("" if pkg else "  (Einzeldatei)"), anchor="w", height=30, corner_radius=0,
                           font=G.font(12, "bold" if sel else "normal"), fg_color=G.ACCENT if sel else "transparent",
                           hover_color=G.BORDER, text_color="white" if sel else (G.INK if not it["error"] else G.ERR),
                           command=lambda p=it["path"]: self.show(p)).grid(row=i, column=0, sticky="ew", pady=1)
@@ -102,10 +102,10 @@ class WorkflowWindow:
         if pkg:
             from .dashboard import ist_angeheftet                        # v80
             pin = ist_angeheftet(self.app, path)
-            ctk.CTkButton(bar, text="★ Als Widget" if pin else "☆ Als Widget", height=28, width=0, corner_radius=8,
+            ctk.CTkButton(bar, text="★ Als Widget" if pin else "☆ Als Widget", height=28, width=0, corner_radius=0,
                           font=G.font(11, "bold"), fg_color=G.ACCENT if pin else G.CARD, hover_color=G.ACCENT_HI if pin else G.BORDER,
                           text_color="white" if pin else G.INK, command=self.pin_toggle).pack(side="left", padx=(0, 6))
-        mehr = ctk.CTkButton(bar, text="⋯", height=28, width=36, corner_radius=8, font=G.font(14, "bold"), fg_color=G.CARD,
+        mehr = ctk.CTkButton(bar, text="⋯", height=28, width=36, corner_radius=0, font=G.font(14, "bold"), fg_color=G.CARD,
                              hover_color=G.BORDER, text_color=G.INK)                                     # v149: Seltenes ins Menü
         mehr.configure(command=lambda: self._mehr_menu(mehr, path, pkg)); mehr.pack(side="left")
         hilfe.tip(mehr, "Neu laden, Ordner öffnen, Exportieren, workflow.json bearbeiten, Löschen")
@@ -187,7 +187,7 @@ class WorkflowWindow:
                 box = ctk.CTkTextbox(lf, height=70, font=G.font(11), border_width=1, border_color=G.BORDER, wrap="none")
                 box.grid(row=r, column=0, sticky="ew"); box.configure(state="disabled"); r += 1; hilfe.tip(box, itip)
                 self.inputs[inp["id"]] = {"type": "files", "files": [], "box": box}
-                ctk.CTkButton(lf, text="Dateien wählen …", height=26, width=140, corner_radius=7, font=G.font(11), fg_color=G.BORDER,
+                ctk.CTkButton(lf, text="Dateien wählen …", height=26, width=140, corner_radius=0, font=G.font(11), fg_color=G.BORDER,
                               hover_color=G.MUTED, text_color=G.INK, command=lambda i=inp: self.pick(i)).grid(row=r, column=0, sticky="w", pady=(4, 0)); r += 1
             else:
                 e = ctk.CTkTextbox(lf, height=48, font=G.font(12), border_width=1, border_color=G.BORDER, wrap="word")
@@ -202,15 +202,15 @@ class WorkflowWindow:
             self.seg_ausf.set(werte.get(str(self.wf.get("ausfuehrlichkeit") or self._raw().get("ausfuehrlichkeit") or "normal"), "normal"))
             self.seg_ausf.pack(side="left"); hilfe.tip(self.seg_ausf, "#wf_ausf")
         bb = ctk.CTkFrame(lf, fg_color="transparent"); bb.grid(row=r, column=0, sticky="ew", pady=(14, 0)); r += 1
-        self.b_start = ctk.CTkButton(bb, text="▶  Starten", height=34, corner_radius=8, font=G.font(13, "bold"), fg_color=G.ACCENT,
+        self.b_start = ctk.CTkButton(bb, text="▶  Starten", height=34, corner_radius=0, font=G.font(13, "bold"), fg_color=G.ACCENT,
                                      hover_color=G.ACCENT_HI, command=self.start); self.b_start.pack(side="left")
-        ctk.CTkButton(bb, text="Abbrechen", height=34, width=90, corner_radius=8, font=G.font(12), fg_color=G.CARD,
+        ctk.CTkButton(bb, text="Abbrechen", height=34, width=90, corner_radius=0, font=G.font(12), fg_color=G.CARD,
                       hover_color=G.BORDER, text_color=G.INK, command=self.app.w.cancel.set).pack(side="left", padx=8)
         rs = ctk.CTkFrame(lf, fg_color="transparent"); rs.grid(row=r, column=0, sticky="ew", pady=(10, 0)); r += 1
         ids = [s["id"] for s in self.wf["steps"]]
         self.o_ab = ctk.CTkOptionMenu(rs, values=ids, width=130, height=28, font=G.font(11), fg_color=G.BUBBLE, button_color=G.BORDER,
                                       text_color=G.INK); self.o_ab.set(ids[-1]); self.o_ab.pack(side="left"); hilfe.tip(self.o_ab, "#wf_ab")
-        ctk.CTkButton(rs, text="Ab Schritt neu (letzter Lauf)", height=28, corner_radius=8, font=G.font(11), fg_color=G.BORDER,
+        ctk.CTkButton(rs, text="Ab Schritt neu (letzter Lauf)", height=28, corner_radius=0, font=G.font(11), fg_color=G.BORDER,
                       hover_color=G.MUTED, text_color=G.INK, command=self.restart).pack(side="left", padx=6)
         ctk.CTkLabel(lf, text="* = Pflichteingabe. Ein Lauf dauert je nach Modell 10–25 Minuten. Notebook nicht zuklappen – "
                               "Standby unterbricht den Lauf. «← Zurück» lässt den Lauf im Hintergrund weiterlaufen.",
@@ -219,7 +219,7 @@ class WorkflowWindow:
         # rechts: Schritte, Status, Ergebnis
         rf = ctk.CTkFrame(t, fg_color="transparent"); rf.grid(row=0, column=1, sticky="nsew"); rf.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(rf, text="SCHRITTE", font=G.font(10, "bold"), text_color=G.MUTED, anchor="w").grid(row=0, column=0, sticky="w")
-        sf = ctk.CTkFrame(rf, fg_color=G.BUBBLE, corner_radius=8); sf.grid(row=1, column=0, sticky="ew", pady=(4, 8))
+        sf = ctk.CTkFrame(rf, fg_color=G.BUBBLE, corner_radius=0); sf.grid(row=1, column=0, sticky="ew", pady=(4, 8))
         self.step_lbl = {}
         for i, s in enumerate(self.wf["steps"]):
             l = ctk.CTkLabel(sf, text=f"○  {i + 1}. {s.get('label', s['id'])}  ({s['type']})", font=G.font(12), text_color=G.MUTED, anchor="w",
@@ -368,13 +368,13 @@ class WorkflowWindow:
             for sid, (l, txt) in self.step_lbl.items():
                 if l.cget("text").startswith("▶"): l.configure(text=f"✕  {txt}", text_color=G.ERR)
         for m in res.get("meldungen") or []:                            # v53: Meldungen der Schritte
-            box = ctk.CTkFrame(self.res, fg_color=G.BUBBLE, corner_radius=8); box.pack(fill="x", anchor="w", pady=(0, 6))
+            box = ctk.CTkFrame(self.res, fg_color=G.BUBBLE, corner_radius=0); box.pack(fill="x", anchor="w", pady=(0, 6))
             ctk.CTkLabel(box, text=m.get("titel") or "Meldung", font=G.font(11, "bold"), anchor="w").pack(anchor="w", padx=10, pady=(6, 0))
             ctk.CTkLabel(box, text=(m.get("text") or "")[:3000], font=G.font(11), anchor="w", justify="left",
                          wraplength=520).pack(anchor="w", padx=10, pady=(0, 6))
         pr = res.get("pruefungen") or []
         if pr:                                                          # v40: Pruefhinweise (Warnungen + Plausibilitaet)
-            box = ctk.CTkFrame(self.res, fg_color=("#FEF3C7", "#3A2F12"), corner_radius=8); box.pack(fill="x", anchor="w", pady=(0, 6))
+            box = ctk.CTkFrame(self.res, fg_color=("#FEF3C7", "#3A2F12"), corner_radius=0); box.pack(fill="x", anchor="w", pady=(0, 6))
             ctk.CTkLabel(box, text=f"⚠ {len(pr)} Prüfhinweis{'e' if len(pr) > 1 else ''} – Ergebnis gezielt prüfen", font=G.font(11, "bold"),
                          text_color=("#92400E", "#FCD34D"), anchor="w").pack(anchor="w", padx=10, pady=(6, 2))
             for m in pr[:12]:
@@ -384,10 +384,10 @@ class WorkflowWindow:
                                           text_color=G.MUTED).pack(anchor="w", padx=10)
             ctk.CTkFrame(box, height=6, fg_color="transparent").pack()
         for f in res.get("files") or []:
-            ctk.CTkButton(self.res, text=f"Öffnen: {Path(f).name}", height=28, corner_radius=8, font=G.font(11, "bold"), fg_color=G.ACCENT,
+            ctk.CTkButton(self.res, text=f"Öffnen: {Path(f).name}", height=28, corner_radius=0, font=G.font(11, "bold"), fg_color=G.ACCENT,
                           hover_color=G.ACCENT_HI, command=lambda f=f: _open(f)).pack(anchor="w", pady=2)
         if res.get("zwischenstand"):
-            ctk.CTkButton(self.res, text="Laufordner öffnen", height=26, corner_radius=8, font=G.font(11), fg_color=G.BORDER,
+            ctk.CTkButton(self.res, text="Laufordner öffnen", height=26, corner_radius=0, font=G.font(11), fg_color=G.BORDER,
                           hover_color=G.MUTED, text_color=G.INK, command=lambda: _open(Path(res["zwischenstand"]).parent)).pack(anchor="w", pady=2)
         hilfe.auto(self.res, "workflow")
 
@@ -414,11 +414,11 @@ class WorkflowWindow:
                                      button_color=G.BORDER, text_color=G.INK, command=lambda v: self.fill_table())
         self.o_v.set(files[0] if files else "(keine Vorlage)"); self.o_v.pack(side="left")
         if self.cur.endswith("workflow.json"):
-            ctk.CTkButton(top, text="+ Vorlage hinzufügen …", height=28, corner_radius=8, font=G.font(11), fg_color=G.BORDER,
+            ctk.CTkButton(top, text="+ Vorlage hinzufügen …", height=28, corner_radius=0, font=G.font(11), fg_color=G.BORDER,
                           hover_color=G.MUTED, text_color=G.INK, command=self.add_template).pack(side="left", padx=8)
-            ctk.CTkButton(top, text="Vorlage entfernen", height=28, corner_radius=8, font=G.font(11), fg_color=G.BORDER,
+            ctk.CTkButton(top, text="Vorlage entfernen", height=28, corner_radius=0, font=G.font(11), fg_color=G.BORDER,
                           hover_color=G.MUTED, text_color=G.INK, command=self.del_template).pack(side="left")
-            ctk.CTkButton(top, text="Feldplan …", height=28, corner_radius=8, font=G.font(11, "bold"), fg_color=G.ACCENT,
+            ctk.CTkButton(top, text="Feldplan …", height=28, corner_radius=0, font=G.font(11, "bold"), fg_color=G.ACCENT,
                           hover_color=G.ACCENT_HI, command=self.feldplan).pack(side="left", padx=8)      # v64a
         self.lbl_v = ctk.CTkLabel(t, text="", font=G.font(11), text_color=G.MUTED, anchor="w", justify="left")
         self.lbl_v.grid(row=1, column=0, sticky="ew", pady=(6, 4))
@@ -519,7 +519,7 @@ class WorkflowWindow:
                      font=G.font(11), text_color=G.MUTED, anchor="w", justify="left", wraplength=900).grid(row=0, column=0, sticky="w")
         bar = ctk.CTkFrame(t, fg_color="transparent"); bar.grid(row=1, column=0, sticky="w", pady=(8, 6))
         def b(txt, cmd, main=False):
-            ctk.CTkButton(bar, text=txt, height=28, width=0, corner_radius=8, font=G.font(11, "bold" if main else "normal"),
+            ctk.CTkButton(bar, text=txt, height=28, width=0, corner_radius=0, font=G.font(11, "bold" if main else "normal"),
                           fg_color=G.ACCENT if main else G.BORDER, hover_color=G.ACCENT_HI if main else G.MUTED,
                           text_color="white" if main else G.INK, command=cmd).pack(side="left", padx=(0, 6))
         b("+ Regel …", lambda: self._pl_edit(None, "regel"), True)

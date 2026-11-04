@@ -8,8 +8,8 @@ from .config import DATA, MODELS
 
 F = "Segoe UI"
 def font(s=13, w="normal"): return ctk.CTkFont(family=F, size=s, weight=w)
-ACCENT, ACCENT_HI = "#6E56F8", "#5A43E0"
-MUTED = ("#6B7280", "#8E98B5")
+ACCENT, ACCENT_HI = "#B3121D", "#8E0E17"
+MUTED = ("#525A50", "#A3AD9F")
 PFLICHT = ("model.safetensors", "config.json", "vocab.json", "added_tokens.json")
 
 def mci(cmd):
@@ -32,10 +32,10 @@ class SttWindow:
         self.b_rec = ctk.CTkButton(bar, text="🎙 Aufnahme", command=self.toggle, fg_color=ACCENT, hover_color=ACCENT_HI, font=font())
         self.b_rec.pack(side="left", padx=(0, 8))
         self.b_file = ctk.CTkButton(bar, text="WAV-Datei wählen", command=self.pick, fg_color="transparent", border_width=1,
-                                    text_color=("#111827", "#E6E9F2"), font=font())
+                                    text_color=("#1C211C", "#E8ECE4"), font=font())
         self.b_file.pack(side="left", padx=(0, 8))
         self.b_free = ctk.CTkButton(bar, text="Modell entladen", command=self.free, fg_color="transparent", border_width=1,
-                                    text_color=("#111827", "#E6E9F2"), font=font())
+                                    text_color=("#1C211C", "#E8ECE4"), font=font())
         self.b_free.pack(side="left")
         self.txt = ctk.CTkTextbox(self.body, font=font(14), wrap="word"); self.txt.grid(row=2, column=0, sticky="nsew", padx=16, pady=10)
         self.stat = ctk.CTkLabel(self.body, text="", font=font(11), text_color=MUTED, anchor="w", justify="left", wraplength=800)

@@ -59,7 +59,7 @@ class SkillsFenster:
 
     def _karte(self, e, r):
         G = self.G
-        k = ctk.CTkFrame(self.lst, fg_color=G.BUBBLE, corner_radius=8, border_width=1,
+        k = ctk.CTkFrame(self.lst, fg_color=G.BUBBLE, corner_radius=0, border_width=1,
                          border_color=G.AMBER if e["geaendert"] else (G.ACCENT if e["aktiv"] else G.BORDER))
         k.grid(row=r, column=0, sticky="ew", pady=3); k.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(k, text=e["titel"], font=G.font(13, "bold"), text_color=G.INK, anchor="w").grid(row=0, column=0, sticky="w", padx=12, pady=(8, 0))
@@ -91,7 +91,7 @@ class SkillsFenster:
 
     def _knopf(self, parent, text, cmd):
         G = self.G
-        ctk.CTkButton(parent, text=text, height=24, width=0, corner_radius=6, font=G.font(11), fg_color=G.BORDER,
+        ctk.CTkButton(parent, text=text, height=24, width=0, corner_radius=0, font=G.font(11), fg_color=G.BORDER,
                       hover_color=G.MUTED, text_color=G.INK, command=cmd).pack(anchor="e", pady=1, fill="x")
 
     # ------------------------------------------------------------------ Aktionen

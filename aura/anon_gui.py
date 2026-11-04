@@ -12,9 +12,9 @@ from .config import load_settings
 
 F = "Segoe UI"
 def font(size=13, weight="normal"): return ctk.CTkFont(family=F, size=size, weight=weight)
-SIDE, CARD, BORDER = ("#FFFFFF", "#10172E"), ("#EEF0F7", "#18213D"), ("#E1E4EE", "#263156")
-INK, MUTED = ("#111827", "#E6E9F2"), ("#6B7280", "#8E98B5")
-ACCENT, ACCENT_HI = "#6E56F8", "#5A43E0"
+SIDE, CARD, BORDER = ("#E7EAE3", "#0C0F0D"), ("#EDEFEA", "#232B24"), ("#C9CEC3", "#303A31")
+INK, MUTED = ("#1C211C", "#E8ECE4"), ("#525A50", "#A3AD9F")
+ACCENT, ACCENT_HI = "#B3121D", "#8E0E17"
 WARN_BG, WARN_INK = ("#FFF4E5", "#3A2A10"), ("#7A4B00", "#FFD089")
 # Markierungsfarben (Hintergrund hell, Schrift dunkel – lesbar in Hell und Dunkel)
 FARBE = {"muster": "#BFDBFE", "begriff": "#BFDBFE", "llm": "#FED7AA", "manuell": "#BBF7D0"}
@@ -54,20 +54,20 @@ class AnonWindow:
         return f
 
     def _banner(self, f, r, text=EINSTUFUNG):
-        b = ctk.CTkFrame(f, fg_color=WARN_BG, corner_radius=10); b.grid(row=r, column=0, sticky="ew", pady=(10, 8))
+        b = ctk.CTkFrame(f, fg_color=WARN_BG, corner_radius=0); b.grid(row=r, column=0, sticky="ew", pady=(10, 8))
         lb = ctk.CTkLabel(b, text="⚠  " + text, font=font(12), text_color=WARN_INK, justify="left", anchor="w", wraplength=820)
         lb.pack(fill="x", padx=14, pady=10)
         b.bind("<Configure>", lambda e, l=lb: l.configure(wraplength=max(300, e.width - 40)), add="+")
         return b
 
     def _btn(self, parent, text, cmd, main=False, **kw):
-        return ctk.CTkButton(parent, text=text, command=cmd, height=34, corner_radius=8, font=font(13, "bold" if main else "normal"),
+        return ctk.CTkButton(parent, text=text, command=cmd, height=34, corner_radius=0, font=font(13, "bold" if main else "normal"),
                              fg_color=ACCENT if main else CARD, hover_color=ACCENT_HI if main else BORDER,
                              text_color="white" if main else INK, **kw)
 
     def _box(self, parent, height):
         tb = ctk.CTkTextbox(parent, height=height, font=ctk.CTkFont(family=F, size=13), wrap="word", fg_color=SIDE,
-                            text_color=INK, border_width=1, border_color=BORDER, corner_radius=8)
+                            text_color=INK, border_width=1, border_color=BORDER, corner_radius=0)
         return tb
 
     # ------------------------------------------------------------------ 1 Text wählen
@@ -76,7 +76,7 @@ class AnonWindow:
         self._banner(f, 1)
         r = 2
         n_begr = len(anon.lade_begriffe()) if anon.BEGRIFFE.exists() else 0
-        info = ctk.CTkFrame(f, fg_color=CARD, corner_radius=10); info.grid(row=r, column=0, sticky="ew", pady=(0, 10)); r += 1
+        info = ctk.CTkFrame(f, fg_color=CARD, corner_radius=0); info.grid(row=r, column=0, sticky="ew", pady=(0, 10)); r += 1
         info.grid_columnconfigure(0, weight=1)
         if n_begr:
             txt = f"Begriffsliste: {n_begr} Einträge (Personen, Projekte, Standorte …) – nur auf diesem Rechner gespeichert."
@@ -161,7 +161,7 @@ class AnonWindow:
         self.leg = {}
         for key, lab, col in (("liste", "Muster/Liste", FARBE["muster"]), ("llm", "Sprachmodell", FARBE["llm"]),
                               ("manuell", "von dir", FARBE["manuell"]), ("aus", "abgewählt", GRAU)):
-            c = ctk.CTkLabel(leg, text=f"  {lab}  ", font=font(12), fg_color=col, text_color="#111827", corner_radius=6)
+            c = ctk.CTkLabel(leg, text=f"  {lab}  ", font=font(12), fg_color=col, text_color="#1C211C", corner_radius=0)
             c.pack(side="left", padx=(0, 8)); self.leg[key] = (c, lab)
         ctk.CTkLabel(f, text="Klick auf eine Markierung = nur diese Stelle ab-/anwählen (z.B. «Schweizer» in «Schweizer Bevölkerung»). "
                              "Rechtsklick = alle gleichen ab-/anwählen. Maus darüber zeigt, woher die Markierung stammt. "
@@ -173,14 +173,14 @@ class AnonWindow:
         t = self.tk = tb._textbox
         t.configure(spacing1=2, spacing3=8, padx=14, pady=10, font=(F, 13), wrap="word")     # v114: ruhigere Darstellung
         t.insert("1.0", self.text)
-        t.tag_config("seite", foreground="#8E98B5", font=(F, 11, "bold"), spacing1=14)
+        t.tag_config("seite", foreground="#A3AD9F", font=(F, 11, "bold"), spacing1=14)
         for m in re.finditer(r"^\[Seite \d+\]$", self.text, re.M): t.tag_add("seite", self._idx(m.start()), self._idx(m.end()))
         t.bind("<Key>", self._readonly)
         t.bind("<ButtonRelease-1>", self._click, add="+")
         t.bind("<Button-3>", self._click_all, add="+")
         t.bind("<Motion>", self._hover, add="+")
-        for k, col in FARBE.items(): t.tag_config("q_" + k, background=col, foreground="#111827")
-        t.tag_config("q_aus", background=GRAU, foreground="#6B7280", overstrike=True)
+        for k, col in FARBE.items(): t.tag_config("q_" + k, background=col, foreground="#1C211C")
+        t.tag_config("q_aus", background=GRAU, foreground="#525A50", overstrike=True)
         t.tag_raise("sel")
         self._paint()
         ctk.CTkLabel(f, text="Tipp: Lies suchend, nicht bestätigend. Oft übersehen: Signaturen, Doppelnamen, Namen mit Umlauten, "
@@ -372,7 +372,7 @@ class AnonWindow:
     def _wz_summary(self, f):
         rows, hinweise = self._wz_rows()
         ctk.CTkLabel(f, text="Zusammenfassung", font=font(16, "bold"), text_color=INK, anchor="w").grid(row=2, column=0, sticky="w")
-        box = ctk.CTkScrollableFrame(f, fg_color=CARD, corner_radius=10, height=300); box.grid(row=4, column=0, sticky="nsew")
+        box = ctk.CTkScrollableFrame(f, fg_color=CARD, corner_radius=0, height=300); box.grid(row=4, column=0, sticky="nsew")
         f.grid_rowconfigure(4, weight=1)
         for k in anon.KATEGORIEN:
             ctk.CTkLabel(box, text=f"{k[1]}: {len(self.wz[k[0]])}", font=font(13), text_color=INK, anchor="w").pack(anchor="w", padx=10, pady=1)

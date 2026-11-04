@@ -98,14 +98,14 @@ class SchrittEditor:
             if a is not None: self._version_ablegen(a)                 # auch das Wiederherstellen laesst sich rueckgaengig machen
         for p in v:
             d = p.name[len(Path(self.ww.cur).stem) + 1:]
-            row = ctk.CTkFrame(lst, fg_color=G.BUBBLE, corner_radius=6); row.pack(fill="x", pady=2)
+            row = ctk.CTkFrame(lst, fg_color=G.BUBBLE, corner_radius=0); row.pack(fill="x", pady=2)
             ctk.CTkLabel(row, text=f"{d[6:8]}.{d[4:6]}.{d[:4]}  {d[9:11]}:{d[11:13]}:{d[13:15]}", font=G.font(12), text_color=G.INK).pack(side="left", padx=10, pady=5)
             self._mini(row, "Wiederherstellen", lambda p=p: zurueck(p)).pack(side="right", padx=6)
 
     def _ausloeser(self, t):
         G = self.G
         ctk.CTkLabel(t, text="AUSLÖSER", font=G.font(10, "bold"), text_color=G.MUTED, anchor="w").grid(row=0, column=0, sticky="w")
-        af = ctk.CTkFrame(t, fg_color=G.BUBBLE, corner_radius=8); af.grid(row=1, column=0, sticky="ew", pady=(4, 10))
+        af = ctk.CTkFrame(t, fg_color=G.BUBBLE, corner_radius=0); af.grid(row=1, column=0, sticky="ew", pady=(4, 10))
         af.grid_columnconfigure(0, weight=1)
         zp = self.raw.get("zeitplan")
         top = ctk.CTkFrame(af, fg_color="transparent"); top.grid(row=0, column=0, sticky="ew", padx=10, pady=(8, 2))
@@ -128,13 +128,13 @@ class SchrittEditor:
         hd = ctk.CTkFrame(t, fg_color="transparent"); hd.grid(row=2, column=0, sticky="ew")
         if Path(self.ww.cur).name == "workflow.json":                  # v149: Hilfsmittel des Workflows als Fenster
             for name, txt in (("Wissen", "📚 Wissen"), ("Vorlage", "📄 Vorlagen & Feldplan"), ("Prüfliste", "✓ Prüfliste")):
-                b = ctk.CTkButton(hd, text=txt, height=28, width=0, corner_radius=8, font=G.font(11), fg_color=G.BUBBLE,
+                b = ctk.CTkButton(hd, text=txt, height=28, width=0, corner_radius=0, font=G.font(11), fg_color=G.BUBBLE,
                                   hover_color=G.BORDER, text_color=G.INK, command=lambda n=name: self.ww.ressource(n))
                 b.pack(side="left", padx=(0, 6))
         else:
             ctk.CTkLabel(hd, text="SCHRITTE", font=G.font(10, "bold"), text_color=G.MUTED).pack(side="left")
         if not leinwand:                                               # v149: auf der Leinwand übernimmt das die Palette
-            ctk.CTkButton(hd, text="+ Schritt hinzufügen", height=28, corner_radius=8, font=G.font(11, "bold"), fg_color=G.ACCENT,
+            ctk.CTkButton(hd, text="+ Schritt hinzufügen", height=28, corner_radius=0, font=G.font(11, "bold"), fg_color=G.ACCENT,
                           hover_color=G.ACCENT_HI, command=lambda: self._add(len(self.raw.get("steps", [])))).pack(side="right")
         self._mini(hd, "↶ Rückgängig", self._rueckgaengig).pack(side="left", padx=(6, 2))   # v173
         self._mini(hd, "Versionen …", self._versionen_fenster).pack(side="left", padx=2)
@@ -167,7 +167,7 @@ class SchrittEditor:
     # ------------------------------------------------------------------ Hilfen
     def _mini(self, parent, text, cmd):
         G = self.G
-        return ctk.CTkButton(parent, text=text, height=24, width=0, corner_radius=6, font=G.font(11), fg_color=G.BORDER,
+        return ctk.CTkButton(parent, text=text, height=24, width=0, corner_radius=0, font=G.font(11), fg_color=G.BORDER,
                              hover_color=G.MUTED, text_color=G.INK, command=cmd)
 
     def _last_state(self):
@@ -242,9 +242,9 @@ class SchrittEditor:
                          font=G.font(12), text_color=G.MUTED).grid(row=0, column=0, sticky="w", pady=10)
         for i, s in enumerate(steps):
             meta = S.BAUSTEINE.get(s.get("type"), {})
-            card = ctk.CTkFrame(self.lst, fg_color=G.BUBBLE, corner_radius=8, border_width=1, border_color=G.BORDER)
+            card = ctk.CTkFrame(self.lst, fg_color=G.BUBBLE, corner_radius=0, border_width=1, border_color=G.BORDER)
             card.grid(row=i * 2, column=0, sticky="ew", pady=(0, 2)); card.grid_columnconfigure(1, weight=1)
-            ctk.CTkLabel(card, text=str(i + 1), width=28, height=28, corner_radius=14, fg_color=G.ACCENT, text_color="white",
+            ctk.CTkLabel(card, text=str(i + 1), width=28, height=28, corner_radius=0, fg_color=G.ACCENT, text_color="white",
                          font=G.font(12, "bold")).grid(row=0, column=0, rowspan=3, padx=10, pady=8, sticky="n")
             ctk.CTkLabel(card, text=s.get("label") or meta.get("titel", s["type"]), font=G.font(13, "bold"), text_color=G.INK,
                          anchor="w").grid(row=0, column=1, sticky="w", pady=(8, 0))
@@ -263,7 +263,7 @@ class SchrittEditor:
             self._mini(bb, "▲", lambda i=i: self._move(i, -1)).pack(side="left", padx=2)
             self._mini(bb, "▼", lambda i=i: self._move(i, 1)).pack(side="left", padx=2)
             self._mini(bb, "✕", lambda i=i: self._del(i)).pack(side="left", padx=2)
-            plus = ctk.CTkButton(self.lst, text="＋", width=28, height=18, corner_radius=9, font=G.font(11), fg_color="transparent",
+            plus = ctk.CTkButton(self.lst, text="＋", width=28, height=18, corner_radius=0, font=G.font(11), fg_color="transparent",
                                  hover_color=G.BORDER, text_color=G.MUTED, command=lambda i=i: self._add(i + 1))
             plus.grid(row=i * 2 + 1, column=0, pady=(0, 2))
 
@@ -292,7 +292,7 @@ class SchrittEditor:
             ctk.CTkLabel(fr, text=g.upper(), font=G.font(10, "bold"), text_color=G.MUTED, anchor="w").grid(row=r, column=0, sticky="w", pady=(8, 2)); r += 1
             for typ, m in S.BAUSTEINE.items():
                 if m["gruppe"] != g: continue
-                b = ctk.CTkButton(fr, text=f"{m['titel']}\n{m['beschreibung']}", anchor="w", height=52, corner_radius=8,
+                b = ctk.CTkButton(fr, text=f"{m['titel']}\n{m['beschreibung']}", anchor="w", height=52, corner_radius=0,
                                   font=G.font(11), fg_color=G.BUBBLE, hover_color=G.BORDER, text_color=G.INK,
                                   command=lambda t=typ: (dlg.destroy(), self._new(t, pos)))
                 b.grid(row=r, column=0, sticky="ew", pady=2); r += 1
@@ -333,7 +333,7 @@ class SchrittEditor:
             w = self._widget(fr, f, step.get(f["key"]), dlg); w.grid(row=r, column=1, sticky="ew", pady=(10, 0))
             widgets[f["key"]] = (f, w)
             if f.get("wert_einfuegen"):
-                b = ctk.CTkButton(fr, text="Wert einfügen ▾", width=110, height=26, corner_radius=6, font=G.font(11),
+                b = ctk.CTkButton(fr, text="Wert einfügen ▾", width=110, height=26, corner_radius=0, font=G.font(11),
                                   fg_color=G.BORDER, hover_color=G.MUTED, text_color=G.INK)
                 tgt = w if not isinstance(w, ctk.CTkFrame) else getattr(w, "_ziel", w)
                 b.configure(command=lambda w=tgt, b=b: self._insert_menu(w, idx, b)); b.grid(row=r, column=2, sticky="nw", padx=8, pady=(10, 0))
@@ -485,7 +485,7 @@ class SchrittEditor:
         def fill():
             for c in lst.winfo_children(): c.destroy()
             for j, x in enumerate(felder):
-                row = ctk.CTkFrame(lst, fg_color=G.BUBBLE, corner_radius=6); row.grid(row=j, column=0, sticky="ew", pady=2)
+                row = ctk.CTkFrame(lst, fg_color=G.BUBBLE, corner_radius=0); row.grid(row=j, column=0, sticky="ew", pady=2)
                 row.grid_columnconfigure(0, weight=1)
                 extra = [n for n, k in (("Auswahl", "auswahl"), ("Zahl", "zahl"), ("Beleg", "beleg"), ("nur Prüfbericht", "vorschlag"), ("ausführlich", "ausfuehrlich_ok")) if x.get(k)]
                 ctk.CTkLabel(row, text=f"{x.get('name')}   " + (f"[{', '.join(extra)}]  " if extra else "") + _kurz(x.get("hint", ""), 70),

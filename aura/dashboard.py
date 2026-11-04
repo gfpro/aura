@@ -73,13 +73,13 @@ class Widgets:
         except Exception: wf, name = None, Path(path).parent.name
         proto, stamp = letzter_lauf(path)
         neu = bool(stamp and stamp > gesehen())
-        c = ctk.CTkFrame(self.frame, fg_color=G.BUBBLE, corner_radius=14, border_width=1, border_color=G.ACCENT if neu else G.BORDER,
+        c = ctk.CTkFrame(self.frame, fg_color=G.BUBBLE, corner_radius=0, border_width=1, border_color=G.ACCENT if neu else G.BORDER,
                          )
         c.grid_columnconfigure(0, weight=1)
         hd = ctk.CTkFrame(c, fg_color="transparent"); hd.grid(row=0, column=0, sticky="ew", padx=12, pady=(10, 2))
         hd.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(hd, text=name[:80], font=G.font(15, "bold"), text_color=G.INK, anchor="w").grid(row=0, column=0, sticky="w")
-        x = ctk.CTkButton(hd, text="✕", width=24, height=22, corner_radius=6, font=G.font(11), fg_color="transparent",
+        x = ctk.CTkButton(hd, text="✕", width=24, height=22, corner_radius=0, font=G.font(11), fg_color="transparent",
                           hover_color=G.BORDER, text_color=G.MUTED, command=lambda: self._weg(path))
         x.grid(row=0, column=1); hilfe.tip(x, "Widget entfernen (der Workflow bleibt).")
         if proto is None: zeile, txt = "noch kein Lauf", "Noch kein Ergebnis. Workflow starten oder Zeitplan abwarten."
@@ -99,7 +99,7 @@ class Widgets:
         bb = ctk.CTkFrame(c, fg_color="transparent"); bb.grid(row=3, column=0, sticky="w", padx=10, pady=(0, 10))
         for t, cmd in (("Kopieren", lambda: self.app._copy(txt)), ("Alle Ergebnisse", self.app.open_ergebnisse),
                        ("Workflow", lambda: self.app._erg_workflow(path))):
-            ctk.CTkButton(bb, text=t, height=24, width=0, corner_radius=8, font=G.font(11), fg_color=G.CARD, hover_color=G.BORDER,
+            ctk.CTkButton(bb, text=t, height=24, width=0, corner_radius=0, font=G.font(11), fg_color=G.CARD, hover_color=G.BORDER,
                           text_color=G.INK, command=cmd).pack(side="left", padx=2)
         return c
 

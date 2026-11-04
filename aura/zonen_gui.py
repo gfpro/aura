@@ -45,20 +45,20 @@ class ZonenAnsicht:
                    [("Schritte im Detail …", lambda: ww.tabs.set("Schritte"))])
         self._zone(tab, 2, "③ Was kommt raus?", None, a["raus"],
                    ([("+ Vorlage hochladen …", self._vorlage_neu)] if p else []))
-        ctk.CTkButton(tab, text="Weiter: Ausführen ▶", height=32, corner_radius=8, font=G.font(12, "bold"), fg_color=G.ACCENT,
+        ctk.CTkButton(tab, text="Weiter: Ausführen ▶", height=32, corner_radius=0, font=G.font(12, "bold"), fg_color=G.ACCENT,
                       hover_color=G.ACCENT_HI, command=lambda: ww.tabs.set("Ausführen")).grid(row=2, column=2, sticky="e", padx=4, pady=(10, 4))
 
     def _zone(self, tab, col, titel, start, items, aktionen):
         G = self.G
-        z = ctk.CTkFrame(tab, fg_color=G.BUBBLE, corner_radius=10); z.grid(row=1, column=col, sticky="nsew", padx=4)
+        z = ctk.CTkFrame(tab, fg_color=G.BUBBLE, corner_radius=0); z.grid(row=1, column=col, sticky="nsew", padx=4)
         z.grid_columnconfigure(0, weight=1); z.grid_rowconfigure(2, weight=1)
-        ctk.CTkFrame(z, height=4, fg_color=FARBEN[col], corner_radius=2).grid(row=0, column=0, sticky="ew", padx=10, pady=(8, 0))
+        ctk.CTkFrame(z, height=4, fg_color=FARBEN[col], corner_radius=0).grid(row=0, column=0, sticky="ew", padx=10, pady=(8, 0))
         ctk.CTkLabel(z, text=titel, font=G.font(13, "bold"), text_color=G.INK, anchor="w").grid(row=1, column=0, sticky="w", padx=12, pady=(6, 4))
         lst = ctk.CTkScrollableFrame(z, fg_color="transparent"); lst.grid(row=2, column=0, sticky="nsew", padx=4)
         lst.grid_columnconfigure(0, weight=1)
         gezeigt = set()
         for i, (t, u, rot, akt) in enumerate(items):
-            f = ctk.CTkFrame(lst, fg_color=ROT_BG if rot else G.CARD, corner_radius=8); f.grid(row=i, column=0, sticky="ew", pady=3)
+            f = ctk.CTkFrame(lst, fg_color=ROT_BG if rot else G.CARD, corner_radius=0); f.grid(row=i, column=0, sticky="ew", pady=3)
             ctk.CTkLabel(f, text=("⚠ " if rot else "") + t, font=G.font(12, "bold"), text_color=ROT_FG if rot else G.INK,
                          anchor="w", justify="left", wraplength=280).pack(anchor="w", padx=10, pady=(6, 0 if u else 6))
             if u: ctk.CTkLabel(f, text=u, font=G.font(11), text_color=ROT_FG if rot else G.MUTED, anchor="w", justify="left",
@@ -74,11 +74,11 @@ class ZonenAnsicht:
             if knoepfe:
                 kb = ctk.CTkFrame(f, fg_color="transparent"); kb.pack(anchor="w", padx=8, pady=(0, 6))
                 for kt, kc in knoepfe:
-                    ctk.CTkButton(kb, text=kt, height=24, width=0, corner_radius=6, font=G.font(11), fg_color=G.BORDER,
+                    ctk.CTkButton(kb, text=kt, height=24, width=0, corner_radius=0, font=G.font(11), fg_color=G.BORDER,
                                   hover_color=G.MUTED, text_color=G.INK, command=kc).pack(side="left", padx=(0, 4))
         bb = ctk.CTkFrame(z, fg_color="transparent"); bb.grid(row=3, column=0, sticky="ew", padx=10, pady=(6, 4))
         for t, cmd in aktionen:
-            ctk.CTkButton(bb, text=t, height=28, width=0, corner_radius=8, font=G.font(11), fg_color=G.CARD, hover_color=G.BORDER,
+            ctk.CTkButton(bb, text=t, height=28, width=0, corner_radius=0, font=G.font(11), fg_color=G.CARD, hover_color=G.BORDER,
                           text_color=G.INK, command=cmd).pack(side="left", padx=(0, 6), pady=2)
         if start: ctk.CTkLabel(z, text=start, font=G.font(11), text_color=G.MUTED, anchor="w").grid(row=4, column=0, sticky="w", padx=12, pady=(0, 10))
 

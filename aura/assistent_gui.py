@@ -40,7 +40,7 @@ class Assistent:
         self.b_go = ctk.CTkButton(bb, text="✨  Mit Sprachmodell verstehen und Workflow bauen", height=36, font=G.font(13, "bold"),
                                   fg_color=G.ACCENT, hover_color=G.ACCENT_HI, command=self.verstehen); self.b_go.pack(side="left")
         self.lbl = ctk.CTkLabel(bb, text="", font=G.font(11), text_color=G.MUTED, wraplength=380, justify="left"); self.lbl.pack(side="left", padx=12)
-        self.form = ctk.CTkScrollableFrame(left, fg_color=G.BUBBLE, corner_radius=8); self.form.grid(row=6, column=0, sticky="nsew", pady=(6, 0))
+        self.form = ctk.CTkScrollableFrame(left, fg_color=G.BUBBLE, corner_radius=0); self.form.grid(row=6, column=0, sticky="nsew", pady=(6, 0))
         self.form.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(self.form, text="Fehlt etwas oder ist etwas unklar, fragt AURA hier nach. Sonst wird der Workflow direkt gebaut.",
                      font=G.font(11), text_color=G.MUTED).grid(row=0, column=0, columnspan=2, sticky="w", padx=10, pady=10)
@@ -50,13 +50,13 @@ class Assistent:
         self.b_mk = ctk.CTkButton(ft, text="Workflow bauen", width=170, height=32, font=G.font(12, "bold"), fg_color=G.ACCENT,
                                   hover_color=G.ACCENT_HI, command=self.erstellen, state="disabled"); self.b_mk.pack(side="right")
         # ---- Bausteine
-        right = ctk.CTkScrollableFrame(d, fg_color=G.CARD, corner_radius=8); right.grid(row=0, column=1, sticky="nsew", padx=(8, 16), pady=12)
+        right = ctk.CTkScrollableFrame(d, fg_color=G.CARD, corner_radius=0); right.grid(row=0, column=1, sticky="nsew", padx=(8, 16), pady=12)
         ctk.CTkLabel(right, text="BAUSTEINE", font=G.font(10, "bold"), text_color=G.MUTED).pack(anchor="w", padx=8, pady=(6, 0))
         grp = None
         for g, label, hilfe in A.BAUSTEINE + [("Wissen", f"Wissen: {n}", "") for n in self._wissen_docs()]:
             if g != grp:
                 grp = g; ctk.CTkLabel(right, text=g, font=G.font(11, "bold"), anchor="w").pack(anchor="w", padx=8, pady=(10, 2))
-            c = ctk.CTkLabel(right, text=label, font=G.font(11), fg_color="#DCE3FF", text_color="#1E3A8A", corner_radius=10,
+            c = ctk.CTkLabel(right, text=label, font=G.font(11), fg_color="#DCE3FF", text_color="#1E3A8A", corner_radius=0,
                              height=24, cursor="hand2"); c.pack(anchor="w", padx=12, pady=2)
             for w in (c, getattr(c, "_label", c)):
                 w.bind("<ButtonPress-1>", lambda e, t=label: self._press(e, t))

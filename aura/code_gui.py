@@ -11,9 +11,9 @@ from .config import load_settings, save_settings
 
 F = "Segoe UI"
 def font(size=13, weight="normal"): return ctk.CTkFont(family=F, size=size, weight=weight)
-SIDE, CARD, BORDER = ("#FFFFFF", "#10172E"), ("#EEF0F7", "#18213D"), ("#E1E4EE", "#263156")
-INK, MUTED = ("#111827", "#E6E9F2"), ("#6B7280", "#8E98B5")
-ACCENT, ACCENT_HI = "#6E56F8", "#5A43E0"
+SIDE, CARD, BORDER = ("#E7EAE3", "#0C0F0D"), ("#EDEFEA", "#232B24"), ("#C9CEC3", "#303A31")
+INK, MUTED = ("#1C211C", "#E8ECE4"), ("#525A50", "#A3AD9F")
+ACCENT, ACCENT_HI = "#B3121D", "#8E0E17"
 WARN_BG, WARN_INK = ("#FFF4E5", "#3A2A10"), ("#7A4B00", "#FFD089")
 STUFE_FARBE = {"hoch": "#FECACA", "mittel": "#FDE68A", "tief": "#E5E7EB"}
 HINWEIS = ("Arbeite auf einer Kopie oder einem eigenen Git-Zweig. AURA ändert nur, was du einzeln übernimmst, und legt vorher "
@@ -37,7 +37,7 @@ class CodeWindow:
 
     # ------------------------------------------------------------------ Aufbau
     def _btn(self, parent, text, cmd, main=False, **kw):
-        return ctk.CTkButton(parent, text=text, command=cmd, height=32, corner_radius=8, font=font(12, "bold" if main else "normal"),
+        return ctk.CTkButton(parent, text=text, command=cmd, height=32, corner_radius=0, font=font(12, "bold" if main else "normal"),
                              fg_color=ACCENT if main else CARD, hover_color=ACCENT_HI if main else BORDER,
                              text_color="white" if main else INK, **kw)
 
@@ -45,12 +45,12 @@ class CodeWindow:
         f = ctk.CTkFrame(self.body, fg_color="transparent"); f.grid(row=0, column=0, sticky="nsew", padx=24, pady=(6, 12))
         f.grid_columnconfigure(0, weight=1); f.grid_rowconfigure(4, weight=1)
         ctk.CTkLabel(f, text="Code prüfen", font=font(22, "bold"), text_color=INK, anchor="w").grid(row=0, column=0, sticky="w")
-        b = ctk.CTkFrame(f, fg_color=WARN_BG, corner_radius=10); b.grid(row=1, column=0, sticky="ew", pady=(6, 8))
+        b = ctk.CTkFrame(f, fg_color=WARN_BG, corner_radius=0); b.grid(row=1, column=0, sticky="ew", pady=(6, 8))
         lb = ctk.CTkLabel(b, text="⚠  " + HINWEIS, font=font(12), text_color=WARN_INK, justify="left", anchor="w", wraplength=820)
         lb.pack(fill="x", padx=14, pady=8)
         b.bind("<Configure>", lambda e: lb.configure(wraplength=max(300, e.width - 40)), add="+")
 
-        top = ctk.CTkFrame(f, fg_color=CARD, corner_radius=10); top.grid(row=2, column=0, sticky="ew"); top.grid_columnconfigure(1, weight=1)
+        top = ctk.CTkFrame(f, fg_color=CARD, corner_radius=0); top.grid(row=2, column=0, sticky="ew"); top.grid_columnconfigure(1, weight=1)
         self._btn(top, "Projektordner …", self.ordner_waehlen, main=not self.root_dir).grid(row=0, column=0, padx=10, pady=8)
         self.l_ordner = ctk.CTkLabel(top, text=self.root_dir or "Noch kein Ordner gewählt", font=font(12), text_color=INK, anchor="w")
         self.l_ordner.grid(row=0, column=1, sticky="ew")
@@ -67,7 +67,7 @@ class CodeWindow:
         self._btn(act, "Sicherungen …", self.sicherungen, width=110).pack(side="left")
         self.l_status = ctk.CTkLabel(act, text="", font=font(11), text_color=MUTED, anchor="e"); self.l_status.pack(side="right")
 
-        pw = tk.PanedWindow(f, orient="horizontal", sashwidth=6, bd=0, bg="#E1E4EE"); pw.grid(row=4, column=0, sticky="nsew")
+        pw = tk.PanedWindow(f, orient="horizontal", sashwidth=6, bd=0, bg="#C9CEC3"); pw.grid(row=4, column=0, sticky="nsew")
         st = ttk.Style(); st.configure("Code.Treeview", rowheight=28, font=(F, 10))  # v143: Unterstriche sichtbar; st.configure("Code.Treeview.Heading", font=(F, 10, "bold"))
         lf = tk.Frame(pw); self.t_dat = ttk.Treeview(lf, columns=("z", "h"), style="Code.Treeview", selectmode="extended")
         self.t_dat.heading("#0", text="Datei"); self.t_dat.heading("z", text="Zeilen"); self.t_dat.heading("h", text="Hinweise")
@@ -76,12 +76,12 @@ class CodeWindow:
         rf = tk.Frame(pw); self.t_bef = ttk.Treeview(rf, columns=("s", "o", "a", "t"), show="headings", style="Code.Treeview")
         for c, t, w in (("s", "Stufe", 60), ("o", "Ort", 190), ("a", "Art", 110), ("t", "Befund", 520)):
             self.t_bef.heading(c, text=t); self.t_bef.column(c, width=w, stretch=(c == "t"))
-        for s_, col in STUFE_FARBE.items(): self.t_bef.tag_configure(s_, background=col, foreground="#111827")
+        for s_, col in STUFE_FARBE.items(): self.t_bef.tag_configure(s_, background=col, foreground="#1C211C")
         self._scroll(rf, self.t_bef); pw.add(rf, minsize=320)
         self.t_dat.bind("<<TreeviewSelect>>", lambda e: self._zeige_befunde())
         self.t_bef.bind("<Double-1>", lambda e: self.vorschlag_dialog())
         self.b_pruef.configure(state="normal" if self.llm_var.get() else "disabled")
-        self.t_bef.tag_configure("modell", foreground="#6B7280")
+        self.t_bef.tag_configure("modell", foreground="#525A50")
         ctk.CTkLabel(f, text="Doppelklick auf einen Befund: Vorschlag erzeugen und als Diff prüfen. Ohne Auswahl links: alle Dateien.",
                      font=font(11), text_color=MUTED, anchor="w").grid(row=5, column=0, sticky="w", pady=(6, 0))
 

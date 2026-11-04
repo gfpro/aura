@@ -47,19 +47,19 @@ APP_NAME = "AURA"
 SUBTITLE = "Artificial Understanding & Retrieval Assistant"
 F = "Segoe UI"
 # Farbpaare (hell, dunkel) - folgen automatisch dem Windows-Farbschema
-BG      = ("#F4F5FA", "#0B1020")          # v68: Navy-Schema
-SIDE    = ("#FFFFFF", "#10172E")
-CARD    = ("#EEF0F7", "#18213D")
-BUBBLE  = ("#FFFFFF", "#151D36")
-BORDER  = ("#E1E4EE", "#263156")
-INK     = ("#111827", "#E6E9F2")
-MUTED   = ("#6B7280", "#8E98B5")
-ACCENT, ACCENT_HI = "#6E56F8", "#5A43E0"
+BG      = ("#F4F5F2", "#111512")          # v68: Navy-Schema
+SIDE    = ("#E7EAE3", "#0C0F0D")
+CARD    = ("#EDEFEA", "#232B24")
+BUBBLE  = ("#FFFFFF", "#1A201B")
+BORDER  = ("#C9CEC3", "#303A31")
+INK     = ("#1C211C", "#E8ECE4")
+MUTED   = ("#525A50", "#A3AD9F")
+ACCENT, ACCENT_HI = "#B3121D", "#8E0E17"
 TEAL    = ("#0F9D7A", "#2DD4A4")          # v68: Statusfarbe der Info-Leiste
 OK, OFF, ERR = "#10B981", ("#C4C8CF", "#4B5260"), "#E5484D"
 BLUE    = "#3B82F6"                        # v109: Balken «läuft»
 AMBER, AMBER_HI = "#F59E0B", "#D97706"       # v129: Senden gesperrt (Vektoren)
-FH = "Georgia"
+FH = "Segoe UI"
 MODI = {"Hell": "light", "Dunkel": "dark", "System": "system"}            # v69                            # v68: Serifen nur für wenige Überschriften
 # v46: Startfragen. Mit «XY» wird nur ins Eingabefeld uebernommen (XY markiert), sonst sofort gefragt.
 SUGGESTIONS = ["Welche Termine habe ich diese Woche?",
@@ -132,13 +132,13 @@ class App:
         hd.grid_columnconfigure(1, weight=1)
         logo = self._logo(40)                                            # v71
         if logo is not None: ctk.CTkLabel(hd, text="", image=logo, width=40, height=40).grid(row=0, column=0)
-        else: ctk.CTkLabel(hd, text="◆", width=36, height=36, corner_radius=10, fg_color=ACCENT,
+        else: ctk.CTkLabel(hd, text="◆", width=36, height=36, corner_radius=0, fg_color=ACCENT,
                            text_color="white", font=font(16, "bold")).grid(row=0, column=0)
         tt = ctk.CTkFrame(hd, fg_color="transparent"); tt.grid(row=0, column=1, sticky="w", padx=10)
         ctk.CTkLabel(tt, text=APP_NAME, font=font(20, "bold"), text_color=INK, height=22).pack(anchor="w")
         ctk.CTkLabel(tt, text="Artificial Understanding &\nRetrieval Assistant", font=font(11), text_color=MUTED,
                      justify="left", anchor="w").pack(anchor="w")                     # v69
-        ctk.CTkButton(hd, text="⌂", width=34, height=34, corner_radius=10, font=font(18, "bold"), fg_color=CARD,
+        ctk.CTkButton(hd, text="⌂", width=34, height=34, corner_radius=0, font=font(18, "bold"), fg_color=CARD,
                       hover_color=BORDER, text_color=ACCENT, command=self.go_home).grid(row=0, column=2, sticky="e")   # v79
 
         menu = ctk.CTkFrame(side, fg_color="transparent"); menu.grid(row=1, column=0, sticky="new", padx=12, pady=(20, 0))
@@ -147,7 +147,7 @@ class App:
         # ---- Chat: Sprachmodell, 8 Bit
         b = self._grp(menu, "Chat", "Sprachmodell wählen und laden, Anzahl Quellen.")
         self.models = discover(MODELS); ids = [m[0] for m in self.models]
-        self.om = ctk.CTkOptionMenu(b, values=[m[1] for m in self.models], height=32, corner_radius=8,
+        self.om = ctk.CTkOptionMenu(b, values=[m[1] for m in self.models], height=32, corner_radius=0,
                                     font=font(12), dropdown_font=font(12), fg_color=SIDE, button_color=SIDE,
                                     button_hover_color=BORDER, text_color=INK, command=self.pick_model, dynamic_resizing=False)
         self.om.set(self.models[ids.index(self.s["llm"])][1] if self.s["llm"] in ids else self.models[0][1])
@@ -157,7 +157,7 @@ class App:
         self.llm_dot = ctk.CTkLabel(lrow, text="●", text_color=OFF, font=font(12), width=14); self.llm_dot.grid(row=0, column=0)
         self.llm_info = ctk.CTkLabel(lrow, text="nicht geladen", font=font(11), text_color=MUTED, anchor="w")
         self.llm_info.grid(row=0, column=1, sticky="w", padx=(6, 0)); hilfe.tip(self.llm_info, "#modell_status")
-        self.b_llm = ctk.CTkButton(lrow, text="Laden", width=76, height=28, corner_radius=8, font=font(12, "bold"),
+        self.b_llm = ctk.CTkButton(lrow, text="Laden", width=76, height=28, corner_radius=0, font=font(12, "bold"),
                                    fg_color=ACCENT, hover_color=ACCENT_HI, command=self.toggle_llm)
         self.b_llm.grid(row=0, column=2); self.llm_ready = False
         self.q8_var = tk.BooleanVar(value=bool(self.s.get("llm_int8", True)))                # v70
@@ -227,20 +227,20 @@ class App:
         self._grp_open(self.s.get("menu_offen", "Chat") or None, save=False)
 
         # ---- Aufgaben (unten)
-        tb = ctk.CTkFrame(side, fg_color=CARD, corner_radius=10); tb.grid(row=2, column=0, sticky="sew", padx=12, pady=(8, 4))
+        tb = ctk.CTkFrame(side, fg_color=CARD, corner_radius=0); tb.grid(row=2, column=0, sticky="sew", padx=12, pady=(8, 4))
         tb.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(tb, text="AUFGABEN", font=font(10, "bold"), text_color=MUTED, anchor="w").grid(
             row=0, column=0, sticky="w", padx=12, pady=(8, 0))
         self.prog = ctk.CTkLabel(tb, text="Bereit", font=font(11), text_color=INK, wraplength=230, justify="left", anchor="w")
         self.prog.grid(row=1, column=0, sticky="ew", padx=12); hilfe.tip(self.prog, "#fortschritt")
-        self.pb = ctk.CTkProgressBar(tb, height=6, corner_radius=3, progress_color=BLUE, fg_color=BORDER)
+        self.pb = ctk.CTkProgressBar(tb, height=6, corner_radius=0, progress_color=BLUE, fg_color=BORDER)
         self.pb.grid(row=2, column=0, sticky="ew", padx=12, pady=(6, 8)); self.pb.set(0)
         box = ctk.CTkFrame(tb, fg_color="transparent"); box.grid(row=3, column=0, sticky="ew", padx=12, pady=(0, 10))
         box.grid_columnconfigure(0, weight=1)
-        self.b_embed = ctk.CTkButton(box, text="Vektoren berechnen", height=28, corner_radius=8, font=font(12, "bold"),
+        self.b_embed = ctk.CTkButton(box, text="Vektoren berechnen", height=28, corner_radius=0, font=font(12, "bold"),
                                      fg_color=ACCENT, hover_color=ACCENT_HI, command=lambda: self.w.submit("embed"))
         self.b_embed.grid(row=0, column=0, sticky="ew"); self.buttons.append(self.b_embed)
-        ctk.CTkButton(box, text="Pause", width=64, height=28, corner_radius=8, font=font(12), fg_color=SIDE,
+        ctk.CTkButton(box, text="Pause", width=64, height=28, corner_radius=0, font=font(12), fg_color=SIDE,
                       hover_color=BORDER, text_color=INK, command=self.w.cancel.set).grid(row=0, column=1, padx=(6, 0))
         vl = ctk.CTkLabel(side, text=f"Version {VERSION}  ·  lokal, ohne Cloud", font=font(10), text_color=MUTED, cursor="hand2")
         vl.bind("<Button-1>", lambda e: self.open_log()); hilfe.tip(vl, "#version")
@@ -248,9 +248,9 @@ class App:
 
     def _grp(self, menu, name, tiptext):
         """v109: Gruppenkopf (Wort ohne Pfeil) + Inhalt; Klick klappt auf/zu."""
-        w = ctk.CTkFrame(menu, fg_color="transparent", corner_radius=10); w.pack(fill="x", pady=(2, 0))   # v187: Rechteck der offenen Gruppe
+        w = ctk.CTkFrame(menu, fg_color="transparent", corner_radius=0); w.pack(fill="x", pady=(2, 0))   # v187: Rechteck der offenen Gruppe
         w.grid_columnconfigure(0, weight=1)
-        h = ctk.CTkButton(w, text=name, anchor="w", height=34, corner_radius=8, font=font(14, "bold"), fg_color="transparent",
+        h = ctk.CTkButton(w, text=name, anchor="w", height=34, corner_radius=0, font=font(14, "bold"), fg_color="transparent",
                           hover_color=CARD, text_color=INK, command=lambda: self._grp_open(name))
         h.pack(fill="x"); hilfe.tip(h, tiptext)
         b = ctk.CTkFrame(w, fg_color="transparent"); b.grid_columnconfigure(0, weight=1)
@@ -270,7 +270,7 @@ class App:
             self.s = load_settings(); self.s["menu_offen"] = name or ""; save_settings(self.s)
 
     def _item(self, parent, text, cmd, r):
-        b = ctk.CTkButton(parent, text=text, anchor="w", height=30, corner_radius=8, font=font(12), fg_color="transparent",
+        b = ctk.CTkButton(parent, text=text, anchor="w", height=30, corner_radius=0, font=font(12), fg_color="transparent",
                           hover_color=BORDER, text_color=INK, command=cmd)
         b.grid(row=r, column=0, sticky="ew", pady=1); return b
 
@@ -341,7 +341,7 @@ class App:
         self.rb_vbig.grid(row=1, column=0, sticky="w", padx=14)
         self.rb_vsub = ctk.CTkLabel(c, text="", font=font(11), text_color=MUTED, anchor="w")
         self.rb_vsub.grid(row=2, column=0, sticky="w", padx=14)
-        self.rb_vbar = ctk.CTkProgressBar(c, height=6, corner_radius=3, progress_color=TEAL, fg_color=BORDER)
+        self.rb_vbar = ctk.CTkProgressBar(c, height=6, corner_radius=0, progress_color=TEAL, fg_color=BORDER)
         self.rb_vbar.grid(row=3, column=0, sticky="ew", padx=14, pady=(8, 6)); self.rb_vbar.set(0)
         self.rb_vsrc = ctk.CTkFrame(c, fg_color="transparent"); self.rb_vsrc.grid(row=4, column=0, sticky="ew", padx=10)
         self.rb_vsrc.grid_columnconfigure(0, weight=1)
@@ -351,7 +351,7 @@ class App:
                      "(Suche nach Bedeutung). Unter 100 %: links «Vektoren berechnen».")
         # --- Workflows
         c = self._rb_card(sf, "WORKFLOWS", 2)
-        ctk.CTkButton(c, text="alle anzeigen →", width=0, height=20, corner_radius=8, font=font(11), fg_color="transparent",
+        ctk.CTkButton(c, text="alle anzeigen →", width=0, height=20, corner_radius=0, font=font(11), fg_color="transparent",
                       hover_color=BORDER, text_color=ACCENT, command=self.open_ergebnisse).grid(row=0, column=0, sticky="e", padx=10, pady=(8, 0))
         self.rb_plan = ctk.CTkLabel(c, text="", font=font(11), text_color=INK, anchor="w", justify="left", wraplength=230)
         self.rb_plan.grid(row=1, column=0, sticky="w", padx=14)
@@ -361,7 +361,7 @@ class App:
         self._rb_model(); self._rb_stats(); self._rb_runs()
 
     def _rb_card(self, parent, title, row):
-        c = ctk.CTkFrame(parent, fg_color=CARD, corner_radius=12, border_width=1, border_color=BORDER)
+        c = ctk.CTkFrame(parent, fg_color=CARD, corner_radius=0, border_width=1, border_color=BORDER)
         c.grid(row=row, column=0, sticky="ew", padx=8, pady=6); c.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(c, text=title, font=font(10, "bold"), text_color=MUTED, anchor="w").grid(row=0, column=0, sticky="w", padx=14, pady=(10, 4))
         return c
@@ -423,7 +423,7 @@ class App:
                 ctk.CTkLabel(self.rb_wbox, text="Noch keine Läufe.", font=font(11), text_color=MUTED, anchor="w").grid(row=0, column=0, sticky="w", padx=6)
             for i, x in enumerate(ls):
                 ok = x["status"] == "ok"
-                row = ctk.CTkFrame(self.rb_wbox, fg_color="transparent", corner_radius=8); row.grid(row=i, column=0, sticky="ew", pady=1)
+                row = ctk.CTkFrame(self.rb_wbox, fg_color="transparent", corner_radius=0); row.grid(row=i, column=0, sticky="ew", pady=1)
                 row.grid_columnconfigure(1, weight=1)
                 ic = ctk.CTkLabel(row, text="✓" if ok else "✕", width=22, font=font(12, "bold"), text_color=TEAL if ok else ERR)
                 ic.grid(row=0, column=0, rowspan=2, padx=(4, 4))
@@ -475,7 +475,7 @@ class App:
         hd = ctk.CTkFrame(p, fg_color="transparent"); hd.grid(row=0, column=0, sticky="ew", padx=(20, 10), pady=(14, 6))
         hd.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(hd, text=title, font=font(18, "bold"), text_color=INK, anchor="w").grid(row=0, column=0, sticky="w")
-        hilfe.tip(ctk.CTkButton(hd, text="✕", width=32, height=32, corner_radius=8, font=font(14), fg_color="transparent",
+        hilfe.tip(ctk.CTkButton(hd, text="✕", width=32, height=32, corner_radius=0, font=font(14), fg_color="transparent",
                                 hover_color=CARD, text_color=MUTED, command=self.close_panel), "#panel_zu").grid(row=0, column=1)
         body = ctk.CTkFrame(p, fg_color="transparent"); body.grid(row=1, column=0, sticky="nsew", padx=1, pady=(0, 1))
         body.grid_columnconfigure(0, weight=1)
@@ -528,7 +528,7 @@ class App:
         outer = ctk.CTkFrame(self.root, fg_color=SIDE, corner_radius=0)
         outer.grid_columnconfigure(0, weight=1); outer.grid_rowconfigure(1, weight=1)
         hd = ctk.CTkFrame(outer, fg_color="transparent"); hd.grid(row=0, column=0, sticky="ew", padx=14, pady=(10, 0))
-        hilfe.tip(ctk.CTkButton(hd, text="← Zurück", width=90, height=28, corner_radius=8, font=font(12), fg_color=CARD,
+        hilfe.tip(ctk.CTkButton(hd, text="← Zurück", width=90, height=28, corner_radius=0, font=font(12), fg_color=CARD,
                                 hover_color=BORDER, text_color=INK, command=self.back), "#zurueck").pack(side="left")
         ctk.CTkLabel(hd, text=title.upper(), font=font(10, "bold"), text_color=MUTED).pack(side="left", padx=12)
         body = ctk.CTkFrame(outer, fg_color=SIDE, corner_radius=0); body.grid(row=1, column=0, sticky="nsew")
@@ -569,7 +569,7 @@ class App:
             row=0, column=0, sticky="w", padx=4, pady=(0, 10))
         self.rows, self.src_btns = {}, []
         for i, c in enumerate(CONNECTORS):
-            card = ctk.CTkFrame(w, fg_color=CARD, corner_radius=10)
+            card = ctk.CTkFrame(w, fg_color=CARD, corner_radius=0)
             card.grid(row=1 + i, column=0, sticky="ew", pady=3)
             card.grid_columnconfigure(1, weight=1)
             dot = ctk.CTkLabel(card, text="●", text_color=OFF, font=font(11), width=12)
@@ -581,24 +581,24 @@ class App:
             info.grid(row=1, column=1, sticky="w", pady=(0, 7))
             btns = ctk.CTkFrame(card, fg_color="transparent"); btns.grid(row=0, column=2, rowspan=2, padx=(12, 10))
             if c.id == "outlook_mail":                              # v23: Ordnerauswahl
-                ctk.CTkButton(btns, text="Ordner", width=56, height=24, corner_radius=7, font=font(11), fg_color=BORDER,
+                ctk.CTkButton(btns, text="Ordner", width=56, height=24, corner_radius=0, font=font(11), fg_color=BORDER,
                               hover_color=MUTED, text_color=INK, command=self.open_folders).pack(side="left", padx=(0, 4))
             if c.id == "folder_docs":
-                ctk.CTkButton(btns, text="…", width=26, height=24, corner_radius=7, fg_color=BORDER,
+                ctk.CTkButton(btns, text="…", width=26, height=24, corner_radius=0, fg_color=BORDER,
                               hover_color=MUTED, text_color=INK, command=self.pick_folder).pack(side="left", padx=(0, 4))
-                ctk.CTkButton(btns, text="✕", width=26, height=24, corner_radius=7, fg_color=BORDER,      # v37: Ordner entfernen
+                ctk.CTkButton(btns, text="✕", width=26, height=24, corner_radius=0, fg_color=BORDER,      # v37: Ordner entfernen
                               hover_color=MUTED, text_color=INK, command=self.remove_folder).pack(side="left", padx=(0, 4))
             if c.id == "onenote":                                   # v87: Abschnittsauswahl
-                ctk.CTkButton(btns, text="Abschnitte", width=76, height=24, corner_radius=7, font=font(11), fg_color=BORDER,
+                ctk.CTkButton(btns, text="Abschnitte", width=76, height=24, corner_radius=0, font=font(11), fg_color=BORDER,
                               hover_color=MUTED, text_color=INK, command=lambda: self.open_folders("onenote")).pack(side="left", padx=(0, 4))
             if c.id == "confluence":                                # v78: Links verwalten
-                ctk.CTkButton(btns, text="Links", width=52, height=24, corner_radius=7, font=font(11), fg_color=BORDER,
+                ctk.CTkButton(btns, text="Links", width=52, height=24, corner_radius=0, font=font(11), fg_color=BORDER,
                               hover_color=MUTED, text_color=INK, command=self.open_confluence).pack(side="left", padx=(0, 4))
-            b = ctk.CTkButton(btns, text="Sync", width=48, height=24, corner_radius=7, font=font(11, "bold"),
+            b = ctk.CTkButton(btns, text="Sync", width=48, height=24, corner_radius=0, font=font(11, "bold"),
                               fg_color=ACCENT, hover_color=ACCENT_HI, command=lambda c=c: self.sync(c)); b.pack(side="left")
             self.src_btns.append(b); self.rows[c.id] = (dot, info)
         rz = ctk.CTkFrame(w, fg_color="transparent"); rz.grid(row=2 + len(CONNECTORS), column=0, sticky="ew", pady=(24, 0))   # v60
-        ctk.CTkButton(rz, text="Alles zurücksetzen …", height=28, corner_radius=8, font=font(11), fg_color="transparent",
+        ctk.CTkButton(rz, text="Alles zurücksetzen …", height=28, corner_radius=0, font=font(11), fg_color="transparent",
                       border_width=1, border_color=ERR, hover_color=BORDER, text_color=ERR, command=self.reset_all).pack(side="left")
         ctk.CTkLabel(rz, text="  Löscht alle eingelesenen Daten und beendet alle Synchronisationen.", font=font(10),
                      text_color=MUTED).pack(side="left")
@@ -653,9 +653,9 @@ class App:
         hd.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(hd, text="Fragen", font=font(22, "bold"), text_color=INK, anchor="w").grid(row=0, column=0, sticky="w")
         for col, (txt, cmd) in enumerate((("🕘 Verlauf", self.open_chats), ("＋ Neuer Chat", self.new_chat)), start=1):   # v129
-            ctk.CTkButton(hd, text=txt, height=30, corner_radius=15, font=font(12), fg_color="transparent", hover_color=BORDER,
+            ctk.CTkButton(hd, text=txt, height=30, corner_radius=0, font=font(12), fg_color="transparent", hover_color=BORDER,
                           text_color=INK, border_width=1, border_color=BORDER, command=cmd).grid(row=0, column=col, padx=(8, 0))
-        self.m_rolle = ctk.CTkOptionMenu(hd, values=["Keine Rolle"], height=30, width=170, corner_radius=15, font=font(12),
+        self.m_rolle = ctk.CTkOptionMenu(hd, values=["Keine Rolle"], height=30, width=170, corner_radius=0, font=font(12),
                                          dropdown_font=font(12), fg_color=CARD, button_color=CARD, button_hover_color=BORDER,
                                          text_color=INK, command=self._rolle_gewaehlt)                       # v146
         self.m_rolle.grid(row=0, column=3, padx=(8, 0))
@@ -669,17 +669,17 @@ class App:
         self.chat.bind("<Configure>", lambda e: self._rewrap(), add="+")   # add="+": CTk-eigene Scroll-Bindung behalten
         self.msgs = []; self._welcome()
         # Eingabe: mehrzeilig, Enter = senden, Shift+Enter = neue Zeile
-        bar = ctk.CTkFrame(main, fg_color=BUBBLE, corner_radius=16, border_width=1, border_color=BORDER)
+        bar = ctk.CTkFrame(main, fg_color=BUBBLE, corner_radius=0, border_width=1, border_color=BORDER)
         bar.grid(row=2, column=0, sticky="ew", padx=36, pady=(10, 6)); bar.grid_columnconfigure(0, weight=1)
         self.entry = ctk.CTkTextbox(bar, height=52, font=font(14), fg_color="transparent", text_color=INK,
                                     wrap="word", border_width=0, activate_scrollbars=False)
         self.entry.grid(row=0, column=0, sticky="ew", padx=(14, 6), pady=10)
         self.entry.bind("<Return>", self._enter); self.entry.focus_set(); hilfe.tip(self.entry, "#frage")
-        self.b_ask = ctk.CTkButton(bar, text="\uE724", width=34, height=34, corner_radius=17, font=ctk.CTkFont(family="Segoe MDL2 Assets", size=14),
+        self.b_ask = ctk.CTkButton(bar, text="\uE724", width=34, height=34, corner_radius=0, font=ctk.CTkFont(family="Segoe MDL2 Assets", size=14),
                                    fg_color=ACCENT, hover_color=ACCENT_HI, command=self.ask)
         self.b_ask.grid(row=0, column=2, padx=(0, 12), pady=10, sticky="se"); self.buttons.append(self.b_ask)
         from .mikrofon import Mikrofon                                   # v182: Spracheingabe im Chat
-        self.b_mic = ctk.CTkButton(bar, text="\uE720", width=34, height=34, corner_radius=17,
+        self.b_mic = ctk.CTkButton(bar, text="\uE720", width=34, height=34, corner_radius=0,
                                    font=ctk.CTkFont(family="Segoe MDL2 Assets", size=14), fg_color="transparent",
                                    hover_color=BORDER, text_color=MUTED)
         self.b_mic.grid(row=0, column=1, padx=(0, 6), pady=10, sticky="se"); self.buttons.append(self.b_mic)
@@ -688,11 +688,11 @@ class App:
         self.follow = False                                              # v67: Bezug zur letzten Frage (einmalig)
         tools = ctk.CTkFrame(bar, fg_color="transparent", height=24)     # v98: Werkzeugzeile (Bezug, Anhang) links unten
         tools.grid(row=1, column=0, columnspan=3, sticky="w", padx=(14, 12), pady=(0, 10))
-        self.b_follow = ctk.CTkButton(tools, text="↳ Bezug zur letzten Frage", height=24, corner_radius=12, font=font(11),
+        self.b_follow = ctk.CTkButton(tools, text="↳ Bezug zur letzten Frage", height=24, corner_radius=0, font=font(11),
                                       fg_color="transparent", hover_color=BORDER, text_color=MUTED, border_width=1,
                                       border_color=BORDER, command=self.toggle_follow)
         self.b_follow.pack(side="left")
-        self.b_anhang = ctk.CTkButton(tools, text="📎 Datei anhängen", height=24, corner_radius=12, font=font(11),
+        self.b_anhang = ctk.CTkButton(tools, text="📎 Datei anhängen", height=24, corner_radius=0, font=font(11),
                                       fg_color="transparent", hover_color=BORDER, text_color=MUTED, border_width=1,
                                       border_color=BORDER, command=self.add_anhang)
         self.b_anhang.pack(side="left", padx=(8, 0)); self.buttons.append(self.b_anhang)
@@ -759,9 +759,9 @@ class App:
 
     def _tile(self, parent, sym, title, sub, q):
         """v68: Kachel der Startseite; Klick auf jeden Teil löst aus."""
-        c = ctk.CTkFrame(parent, fg_color=BUBBLE, corner_radius=14, border_width=1, border_color=BORDER, width=300, height=74)
+        c = ctk.CTkFrame(parent, fg_color=BUBBLE, corner_radius=0, border_width=1, border_color=BORDER, width=300, height=74)
         c.grid_propagate(False); c.grid_columnconfigure(1, weight=1)
-        ic = ctk.CTkLabel(c, text=sym, width=38, height=38, corner_radius=10, fg_color=CARD, text_color=ACCENT, font=font(16, "bold"))
+        ic = ctk.CTkLabel(c, text=sym, width=38, height=38, corner_radius=0, fg_color=CARD, text_color=ACCENT, font=font(16, "bold"))
         ic.grid(row=0, column=0, rowspan=2, padx=(14, 10), pady=16)
         t1 = ctk.CTkLabel(c, text=title, font=font(13, "bold"), text_color=INK, anchor="w", height=18, cursor="hand2")
         t1.grid(row=0, column=1, sticky="sw", pady=(16, 0))
@@ -810,7 +810,7 @@ class App:
         holder.grid_columnconfigure(0 if right else 1, weight=1)
         bg = {"q": ACCENT, "a": BUBBLE, "err": ("#FDECEC", "#3A1F22")}[kind]
         fg = {"q": "white", "a": INK, "err": ERR}[kind]
-        b = ctk.CTkFrame(holder, fg_color=bg, corner_radius=16, border_width=0 if kind != "a" else 1, border_color=BORDER)
+        b = ctk.CTkFrame(holder, fg_color=bg, corner_radius=0, border_width=0 if kind != "a" else 1, border_color=BORDER)
         b.grid(row=0, column=1 if right else 0, sticky="e" if right else "w", padx=8)
         lbl = ctk.CTkLabel(b, text=text, font=font(14), text_color=fg, justify="left", anchor="w", wraplength=self._wrap())
         lbl.pack(padx=16, pady=11, anchor="w"); self.msgs.append(lbl)
@@ -840,7 +840,7 @@ class App:
             past = [h for h in hits if h.get("state") == "vorbei"]
             if is_list and len(past) > 3:                          # vergangene Termine eingeklappt
                 box = ctk.CTkFrame(foot, fg_color="transparent")
-                tog = ctk.CTkButton(foot, text=f"▸ {len(past)} vergangene anzeigen", height=22, corner_radius=7,
+                tog = ctk.CTkButton(foot, text=f"▸ {len(past)} vergangene anzeigen", height=22, corner_radius=0,
                                     font=font(11), fg_color="transparent", hover_color=CARD, text_color=MUTED, anchor="w")
                 def flip(b=box, t=tog, n=len(past)):
                     if b.winfo_manager(): b.pack_forget(); t.configure(text=f"▸ {n} vergangene anzeigen")
@@ -866,10 +866,10 @@ class App:
                 lb.bind("<Enter>", lambda e, l=lb: l.configure(text_color=ACCENT))
                 lb.bind("<Leave>", lambda e, l=lb, c=col: l.configure(text_color=c))
         row = ctk.CTkFrame(foot, fg_color="transparent"); row.pack(fill="x", pady=(8, 0))
-        ctk.CTkButton(row, text="Kopieren", width=78, height=24, corner_radius=8, font=font(11), fg_color=CARD,
+        ctk.CTkButton(row, text="Kopieren", width=78, height=24, corner_radius=0, font=font(11), fg_color=CARD,
                       hover_color=BORDER, text_color=INK, command=lambda: self._copy(answer)).pack(side="left")
         if hits and not is_list:
-            ctk.CTkButton(row, text="Kontext", width=70, height=24, corner_radius=8, font=font(11), fg_color=CARD,
+            ctk.CTkButton(row, text="Kontext", width=70, height=24, corner_radius=0, font=font(11), fg_color=CARD,
                           hover_color=BORDER, text_color=INK,
                           command=lambda: self.show_context(hits)).pack(side="left", padx=(6, 0))
         if is_list and tm:
@@ -940,7 +940,7 @@ class App:
         except Exception as e: chats = []; ctk.CTkLabel(sf, text=f"Verlauf nicht lesbar: {e}", text_color=ERR).grid(row=0, column=0)
         if not chats: ctk.CTkLabel(sf, text="Noch keine gespeicherten Chats.", font=font(12), text_color=MUTED).grid(row=0, column=0, pady=12)
         for r, c in enumerate(chats):
-            row = ctk.CTkFrame(sf, fg_color=CARD, corner_radius=10); row.grid(row=r, column=0, sticky="ew", pady=3)
+            row = ctk.CTkFrame(sf, fg_color=CARD, corner_radius=0); row.grid(row=r, column=0, sticky="ew", pady=3)
             row.grid_columnconfigure(0, weight=1)
             akt = c["id"] == self.chat_id
             b = ctk.CTkButton(row, text=f"{c['titel'] or '(ohne Titel)'}\n{time.strftime('%d.%m.%Y %H:%M', time.localtime(c['t1']))}"
@@ -948,10 +948,10 @@ class App:
                               anchor="w", height=44, font=font(12), fg_color="transparent", hover_color=BORDER, text_color=INK,
                               command=lambda i=c["id"]: self.load_chat(i))
             b.grid(row=0, column=0, sticky="ew", padx=(4, 0), pady=2)
-            ctk.CTkButton(row, text="✕", width=30, height=30, corner_radius=8, fg_color="transparent", hover_color=BORDER,
+            ctk.CTkButton(row, text="✕", width=30, height=30, corner_radius=0, fg_color="transparent", hover_color=BORDER,
                           text_color=MUTED, command=lambda i=c["id"]: self._chat_del(i)).grid(row=0, column=1, padx=6)
         ft = ctk.CTkFrame(body, fg_color="transparent"); ft.grid(row=2, column=0, sticky="ew", padx=20, pady=10)
-        ctk.CTkButton(ft, text="Alle löschen", height=30, corner_radius=8, font=font(12), fg_color="transparent", hover_color=CARD,
+        ctk.CTkButton(ft, text="Alle löschen", height=30, corner_radius=0, font=font(12), fg_color="transparent", hover_color=CARD,
                       text_color=ERR, border_width=1, border_color=ERR, command=lambda: self._chat_del(None)).pack(side="left")
 
     def _chat_del(self, chat_id):
@@ -1021,11 +1021,11 @@ class App:
                      font=font(11), text_color=MUTED, anchor="w", justify="left", wraplength=500).grid(row=0, column=0, sticky="w", pady=(0, 8))
         links = list(self.s.get("confluence_links") or [])
         for i, l in enumerate(links):
-            r = ctk.CTkFrame(w, fg_color=CARD, corner_radius=8); r.grid(row=1 + i, column=0, sticky="ew", pady=2)
+            r = ctk.CTkFrame(w, fg_color=CARD, corner_radius=0); r.grid(row=1 + i, column=0, sticky="ew", pady=2)
             try: d = parse_link(l)[2]
             except ValueError as e: d = f"⚠ {e}"
             ctk.CTkLabel(r, text=f"{d}\n{l[:80]}", font=font(10), text_color=INK, anchor="w", justify="left").pack(side="left", padx=10, pady=4)
-            ctk.CTkButton(r, text="✕", width=26, height=24, corner_radius=7, fg_color=BORDER, hover_color=MUTED, text_color=INK,
+            ctk.CTkButton(r, text="✕", width=26, height=24, corner_radius=0, fg_color=BORDER, hover_color=MUTED, text_color=INK,
                           command=lambda l=l: self._conf_remove(l)).pack(side="right", padx=8)
         e = ctk.CTkEntry(w, placeholder_text="https://confluence.bit.admin.ch/spaces/…", height=28)
         e.grid(row=2 + len(links), column=0, sticky="ew", pady=(10, 0))
@@ -1035,7 +1035,7 @@ class App:
             except ValueError as x: messagebox.showerror(APP_NAME, str(x), parent=self.root); return
             if l not in links: self.s["confluence_links"] = links + [l]; save_settings(self.s)
             self.open_confluence()
-        ctk.CTkButton(w, text="+ Link einfügen", height=28, corner_radius=8, font=font(11, "bold"), fg_color=ACCENT,
+        ctk.CTkButton(w, text="+ Link einfügen", height=28, corner_radius=0, font=font(11, "bold"), fg_color=ACCENT,
                       hover_color=ACCENT_HI, command=add).grid(row=3 + len(links), column=0, sticky="w", pady=6)
 
     def _conf_remove(self, l):
@@ -1103,9 +1103,9 @@ class App:
         names = ", ".join(a["name"] for a in lst)
         ctk.CTkLabel(self.anh_box, text=f"📎 {names[:60]}{'…' if len(names) > 60 else ''}  ·  nur in diesem Chat",
                      font=font(11), text_color=ACCENT).pack(side="left")
-        ctk.CTkButton(self.anh_box, text="✕", width=24, height=22, corner_radius=11, font=font(11), fg_color="transparent",
+        ctk.CTkButton(self.anh_box, text="✕", width=24, height=22, corner_radius=0, font=font(11), fg_color="transparent",
                       hover_color=BORDER, text_color=MUTED, command=lambda: self.w.submit("anhang_leeren")).pack(side="left", padx=(4, 0))
-        b = ctk.CTkButton(self.anh_box, text="▶ Als Präsentation", height=22, corner_radius=11, font=font(11), fg_color=CARD,
+        b = ctk.CTkButton(self.anh_box, text="▶ Als Präsentation", height=22, corner_radius=0, font=font(11), fg_color=CARD,
                           hover_color=BORDER, text_color=INK, command=self._als_praesentation)                     # v152
         b.pack(side="left", padx=(8, 0))
         hilfe.tip(b, "Macht aus dem Anhang eine PowerPoint-Präsentation in der Vorlage der Bundesverwaltung. Oder im Chat "
@@ -1122,9 +1122,9 @@ class App:
         f = getattr(self, "last_ans", None)
         if f is None or not f.winfo_exists(): return
         box = ctk.CTkFrame(f, fg_color="transparent"); box.pack(fill="x", padx=16, pady=(0, 12))
-        ctk.CTkButton(box, text=f"Öffnen: {Path(pfad).name}", height=28, corner_radius=8, font=font(11, "bold"), fg_color=ACCENT,
+        ctk.CTkButton(box, text=f"Öffnen: {Path(pfad).name}", height=28, corner_radius=0, font=font(11, "bold"), fg_color=ACCENT,
                       hover_color=ACCENT_HI, command=lambda: os.startfile(pfad)).pack(side="left")
-        ctk.CTkButton(box, text="Im Ordner zeigen", height=28, corner_radius=8, font=font(11), fg_color=CARD, hover_color=BORDER,
+        ctk.CTkButton(box, text="Im Ordner zeigen", height=28, corner_radius=0, font=font(11), fg_color=CARD, hover_color=BORDER,
                       text_color=INK, command=lambda: os.startfile(str(Path(pfad).parent))).pack(side="left", padx=6)
 
     def _rueckfrage(self, q, backend, cands):
@@ -1134,9 +1134,9 @@ class App:
         box = ctk.CTkFrame(f, fg_color="transparent"); box.pack(fill="x", padx=16, pady=(0, 12))
         for c in cands:
             t = f"{c['ts'][:10]}  ·  {c['title'][:70]}  ·  {c['author'][:30]}"
-            ctk.CTkButton(box, text=t, anchor="w", height=28, corner_radius=8, font=font(12), fg_color=CARD, hover_color=BORDER,
+            ctk.CTkButton(box, text=t, anchor="w", height=28, corner_radius=0, font=font(12), fg_color=CARD, hover_color=BORDER,
                           text_color=INK, command=lambda i=c["item_id"]: self._ask_force(q, backend, [i])).pack(fill="x", pady=2)
-        ctk.CTkButton(box, text="Nein – trotzdem allgemein suchen", anchor="w", height=26, corner_radius=8, font=font(11),
+        ctk.CTkButton(box, text="Nein – trotzdem allgemein suchen", anchor="w", height=26, corner_radius=0, font=font(11),
                       fg_color="transparent", hover_color=BORDER, text_color=MUTED, border_width=1, border_color=BORDER,
                       command=lambda: self._ask_force(q, backend, [])).pack(anchor="w", pady=(6, 0))
         self._scroll()
@@ -1286,11 +1286,11 @@ class App:
 
     def _erg_card(self, parent, x):
         from pathlib import Path
-        c = ctk.CTkFrame(parent, fg_color=BUBBLE, corner_radius=12, border_width=1, border_color=ACCENT if x["neu"] else BORDER)
+        c = ctk.CTkFrame(parent, fg_color=BUBBLE, corner_radius=0, border_width=1, border_color=ACCENT if x["neu"] else BORDER)
         c.grid_columnconfigure(0, weight=1)
         ok = x["status"] == "ok"
         hd = ctk.CTkFrame(c, fg_color="transparent"); hd.grid(row=0, column=0, sticky="ew", padx=14, pady=(10, 2))
-        if x["neu"]: ctk.CTkLabel(hd, text="NEU", font=font(9, "bold"), fg_color=ACCENT, text_color="white", corner_radius=6,
+        if x["neu"]: ctk.CTkLabel(hd, text="NEU", font=font(9, "bold"), fg_color=ACCENT, text_color="white", corner_radius=0,
                                   width=34, height=18).pack(side="left", padx=(0, 8))
         ctk.CTkLabel(hd, text=x["workflow"], font=font(14, "bold"), text_color=INK).pack(side="left")
         ctk.CTkLabel(hd, text=f"   {x['zeit']}  ·  {'✓ fertig' if ok else '✕ ' + str(x['status'])}  ·  {x['seconds']:.0f} s",
@@ -1337,7 +1337,7 @@ class App:
                          text_color=("#92400E", "#FCD34D"), anchor="w").grid(row=r, column=0, sticky="w", padx=14, pady=(4, 0)); r += 1
         bb = ctk.CTkFrame(c, fg_color="transparent"); bb.grid(row=r, column=0, sticky="w", padx=12, pady=(6, 10))
         def btn(t, cmd, main=False):
-            ctk.CTkButton(bb, text=t, height=26, width=0, corner_radius=8, font=font(11, "bold" if main else "normal"),
+            ctk.CTkButton(bb, text=t, height=26, width=0, corner_radius=0, font=font(11, "bold" if main else "normal"),
                           fg_color=ACCENT if main else CARD, hover_color=ACCENT_HI if main else BORDER,
                           text_color="white" if main else INK, command=cmd).pack(side="left", padx=2)
         for f in x["files"]: btn(f"Öffnen: {Path(f).name[:40]}", lambda f=f: self._open_file(f), not Path(f).name.startswith("Pruefbericht"))
@@ -1445,7 +1445,7 @@ class App:
                              + (f"\n⚠ {errs} Ordner nicht lesbar – Löschen ist bis dahin gesperrt." if errs else ""),
                      font=font(11), text_color=MUTED, anchor="w", justify="left", wraplength=480).grid(
             row=0, column=0, sticky="w", padx=20, pady=(0, 8))
-        box = ctk.CTkScrollableFrame(w, fg_color=CARD, corner_radius=10)
+        box = ctk.CTkScrollableFrame(w, fg_color=CARD, corner_radius=0)
         box.grid(row=1, column=0, sticky="nsew", padx=16); box.grid_columnconfigure(0, weight=1)
         self.fvars = {}
         for i, f in enumerate(self.flist):
@@ -1460,9 +1460,9 @@ class App:
         self.fsum = ctk.CTkLabel(w, text="", font=font(11), text_color=MUTED, anchor="w")
         self.fsum.grid(row=2, column=0, sticky="w", padx=20, pady=(8, 0)); self._fsum()
         bar = ctk.CTkFrame(w, fg_color="transparent"); bar.grid(row=3, column=0, sticky="e", padx=16, pady=(8, 16))
-        ctk.CTkButton(bar, text="Abbrechen", width=90, height=30, corner_radius=8, font=font(12), fg_color=CARD,
+        ctk.CTkButton(bar, text="Abbrechen", width=90, height=30, corner_radius=0, font=font(12), fg_color=CARD,
                       hover_color=BORDER, text_color=INK, command=lambda: self.show_view("quellen")).pack(side="left", padx=(0, 8))
-        ctk.CTkButton(bar, text="Speichern & synchronisieren", height=30, corner_radius=8, font=font(12, "bold"),
+        ctk.CTkButton(bar, text="Speichern & synchronisieren", height=30, corner_radius=0, font=font(12, "bold"),
                       fg_color=ACCENT, hover_color=ACCENT_HI, command=self._save_folders).pack(side="left")
         hilfe.auto(bar, "ordner")
 

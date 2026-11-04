@@ -48,18 +48,18 @@ class FeldplanFenster:
         bar = ctk.CTkFrame(d, fg_color="transparent"); bar.grid(row=2, column=0, sticky="ew", padx=16, pady=(8, 6))
         ctk.CTkLabel(bar, text="Herkunft:", font=G.font(11)).pack(side="left", padx=(0, 6))
         for k in ("fakt", "abgeleitet", "fest", "manuell", "leer", "offen"):
-            ctk.CTkButton(bar, text=FP.HERKUNFT[k].split(" (")[0], height=28, width=0, corner_radius=8, font=G.font(11),
+            ctk.CTkButton(bar, text=FP.HERKUNFT[k].split(" (")[0], height=28, width=0, corner_radius=0, font=G.font(11),
                           fg_color=FARBE[k], hover_color=G.INK, text_color="white",
                           command=lambda k=k: self.setzen(k)).pack(side="left", padx=(0, 4))
-        ctk.CTkButton(bar, text="Mehrfach ein/aus", height=28, width=0, corner_radius=8, font=G.font(11), fg_color=G.BORDER,
+        ctk.CTkButton(bar, text="Mehrfach ein/aus", height=28, width=0, corner_radius=0, font=G.font(11), fg_color=G.BORDER,
                       hover_color=G.MUTED, text_color=G.INK, command=self.mehrfach).pack(side="left", padx=(12, 4))
         self.o_f = ctk.CTkOptionMenu(bar, values=["alle zeigen"] + [FP.HERKUNFT[k] for k in FP.HERKUNFT], width=170, height=28,
                                      font=G.font(11), fg_color=G.BUBBLE, button_color=G.BORDER, text_color=G.INK,
                                      command=lambda v: self.fuellen())
         self.o_f.set("alle zeigen"); self.o_f.pack(side="left", padx=(12, 4))
-        ctk.CTkButton(bar, text="▶ Workflow aus Feldplan bauen", height=28, width=0, corner_radius=8, font=G.font(11, "bold"),
+        ctk.CTkButton(bar, text="▶ Workflow aus Feldplan bauen", height=28, width=0, corner_radius=0, font=G.font(11, "bold"),
                       fg_color=G.ACCENT, hover_color=G.ACCENT_HI, command=self.bauen).pack(side="right")
-        ctk.CTkButton(bar, text="Neu analysieren", height=28, width=0, corner_radius=8, font=G.font(11), fg_color=G.BORDER,
+        ctk.CTkButton(bar, text="Neu analysieren", height=28, width=0, corner_radius=0, font=G.font(11), fg_color=G.BORDER,
                       hover_color=G.MUTED, text_color=G.INK, command=self.neu).pack(side="left", padx=(12, 0))
         fr = tk.Frame(d); fr.grid(row=3, column=0, sticky="nsew", padx=16); fr.grid_columnconfigure(0, weight=1); fr.grid_rowconfigure(0, weight=1)
         cols = ("nr", "abschnitt", "typ", "herkunft", "woher", "grund")
@@ -68,7 +68,7 @@ class FeldplanFenster:
         for c, w, h in zip(cols, (70, 220, 110, 130, 300, 260), ("Nr", "Abschnitt", "Typ", "Herkunft", "Woher genau / Regel / Wert", "Warum (AURA)")):
             tv.heading(c, text=h, anchor="w"); tv.column(c, width=w, anchor="w", stretch=c in ("abschnitt", "woher", "grund"))
         for k, col in FARBE.items(): tv.tag_configure(k, foreground=col)
-        tv.tag_configure("option", foreground="#6B7280")
+        tv.tag_configure("option", foreground="#525A50")
         sb = ttk.Scrollbar(fr, orient="vertical", command=tv.yview); tv.configure(yscrollcommand=sb.set)
         tv.grid(row=0, column=0, sticky="nsew"); sb.grid(row=0, column=1, sticky="ns")
         tv.bind("<<TreeviewSelect>>", lambda e: self.detail())
@@ -261,7 +261,7 @@ class FeldplanFenster:
             s = lb.curselection(); return s[0] if s else None
         bb = ctk.CTkFrame(box, fg_color="transparent"); bb.pack(anchor="w", pady=(4, 0))
         def b(t, c, main=False):
-            ctk.CTkButton(bb, text=t, height=26, width=0, corner_radius=7, font=G.font(11), fg_color=G.ACCENT if main else G.BORDER,
+            ctk.CTkButton(bb, text=t, height=26, width=0, corner_radius=0, font=G.font(11), fg_color=G.ACCENT if main else G.BORDER,
                           hover_color=G.ACCENT_HI if main else G.MUTED, text_color="white" if main else G.INK, command=c).pack(side="left", padx=(0, 4))
         def neu():
             r = self._regel_dialog(e, None); self._grab(teil)

@@ -24,7 +24,7 @@ class WissenWindow:
             row=0, column=0, sticky="w", padx=16, pady=(16, 6))
         self.lst = ctk.CTkScrollableFrame(left, fg_color="transparent"); self.lst.grid(row=1, column=0, sticky="nsew", padx=6)
         self.lst.grid_columnconfigure(0, weight=1)
-        ctk.CTkButton(left, text="+ Neue Sammlung", height=32, corner_radius=8, font=G.font(12, "bold"), fg_color=G.ACCENT,
+        ctk.CTkButton(left, text="+ Neue Sammlung", height=32, corner_radius=0, font=G.font(12, "bold"), fg_color=G.ACCENT,
                       hover_color=G.ACCENT_HI, command=self.new).grid(row=2, column=0, sticky="ew", padx=12, pady=12)
         hilfe.auto(left, "wissen")
         # rechts: Details
@@ -45,7 +45,7 @@ class WissenWindow:
         for c in self.lst.winfo_children(): c.destroy()
         for i, n in enumerate(self.w.names()):
             m = self.w.manifest(n); sel = n == self.cur
-            ctk.CTkButton(self.lst, text=m.get("name") or n, anchor="w", height=30, corner_radius=8, font=G.font(12, "bold" if sel else "normal"),
+            ctk.CTkButton(self.lst, text=m.get("name") or n, anchor="w", height=30, corner_radius=0, font=G.font(12, "bold" if sel else "normal"),
                           fg_color=G.ACCENT if sel else "transparent", hover_color=G.BORDER,
                           text_color="white" if sel else G.INK, command=lambda n=n: self.switch(n)).grid(row=i, column=0, sticky="ew", pady=1)
 
@@ -86,7 +86,7 @@ class WissenWindow:
         self.e_age.pack(side="left"); self.e_age.bind("<KeyRelease>", lambda e: self.touch()); hilfe.tip(self.e_age, "#w_alter")
         # Werkzeugleiste
         bar = ctk.CTkFrame(self.right, fg_color="transparent"); bar.grid(row=2, column=0, sticky="ew", pady=(12, 6))
-        btn = lambda t, c, acc=False: ctk.CTkButton(bar, text=t, height=30, corner_radius=8, font=G.font(12, "bold" if acc else "normal"),
+        btn = lambda t, c, acc=False: ctk.CTkButton(bar, text=t, height=30, corner_radius=0, font=G.font(12, "bold" if acc else "normal"),
                                                     fg_color=G.ACCENT if acc else G.CARD, hover_color=G.ACCENT_HI if acc else G.BORDER,
                                                     text_color="white" if acc else G.INK, command=c)
         btn("+ Dokumente hinzufügen …", self.add).pack(side="left")
@@ -94,7 +94,7 @@ class WissenWindow:
         self.b_save = btn("Speichern & abgleichen", self.save, acc=True); self.b_save.pack(side="right")
         self.lbl_state = ctk.CTkLabel(bar, text="", font=G.font(11), text_color=G.MUTED); self.lbl_state.pack(side="right", padx=12)
         # Dokumenttabelle
-        tab = self.tab = ctk.CTkScrollableFrame(self.right, fg_color=G.CARD, corner_radius=10)
+        tab = self.tab = ctk.CTkScrollableFrame(self.right, fg_color=G.CARD, corner_radius=0)
         tab.grid(row=3, column=0, sticky="nsew")
         for c, wgt in enumerate((3, 1, 4, 2, 1, 0, 3, 0)): tab.grid_columnconfigure(c, weight=wgt)
         for c, h in enumerate(("Datei", "Kürzel", "Titel", "Art", "Stand", "Pflicht", "Status", "")):
@@ -131,7 +131,7 @@ class WissenWindow:
             f"{'Artikel' if db[0].get('art') == 'recht' else 'Text'} · {db[1]} Stücke · {db[2]} Vektoren"
         hilfe.tip(ctk.CTkLabel(tab, text=st, font=G.font(10), text_color=G.MUTED, anchor="w"),
                   hilfe.WISSEN_SPALTEN["Status"]).grid(row=i, column=6, sticky="w", padx=6)
-        ctk.CTkButton(tab, text="✕", width=28, height=26, corner_radius=6, fg_color="transparent", hover_color=G.BORDER,
+        ctk.CTkButton(tab, text="✕", width=28, height=26, corner_radius=0, fg_color="transparent", hover_color=G.BORDER,
                       text_color=G.MUTED, command=lambda f=d["datei"]: self.remove(f)).grid(row=i, column=7, padx=4)
         for e in (e_k, e_t, e_s): e.bind("<KeyRelease>", lambda ev: self.touch())
         for wd, col in ((e_k, "Kürzel"), (e_t, "Titel"), (o_a, "Art"), (e_s, "Stand")): hilfe.tip(wd, hilfe.WISSEN_SPALTEN[col])
