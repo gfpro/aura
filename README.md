@@ -98,13 +98,17 @@ Speicherplatz prüfen und aufräumen: `py tools\ordner_pruefen.py` zeigt je Ordn
 
 ## Updates
 
-Die ZIP der neuen Version in «Downloads» speichern, AURA schliessen und im AURA-Ordner ausführen:
+Zwei Varianten für die Updates. Die ZIP der neuen Version in «Downloads» speichern, AURA schliessen.
+
+**Variante A:** Paket entzippen und das ursprüngliche AURA-Verzeichnis (C:\aura) überschreiben.
+
+**Variante B:** Über die Kommandozeile im AURA-Verzeichnis (C:\aura) ausführen:
 
 ```
 py tools\patch_einspielen.py
 ```
 
-Die Datenordner `data\`, `models\`, `workflows\` und `wissen\` bleiben erhalten.
+Bei beiden Varianten bleiben die Datenordner `data\`, `models\`, `workflows\` und `wissen\` erhalten.
 
 ## Datenschutz
 
