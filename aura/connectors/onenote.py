@@ -3,6 +3,7 @@
 # Knoten im Baum; neue Abschnitte erben die Wahl des Elternknotens. Standard: AUS (nichts ohne bewusste Wahl).
 # Typbibliothek: in ONENOTE.EXE als Ressource 3, Registrierung nur 32 Bit -> direkt per LoadTypeLibEx laden.
 # ext_id = "<SeitenID>|<lastModifiedTime>" -> geaenderte Seite = neues Objekt; ctx.seen -> Worker entfernt alte Versionen.
+from ..text import titel_datum
 import html, re, winreg
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -116,7 +117,8 @@ class OneNote(Connector):
                 if t: zeilen.append(t)
             text = clean("\n".join(zeilen))
             if titel and not text.startswith(titel): text = f"{titel}\n{text}"
-            yield {"ext_id": ext, "title": titel, "author": autor, "ts": _ts(pg.get("lastModifiedTime")),
+            td = titel_datum(titel)                                       # v196: Datum im Titel gilt vor dem Änderungsdatum
+            yield {"ext_id": ext, "title": titel, "author": autor, "ts": f"{td} 12:00" if td else _ts(pg.get("lastModifiedTime")),
                    "location": n["path"], "body": text, "text": text, "prefix": f"{n['path']} › {titel}: ",
                    "meta": {"page_id": pg.get("ID"), "section_id": n["eid"], "pfad": n["path"]}}
         ctx.seen = seen; ctx.complete = not errors

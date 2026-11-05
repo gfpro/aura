@@ -34,6 +34,12 @@ def connect(path=None):
     fresh = not conn.execute("SELECT 1 FROM sqlite_master WHERE name='chunks_fts'").fetchone()
     conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(text, content='chunks', content_rowid='id')")
     if fresh: rebuild_fts(conn)
+    if not conn.execute("SELECT 1 FROM aura_flags WHERE k='onenote_titeldatum'").fetchone():    # v196: einmalig
+        from .text import titel_datum
+        for i, t in conn.execute("SELECT id, title FROM items WHERE source='onenote'").fetchall():
+            d = titel_datum(t)
+            if d: conn.execute("UPDATE items SET ts=? WHERE id=?", (f"{d} 12:00", i))
+        conn.execute("INSERT INTO aura_flags VALUES('onenote_titeldatum', '1')"); conn.commit()
     return conn
 
 def rebuild_fts(conn):

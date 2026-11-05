@@ -19,6 +19,20 @@ def read_text(p):
         return "\f".join(pg.extract_text() or "" for pg in PdfReader(str(p)).pages)
     return ""
 
+def doc_meta(p):
+    """v206: Dateityp, Erstellt am und Autor. Der Autor kommt aus docx bzw. pdf, sonst leer."""
+    autor = ""
+    try:
+        if p.suffix.lower() == ".docx":
+            m = re.search(r"<dc:creator[^>]*>([^<]*)<", zipfile.ZipFile(p).read("docProps/core.xml").decode("utf-8", "replace"))
+            autor = m.group(1).strip() if m else ""
+        elif p.suffix.lower() == ".pdf":
+            from pypdf import PdfReader
+            autor = str((PdfReader(str(p)).metadata or {}).get("/Author") or "").strip()
+    except Exception: pass
+    return {"autor": autor, "dateityp": p.suffix.lower().lstrip("."),
+            "erstellt_am": datetime.fromtimestamp(p.stat().st_ctime).strftime("%Y-%m-%d %H:%M")}
+
 class FolderDocs(Connector):
     id, label = "folder_docs", "Dokumentordner"
     hint = "Dateien aus einem Ordner (Einstellung: docs_folder)."
@@ -38,5 +52,6 @@ class FolderDocs(Connector):
             try: text = clean(read_text(p))
             except Exception as e: ctx.progress(f"{p.name} uebersprungen: {e}"); continue
             ts = datetime.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
-            yield {"ext_id": ext, "title": p.name, "ts": ts, "body": text, "text": text.replace("\f", "\n\n"),
-                   "prefix": f"{p.stem}: ", "meta": {"path": str(p)}}
+            dm = doc_meta(p)                                  # v206
+            yield {"ext_id": ext, "title": p.name, "author": dm["autor"], "ts": ts, "body": text, "text": text.replace("\f", "\n\n"),
+                   "prefix": f"{p.stem}: ", "meta": {"path": str(p), **dm}}

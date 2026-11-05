@@ -4,6 +4,111 @@ Neueste Version zuerst. Versionsnummern entsprechen `VERSION` in `aura/__init__.
 
 ---
 
+## v207 – 05.11.2026 · Edge und Confluence verbinden
+
+- Edge-Besuche werden über Seiten-ID oder Titel mit der Confluence-Seite verbunden.
+- Trefferliste in «Zusammenhänge»: Edge zuletzt, gleiche Titel nur einmal.
+
+## v206 – 05.11.2026 · Confluence und Dokumente
+
+- Confluence speichert Erstellt von/am, Dokumente Autor, Dateityp und Erstellt am.
+- Graph: Verbindung «erstellte» für Confluence und Dokumente.
+- `tools\\metadaten_nachtrag.py` ergänzt auch bestehende Confluence-Seiten und Dokumente, ohne Texte oder Vektoren zu ändern.
+
+## v205 – 05.11.2026 · Abfolgefragen ohne Sprachmodell
+
+- Abfolgefragen werden direkt aus dem Graphen beantwortet: Mail, Termine, Zeit, Titel und Teilnehmende. Das verhindert verfälschte Daten.
+- Inhaltsfragen laufen weiter über das Sprachmodell.
+
+## v204 – 05.11.2026 · Feinschliff Zusammenhänge und Glossar
+
+- Beschriftungen werden nach gemessener Breite gekürzt.
+- «Mail von BRF» findet die Person über das Glossar.
+- Einträge vom Typ Abkürzung erweitern die Suche nicht mehr, sie gehen nur als Hinweis ans Sprachmodell.
+- Der Graph erkennt nun auch reine Metadaten-Änderungen als veraltet.
+
+## v203 – 05.11.2026 · To, CC und Adressen
+
+- Mail- und Kalender-Konnektor speichern To/CC bzw. Pflicht/optional mit Adresse in `meta`.
+- Neu `tools\\metadaten_nachtrag.py` ergänzt bestehende Objekte ohne neue Texte oder Vektoren.
+- Graph: neue Verbindungen «empfing in CC» und «optional eingeladen»; gleiche Adresse führt Namensvarianten zusammen.
+
+## v202 – 05.11.2026 · Graph: nur ein Aufbau gleichzeitig
+
+- Behebt «table knoten already exists», wenn zwei Aufbauten gleichzeitig liefen oder eine alte Zwischendatei lag.
+
+## v201 – 05.11.2026 · Graph: Confluence und Absenderadresse
+
+- Confluence-Seiten sind über «Geändert von» mit Personen verbunden.
+- Gleiche Absenderadresse führt Namensvarianten zusammen.
+- Neu `tools\\empfaenger_test.py`: misst To, CC und Empfängeradressen ohne Namen auszugeben.
+
+## v200 – 05.11.2026 · Glossar im Titel, Graph immer aktuell
+
+- Inhaltsfragen mit Monat: Objekte mit dem Glossarbegriff im Titel stehen zuerst, höchstens vier.
+- Der Graph wird nach dem Auto-Abgleich und vor Abfolgefragen neu aufgebaut, wenn er nicht mehr zur Datenbank passt.
+
+## v199 – 05.11.2026 · Inhaltsfragen ohne Termine
+
+- Inhaltsfragen mit Monat durchsuchen keine Termine mehr: Lange Teams-Einladungen zählten bisher als Text und verdrängten Notizen.
+
+## v198 – 05.11.2026 · Glossar
+
+- Neu unter **Wissen › Glossar**: Excel oder CSV mit Begriff, Bedeutung, Typ hochladen. Ein Upload ersetzt alles; Speicherort `data\\glossar.json`.
+- Begriffe erweitern die Suche, das Sprachmodell erhält nur passende Einträge, mehrdeutige werden so bezeichnet.
+- Einträge vom Typ Person führen Namensvarianten im Graphen zusammen.
+
+## v197 – 05.11.2026 · Inhaltsfragen: Monat und Text
+
+- Inhaltsfragen mit Monat («Juni 2026», «im Juni») suchen nur in diesem Monat und nur in Quellen mit Text.
+- Bei Inhaltsfragen geben reine Termine und Edge-Einträge keinen Personen-Bonus mehr.
+
+## v196 – 04.11.2026 · OneNote: Datum aus dem Titel
+
+- Beginnt ein Seitentitel mit einem Datum, gilt dieses statt des Änderungsdatums. Bestehende Seiten werden einmalig angepasst.
+- Zusammenhänge: Beschriftungen passen in ihre Kästen.
+
+## v195 – 04.11.2026 · Zusammenhänge: Personen zusammenführen
+
+- Namensvarianten derselben Person werden zu einem Knoten, wenn die Zuordnung eindeutig ist.
+- Vergangene Objekte kommen vor Terminen in der Zukunft.
+- Anordnung als Ellipse, passt sich dem Fenster an.
+
+## v194 – 04.11.2026 · Zusammenhänge im Chat als Standard
+
+- Der Schalter ist neu standardmässig ein und heisst «Zusammenhänge im Chat».
+- Antworten nennen die Zeitfolge und behaupten keinen inhaltlichen Bezug ohne Beleg.
+
+## v193 – 04.11.2026 · Zusammenhänge: Namen, mehrere Termine, kein Folgetermin
+
+- Namen mit Teilen wie `da`, `de`, `van` werden erkannt; Personen passen nur noch als ganze Wörter.
+- Mehrere Folgetermine am selben Tag: Das Sprachmodell soll alle nennen.
+- Ohne Folgetermin antwortet AURA ohne Sprachmodell. Ohne Datum gilt nur die neueste Mail.
+- Schalter «Zusammenhänge im Chat» steht oberhalb von «Skills & Rollen».
+
+## v192 – 04.11.2026 · Zusammenhänge: mehrere Folgetermine
+
+- Abfolgefragen liefern alle Termine des nächsten Tages, höchstens drei, statt nur den ersten.
+
+## v191 – 04.11.2026 · Zusammenhänge: Datum und leere Datei
+
+- Nennt eine Abfolgefrage ein Datum (TT.MM.JJJJ), gilt nur die Mail von diesem Tag.
+- Lesen legt keine leere `graph.db` mehr an.
+
+## v190 – 04.11.2026 · Zusammenhänge im Chat (Versuch)
+
+- Neuer Schalter unter Einstellungen, standardmässig aus: Abfolgefragen mit Person ergänzen Mail und folgenden Termin aus dem Graphen. Alle anderen Fragen bleiben unverändert.
+- `tools\zusammenhang_test.py` misst neu den Weg `chat+graph` und meldet, welche Fragen aus `eval\fragen.txt` die Regel auslösen würden.
+
+## v189 – 04.11.2026 · Zusammenhänge (Metadaten-Graph)
+
+- Neu unter **Wissen › Zusammenhänge**: zeigt rund um eine Person, Mail, einen Termin oder eine Seite die Verbindungen; Filter nach Zeitraum, Quelle und Tiefe.
+- Knopf **Zusammenhänge** unter Chat-Antworten startet beim ersten Treffer.
+- `data\graph.db` entsteht ohne Sprachmodell aus Metadaten und wird bei geänderter Datenbank neu aufgebaut. Suche und Antworten bleiben unverändert.
+- Klick = Details, Doppelklick = neu zentrieren, Mausrad = Zoom, rechte Maustaste halten = verschieben.
+- Bekannte Grenze: «ähnlicher Titel, zeitlich nah» (gestrichelt) ist nur ein Hinweis, kein Beleg.
+- `tools\zusammenhang_test.py` versteht auch Quellen wie `OneNote: [Seite]`.
+
 ## v185–v188 – 04.11.2026 · Chat: offene Fragen, Seitenleiste
 
 **Antworten**

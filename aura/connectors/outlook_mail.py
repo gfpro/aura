@@ -3,7 +3,7 @@
 #      Beim Sync werden alle EntryIDs der gewaehlten Ordner gesammelt (ctx.seen) -> Worker loescht Verschwundenes.
 # v112: Anhaenge (pdf/docx/txt/md, bis anhang_max_mb) als Text: it["anhaenge"] = [(name, text)]; anhang_texte() auch fuer Nachtrag.
 # v73: zusaetzlich «zitat» = zitierter Verlauf (der Worker behaelt daraus nur Neues).
-from .base import Connector, outlook_namespace, outlook_available, iso
+from .base import Connector, outlook_namespace, outlook_available, iso, empfaenger
 from ..text import split_mail
 
 SKIP_DEFAULT = (3, 4, 16, 20, 23)   # Geloescht, Postausgang, Entwuerfe, Sync-Probleme, Junk
@@ -113,11 +113,13 @@ class OutlookMail(Connector):
                     ts = iso(it.ReceivedTime) or iso(it.SentOn) or iso(it.CreationTime)
                     own, zit = split_mail(body, subj)
                     anh = anhang_texte(it, ctx.settings, ctx.progress)                     # v112
+                    emp = empfaenger(it)                                                   # v203
                     yield {"anhaenge": anh, "ext_id": eid, "title": subj, "author": it.SenderName or "",
                            "recipients": "; ".join(x for x in (it.To or "", it.CC or "") if x), "ts": ts,
                            "body": body, "text": own, "zitat": zit,
                            "meta": {"folder": fname, "folder_id": f["eid"], "sender_addr": addr or "",
-                                    "conversation_id": getattr(it, "ConversationID", "") or ""}}
+                                    "conversation_id": getattr(it, "ConversationID", "") or "",
+                                    "to": emp[1], "cc": emp[2]}}
                 except Exception as e:
                     if getattr(e, "args", None) and e.args[0] == ENCRYPTED: continue   # verschluesselt
                     ctx.progress(f"Mail uebersprungen: {e}")

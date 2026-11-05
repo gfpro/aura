@@ -24,6 +24,11 @@ def parse_link(url):
     if m: return base, f'space="{m.group(1)}" and type=page', f"Bereich {m.group(1)}"
     raise ValueError("Link enthält weder /pages/<Nummer> noch /spaces/<KÜRZEL>")
 
+def ersteller(r):
+    """v206: Erstellt von/am aus dem Feld history einer Seite."""
+    h = r.get("history") or {}
+    return {"erstellt_von": (h.get("createdBy") or {}).get("displayName", ""), "erstellt_am": (h.get("createdDate") or "")[:16].replace("T", " ")}
+
 class _Text(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True); self.out = []
@@ -63,7 +68,7 @@ class Confluence(Connector):
             while True:
                 if ctx.cancelled(): return                            # unvollstaendig -> kein Aufraeumen
                 url = (f"{base}/rest/api/content/search?cql={urllib.parse.quote(cql)}&limit={PAGE}&start={start}"
-                       "&expand=version,space,ancestors")
+                       "&expand=version,space,ancestors,history")
                 try: d = _get(url, tok)
                 except Exception as e: errors = True; ctx.progress(f"Confluence {desc}: {e}"); break
                 res = d.get("results") or []
@@ -81,7 +86,8 @@ class Confluence(Connector):
                     yield {"ext_id": ext, "title": r["title"], "author": r["version"].get("by", {}).get("displayName", ""),
                            "ts": (r["version"].get("when") or "")[:16].replace("T", " "), "body": text, "text": text,
                            "prefix": f"{pfad}: ", "location": (r.get("space") or {}).get("name", ""),
-                           "meta": {"url": link_, "page_id": r["id"], "space": (r.get("space") or {}).get("key", ""), "pfad": pfad}}
+                           "meta": {"url": link_, "page_id": r["id"], "space": (r.get("space") or {}).get("key", ""), "pfad": pfad,
+                                    **ersteller(r)}}
                 if len(res) < PAGE: break
                 start += PAGE
         ctx.seen = seen; ctx.complete = not errors and bool(seen)

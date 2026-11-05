@@ -41,3 +41,19 @@ def outlook_available():
 def iso(v):
     try: return v.isoformat(sep=" ", timespec="minutes") if v and v.year > 1990 else ""
     except Exception: return ""
+
+
+def empfaenger(it):
+    """v203: Empfänger einer Mail oder eines Termins als {1: [...], 2: [...]} (1 = To/Pflicht, 2 = CC/optional).
+    Jeder Eintrag: {"n": Name, "a": Adresse oder ""}. Fehler bei einem Empfänger überspringen nur diesen."""
+    out = {1: [], 2: []}
+    for i in range(1, it.Recipients.Count + 1):
+        try:
+            r = it.Recipients.Item(i); typ = r.Type
+            if typ not in out: continue
+            try:
+                u = r.AddressEntry.GetExchangeUser(); a = u.PrimarySmtpAddress if u else r.Address
+            except Exception: a = ""
+            out[typ].append({"n": r.Name or "", "a": (a or "").lower() if "@" in (a or "") else ""})
+        except Exception: continue
+    return out

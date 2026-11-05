@@ -17,6 +17,7 @@ DEFAULTS = {
     "antwort_stufe": "Kurz",                 # v163: Kurz | Normal | Ausführlich
     "llm_max_new": 250,                      # maximale Antwortlaenge in Tokens
     "llm_temperature": 0.0,                  # 0 = immer das wahrscheinlichste Wort (schnell, sachlich)
+    "graph_suche": True,                     # v190: Abfolgefragen über den Graphen ergänzen (v194: Standard ein)
     "llm_int8": True,                        # v125: 8-Bit-Gewichte (Standard); false nur als Gegenprobe
 }
 

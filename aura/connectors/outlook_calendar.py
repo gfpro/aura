@@ -1,6 +1,6 @@
 # aura/connectors/outlook_calendar.py — Termine (inkl. Serien) in einem Zeitfenster.
 from datetime import datetime, timedelta
-from .base import Connector, outlook_namespace, outlook_available, iso
+from .base import Connector, outlook_namespace, outlook_available, iso, empfaenger
 from ..text import clean
 
 class OutlookCalendar(Connector):
@@ -42,9 +42,10 @@ class OutlookCalendar(Connector):
                         who = "; ".join(x for x in (it.RequiredAttendees or "", it.OptionalAttendees or "") if x)
                         text = (f"Termin: {subj}\nWann: {iso(st)} bis {iso(it.End)}\nOrt: {loc}\n"
                                 f"Organisator: {it.Organizer or ''}\nTeilnehmende: {who}\n\n{clean(it.Body or '')}")
+                        emp = empfaenger(it)                         # v203
                         yield {"ext_id": ext, "title": subj, "author": it.Organizer or "", "recipients": who,
                                "ts": iso(st), "location": loc, "body": it.Body or "", "text": text,
-                               "meta": {"end": iso(it.End), "recurring": bool(it.IsRecurring)}}
+                               "meta": {"end": iso(it.End), "recurring": bool(it.IsRecurring), "to": emp[1], "cc": emp[2]}}
                 n += 1
                 if n % 50 == 0: ctx.progress(f"Kalender: {n} Termine geprueft")
             except Exception as e:

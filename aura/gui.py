@@ -188,6 +188,10 @@ class App:
         b = self._grp(menu, "Wissen", "Quellen verbinden und Wissenssammlungen pflegen.")
         self._item(b, "Quellen", self.open_sources, 0)
         hilfe.tip(self._item(b, "Wissenssammlungen", self.open_wissen, 1), hilfe.TEXTE["haupt"]["Wissen"])
+        hilfe.tip(self._item(b, "Zusammenhänge", self.open_graph, 2),                                       # v189
+                  "Zeigt rund um eine Person oder ein Objekt, was zusammenhängt.")
+        hilfe.tip(self._item(b, "Glossar", self.open_glossar, 3),                                           # v198
+                  "Excel mit Begriff, Bedeutung, Typ hochladen. AURA versteht damit Kürzel wie BRF, Projektnamen und Abkürzungen.")
 
         # ---- Workflows
         b = self._grp(menu, "Workflows", "Workflows öffnen, Ergebnisse und Widgets.")
@@ -210,19 +214,22 @@ class App:
         self.auto_lbl.grid(row=1, column=0, sticky="w", padx=(42, 0)); hilfe.tip(self.auto_lbl, "#auto_status")
         self.wissen_var = tk.BooleanVar(value=bool(self.s.get("wissen_chat", False)))       # v28
         self._switch(b, "Wissen im Chat", self.wissen_var, self.toggle_wissen, 2)
+        self.graph_var = tk.BooleanVar(value=bool(self.s.get("graph_suche", True)))        # v190
+        hilfe.tip(self._switch(b, "Zusammenhänge im Chat", self.graph_var, self.toggle_graph, 5),
+                  "Ergänzt bei Fragen wie «Welcher Termin folgte nach der Mail von X?» Mail und Termin aus dem Graphen. Dafür «Zusammenhänge» einmal öffnen.")
         self.rb_var = tk.BooleanVar(value=bool(self.s.get("rechte_leiste", True)))          # v68
         self._switch(b, "Info-Leiste rechts", self.rb_var, self.toggle_rb, 3)
         self.start_var = tk.BooleanVar(value=self.s.get("startseite") == "widgets")          # v82
         self._switch(b, "Beim Start Widgets zeigen", self.start_var, self.set_start, 4)
-        hilfe.tip(self._item(b, "Skills & Rollen", self.open_skills, 5),                                   # v146
+        hilfe.tip(self._item(b, "Skills & Rollen", self.open_skills, 6),                                   # v146
                   "Verfügbare Skills und Rollen ansehen, importieren und freigeben. Neues oder Geändertes ist aus, bis du es freigibst.")
         self.sb_mode = ctk.CTkSegmentedButton(b, values=list(MODI), height=26, font=font(11), command=self.set_mode,  # v69
                                               selected_color=ACCENT, selected_hover_color=ACCENT_HI, unselected_color=SIDE,
                                               unselected_hover_color=BORDER, fg_color=SIDE, text_color=INK)
         self.sb_mode.set(next((k for k, v in MODI.items() if v == self.s.get("darstellung", "system")), "System"))
-        self.sb_mode.grid(row=6, column=0, sticky="ew", pady=(10, 4))
+        self.sb_mode.grid(row=7, column=0, sticky="ew", pady=(10, 4))
         hilfe.tip(self.sb_mode, "Darstellung: Hell, Dunkel oder wie Windows (System). Wird gespeichert.")
-        hilfe.tip(self._item(b, "Log öffnen", self.open_log, 7), hilfe.TEXTE["*"]["#version"])
+        hilfe.tip(self._item(b, "Log öffnen", self.open_log, 8), hilfe.TEXTE["*"]["#version"])
 
         self._grp_open(self.s.get("menu_offen", "Chat") or None, save=False)
 
@@ -872,6 +879,11 @@ class App:
             ctk.CTkButton(row, text="Kontext", width=70, height=24, corner_radius=0, font=font(11), fg_color=CARD,
                           hover_color=BORDER, text_color=INK,
                           command=lambda: self.show_context(hits)).pack(side="left", padx=(6, 0))
+            erster = next((h["item_id"] for h in hits if h.get("item_id") and not h.get("path")), None)   # v189
+            if erster:
+                ctk.CTkButton(row, text="Zusammenhänge", width=110, height=24, corner_radius=0, font=font(11), fg_color=CARD,
+                              hover_color=BORDER, text_color=INK,
+                              command=lambda i=erster: self.open_graph(i)).pack(side="left", padx=(6, 0))
         if is_list and tm:
             ctk.CTkLabel(row, text=f"⏱ {secs(tm['total'])}  ·  ohne Sprachmodell", font=font(11),
                          text_color=MUTED, anchor="w").pack(side="left", padx=(12, 0))
@@ -1204,6 +1216,22 @@ class App:
         from . import skills
         skills.setze_chat_rolle(getattr(self, "_rollen", {}).get(v, ""))
 
+    def open_glossar(self):                                           # v198
+        from .glossar_gui import GlossarFenster
+        w = getattr(self, "glossarwin", None)
+        if w is not None and w.alive(): self.show_view("glossar"); return
+        self.glossarwin = GlossarFenster(self)
+
+    def open_graph(self, item_id=None):                               # v189
+        from .graph_gui import GraphFenster
+        start = f"i{item_id}" if item_id else None
+        w = getattr(self, "graphwin", None)
+        if w is not None and w.alive():
+            self.show_view("graph")
+            if start: w.zentrieren(start)
+            return
+        self.graphwin = GraphFenster(self, start)
+
     def open_anon(self):                                              # v113
         from .anon_gui import AnonWindow
         if getattr(self, "anonwin", None) and self.anonwin.alive(): self.show_view("anon"); return
@@ -1231,6 +1259,10 @@ class App:
         self.s = load_settings(); self.s["wissen_chat"] = bool(self.wissen_var.get()); save_settings(self.s)
         self.status.configure(text="Wissenssammlungen im Chat: " + ("ein" if self.s["wissen_chat"] else "aus"))
         if self.s["wissen_chat"]: self.w.submit("wissen_sync")             # Ordner abgleichen und einbetten
+
+    def toggle_graph(self):                                           # v190
+        self.s = load_settings(); self.s["graph_suche"] = bool(self.graph_var.get()); save_settings(self.s)
+        self.status.configure(text="Zusammenhänge im Chat: " + ("ein" if self.s["graph_suche"] else "aus"))
 
     def toggle_auto(self):
         self.s["autosync"] = bool(self.auto_var.get()); save_settings(self.s)

@@ -256,6 +256,20 @@ class Retriever:
                 except ValueError: continue
                 score[cid] += weight * 0.5 ** (age / half_days)
 
+    MONATE = {"januar": 1, "februar": 2, "märz": 3, "maerz": 3, "april": 4, "mai": 5, "juni": 6, "juli": 7, "august": 8,
+              "september": 9, "oktober": 10, "november": 11, "dezember": 12}
+    INHALT = re.compile(r"\b(inhalte?|inhaltlich|fasse?\b|zusammen(fassung|fassen|gefasst)|besprochen|erkenntniss?e?|ergebniss?e?|thema|themen)\b", re.I)
+    MIT_TEXT = "source NOT IN ('outlook_calendar', 'edge_history')"   # v199: Termine sind oft nur lange Teams-Einladungen
+
+    def monat(self, question, today=None):
+        """v197: «Juni 2026» oder «im Juni» als (von, bis, Bezeichnung). Ohne Jahr: letzter vergangener Monat dieses Namens."""
+        m = re.search(r"\b(%s)\b(?:\s+(\d{4}))?" % "|".join(self.MONATE), question, re.I)
+        if not m: return None
+        d = today or date.today(); mo = self.MONATE[m.group(1).lower()]
+        j = int(m.group(2)) if m.group(2) else (d.year if mo <= d.month else d.year - 1)
+        a, b = date(j, mo, 1), date(j + (mo == 12), mo % 12 + 1, 1)
+        return a.isoformat(), b.isoformat(), f"{m.group(1)} {j}"
+
     def plan(self, conn, question):
         """v101: Filter fuer eine Chatfrage. Rueckgabe {who, intent, items (harter Filter oder None), boost (Bonus-Objekte)}."""
         who = self.author_items(conn, question); it = dict(self.intent(conn, question) or {})
@@ -268,7 +282,24 @@ class Retriever:
         if it.get("range") or it.get("source"): items = self.filter_items(conn, it, items)
         for d, m, y in re.findall(r"\b(\d{1,2})\.(\d{1,2})\.(\d{4})\b", question):   # v110: «vom 07.03.2024» als Bonus
             boost += [r[0] for r in conn.execute("SELECT id FROM items WHERE ts LIKE ? LIMIT 200", (f"{y}-{int(m):02d}-{int(d):02d}%",))]
-        return {"who": who, "intent": it or None, "items": items, "boost": boost or None}
+        vorne = []
+        if self.INHALT.search(question):                                 # v197: Inhaltsfrage: Quellen mit Text vor reinen Terminen
+            mo = None if it.get("range") else self.monat(question)
+            if mo:
+                ids = [r[0] for r in conn.execute(f"SELECT id FROM items WHERE ts >= ? AND ts < ? AND {self.MIT_TEXT} ORDER BY ts LIMIT 2000", mo[:2])]
+                if ids:
+                    items = ids; it["monat"] = mo[2]
+                    try:                                                 # v200: Glossarbegriff im Titel kommt zuerst
+                        from . import glossar
+                        for e in glossar.treffer(question):
+                            vorne += [r[0] for r in conn.execute(f"SELECT id FROM items WHERE ts >= ? AND ts < ? AND {self.MIT_TEXT} AND title LIKE ? "
+                                                                 "ORDER BY ts LIMIT 4", (*mo[:2], f"%{e['begriff']}%"))]
+                    except Exception: pass
+            if boost:
+                ohne = [r[0] for i in range(0, len(boost), 500) for r in conn.execute(
+                    f"SELECT id FROM items WHERE id IN ({','.join(str(int(x)) for x in boost[i:i + 500])}) AND {self.MIT_TEXT}")]
+                boost = ohne
+        return {"who": who, "intent": it or None, "items": items, "boost": boost or None, "vorne": list(dict.fromkeys(vorne))[:4]}
 
     def search(self, conn, query, qvec=None, k=6, mode="hybrid", per_item=1, items=None, prefer=None,
                recency=0.0, half_days=180, quote_weight=1.0, boost=None, boost_weight=0.5):

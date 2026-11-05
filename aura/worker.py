@@ -401,6 +401,8 @@ class Worker(threading.Thread):
         if new and s.get("autosync_embed", True) and self.jobs.empty():
             try: self.job_embed(min_chunk=first, auto=True)
             except Exception as e: log.get().warning(f"Auto-Einbetten: {e}")
+        from . import graph                                              # v200: Graph nach dem Abgleich nachführen
+        threading.Thread(target=graph.nachfuehren, daemon=True).start()
         self.emit("autosync_done", time.strftime("%H:%M"), new)
 
     def job_embed(self, min_chunk=None, auto=False):
@@ -594,6 +596,13 @@ class Worker(threading.Thread):
         if FOLLOW_START.search(question) or (len(w) <= 6 and (FOLLOW_REF.search(question) or not own)): return c["qs"]
         return []
 
+    def _graph_vorne(self, hits, ids):
+        """v190: Belege aus dem Graphen als erste Quellen, ohne Doppelte."""
+        if not ids: return hits
+        vorne = self.retriever.item_hits(self.conn, ids, len(ids))
+        if vorne: self.progress(f"Zusammenhang: {len(vorne)} Quellen aus dem Graphen ergänzt")
+        return vorne + [h for h in hits if h.get("item_id") not in ids]
+
     def job_ask(self, question, backend_id, follow=None, force=None):
         t_start = time.perf_counter()
         from .praesentation import WUNSCH                               # v152: «Mach eine Präsentation …» mit Anhang
@@ -603,12 +612,39 @@ class Worker(threading.Thread):
         asked = question                                                 # Originalfrage (Anzeige, Modell)
         if prev:                                                         # Suche mit dem bisherigen Thema
             question = " ".join(prev[-2:] + [asked]); self.progress(f"Folgefrage zu: {prev[-1][:60]}")
+        try:                                                             # v198: Glossar erweitert nur die Suche
+            from . import glossar
+            question = glossar.erweitern(question)
+        except Exception as e: log.get().info(f"Glossar übersprungen: {e}")
         # ---- Listenmodus ZUERST: ohne Embedding, ohne Filterlogik, ohne Sprachmodell (v18b)
         # v99: Anhang nur, wenn die Frage ihn meint oder keine andere Quelle nennt («Mails», «Termine» -> ohne Anhang)
         use_anh = bool(self.anhang) and (bool(ANH_REF.search(asked)) or not SRC_REF.search(asked))
         who = self.retriever.author_items(self.conn, question)
         # v99: Listenmodus nur mit der aktuellen Frage (nicht mit der Vorfrage verknuepft) und nie bei Auftraegen («Erstelle …»)
-        lst = None if use_anh or force is not None or TASK.search(asked) else listmode.calendar_list(self.conn, asked, who[0] if who else None) \
+        gr_ids = []                                                      # v190: Abfolgefrage über den Graphen (Schalter, Versuch)
+        if load_settings().get("graph_suche") and not use_anh:
+            try:
+                from . import graph
+                if graph.ist_abfolge(asked): graph.nachfuehren()        # v200: nie mit altem Stand antworten
+                gr = graph.abfolge(asked)                               # v193
+                if gr and not gr["ids"]:                                # kein Folgetermin: Antwort ohne Sprachmodell
+                    text = (f"Im Kalender ist nach der Mail vom {gr['ts']} innert {graph.MAX_TAGE} Tagen kein Termin "
+                            "mit dieser Person eingetragen.")
+                    self.emit("answer_start", asked, "liste", ref); self.emit("token", text)
+                    self.emit("sources", self.retriever.item_hits(self.conn, [gr["mail"]], 1),
+                              {"search": time.perf_counter() - t_start, "total": time.perf_counter() - t_start, "list": True})
+                    self.chat = {"qs": (prev + [asked])[-3:], "hits": [], "t": time.time()}
+                    self.progress("Fertig (Zusammenhänge ohne Sprachmodell)"); return
+                gr_ids = gr["ids"] if gr else []
+                if gr_ids and not self.retriever.INHALT.search(asked):   # v205: Fakten nicht vom Sprachmodell abschreiben lassen
+                    text, qs = graph.beschreiben(gr_ids)
+                    t = time.perf_counter() - t_start
+                    self.emit("answer_start", asked, "liste", ref); self.emit("token", text)
+                    self.emit("sources", qs, {"search": t, "total": t, "list": True})
+                    self.chat = {"qs": (prev + [asked])[-3:], "hits": [], "t": time.time()}
+                    self.progress("Fertig (Zusammenhänge ohne Sprachmodell)"); return
+            except Exception as e: log.get().info(f"Graph übersprungen: {e}")
+        lst = None if gr_ids or use_anh or force is not None or TASK.search(asked) else listmode.calendar_list(self.conn, asked, who[0] if who else None) \
             or listmode.next_events(self.conn, asked) or listmode.recent_mails(self.conn, asked) \
             or listmode.web_list(self.conn, asked)
         if lst:
@@ -627,6 +663,7 @@ class Worker(threading.Thread):
         k = max(int(s["top_k"]), 2 * n_llm)                              # v119: genug Kandidaten fuer die Streuung
         pl = {"who": None, "intent": None, "items": None, "boost": None} if use_anh else R.plan(self.conn, question)   # v101
         who, it, items, boost = pl["who"], pl["intent"], pl["items"], pl["boost"]
+        vorne = pl.get("vorne") or []                                    # v200
         info = [f"Person {' '.join(who[1])}"] if who else []
         if it and it.get("range"): info.append(it["range"][2])
         if it and it.get("source"): info.append("nur Termine")
@@ -645,6 +682,7 @@ class Worker(threading.Thread):
         searched = not (it and items is not None and (it.get("recent") or (it.get("range") and len(items) <= k)))   # v110
         if it and items is not None and (it.get("recent") or (it.get("range") and len(items) <= k)):
             hits = R.item_hits(self.conn, items, k)                 # Liste nach Datum statt nach Relevanz
+            hits = self._graph_vorne(hits, gr_ids + vorne)
         else:
             rw = float(s.get("recency_weight", 0.01)) * (3 if it and it.get("recent") else 1)
             hits = R.search(self.conn, question, qvec, k=k, mode=mode, items=items, prefer=R.facet(question), boost=boost,
@@ -660,6 +698,7 @@ class Worker(threading.Thread):
                 if ph:
                     hits = [h for h in hits if h.get("item_id") != neu[0]]; hits[1:1] = ph
                     self.progress(f"Confluence: kürzlich geänderte Seite «{ph[0]['title']}» als Quelle vorgezogen")
+            hits = self._graph_vorne(hits, gr_ids + vorne)
             if hits and not DEADLINE.search(question) and int(s.get("nachbarn_top", 1)):   # v105: bester Treffer mit Nachbarn
                 self._add_neighbours(hits, int(s.get("nachbarn_top", 1)))
             if DEADLINE.search(question):
@@ -728,6 +767,13 @@ class Worker(threading.Thread):
         ctx_q = f"(Folgefrage. Vorherige Frage: {prev[-1]})\n" if prev else ""          # v65: nur die Frage, nie die Antwort
         q_llm = asked if backend_id == "extractive" else \
             f"(Aktuell: {listmode.now_text()}. Vergangenes als vergangen behandeln.)\n{ctx_q}{asked}"
+        if backend_id != "extractive":                                  # v198: nur Begriffe aus Frage und Quellentiteln
+            try: q_llm += glossar.hinweis(asked + " " + " ".join(h.get("title", "") for h in hits[:6]))
+            except Exception: pass
+        if backend_id != "extractive" and gr_ids:                       # v194: Zeitfolge ist kein Beleg für einen Bezug
+            q_llm += ("\n(Die Mail und der oder die Termine stammen aus der Zeitfolge mit dieser Person. Nenne alle Termine dieses "
+                      "Tages mit Uhrzeit und Titel, wähle keinen aus. Schreibe «zeitlich folgte» und nicht «wurde gefolgt von». "
+                      "Sage in einem Satz, dass ein inhaltlicher Bezug zur Mail damit nicht belegt ist, ausser die Quellen zeigen ihn.)")
         if backend_id != "extractive" and DEADLINE.search(asked):
             q_llm += ("\n(Die Quellen sind nach Datum sortiert, neueste zuerst. Werden mehrere Fristen genannt, gilt die "
                       "aus der neuesten Mail; ältere nur als verschoben erwähnen. Frist = Datum nach «spätestens», "

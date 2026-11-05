@@ -86,3 +86,18 @@ def verlauf_neu(quoted, known):
         if not any(h and h not in kn for h in hs): continue
         out.append("\n\n".join(keep)); new |= {h for h in hs if h and h not in kn}
     return "\n\n".join(out), new
+
+
+_TITEL_ISO = re.compile(r"^\s*(\d{4})\.(\d{2})\.(\d{2})\b")
+_TITEL_CH = re.compile(r"^\s*(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})\b")
+
+def titel_datum(titel):
+    """v196: Datum am Anfang eines Titels («2026.06.11 - …», «02.06.2026 - …», «05.03.24 - …») als JJJJ-MM-TT, sonst ''."""
+    m = _TITEL_ISO.match(titel or "")
+    if m: j, mo, t = m.groups()
+    else:
+        m = _TITEL_CH.match(titel or "")
+        if not m: return ""
+        t, mo, j = m.groups(); j = j if len(j) == 4 else "20" + j
+    if not (1 <= int(mo) <= 12 and 1 <= int(t) <= 31): return ""
+    return f"{j}-{int(mo):02d}-{int(t):02d}"
