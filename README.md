@@ -2,7 +2,7 @@
 
 Ein lokales «zweites Gehirn» für Windows: AURA durchsucht deine Outlook-Mails und -Termine, den Edge-Verlauf und Dokumentordner und beantwortet Fragen dazu – vollständig auf dem eigenen Rechner. Dazu kommen eine Workflow-Engine, die Word-Vorlagen aus Unterlagen ausfüllt und grafisch zusammengebaut wird, sowie Präsentationen aus angehängten Dokumenten.
 
-Stand: v188 (November 2026) · Änderungen: [CHANGELOG.md](CHANGELOG.md)
+Stand: v212 (November 2026) · Änderungen: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
@@ -109,6 +109,26 @@ py tools\patch_einspielen.py
 ```
 
 Bei beiden Varianten bleiben die Datenordner `data\`, `models\`, `workflows\` und `wissen\` erhalten.
+
+**Ab v208 prüft `patch_einspielen.py` jedes Paket vollständig, bevor es eine Datei ändert:** Pfade (kein `..`, kein Laufwerk/UNC, kein `\`, kein `:`/ADS, keine Gerätenamen, keine Links aus `C:\aura` hinaus), Doppelte, Grössen und ZIP-Bomben. `data\`, `logs\`, `_sicherung\` und `.git\` sind gesperrt. Bei einem Fehler wird alles zurückgerollt. Zusätzlich verlangt das Skript eine **Signatur** (`_manifest.json` + `_manifest.sig`, Ed25519). Den öffentlichen Schlüssel verteilt die IT per Richtlinie: `HKLM\SOFTWARE\Policies\AURA`, Wert `UpdateSchluessel` (hex). Signiert wird nur auf dem Release-Rechner mit `py tools\patch_signieren.py`; der geheime Schlüssel liegt nie in `C:\aura` oder in Git. Solange kein Schlüssel verteilt ist: `py tools\patch_einspielen.py --ohne-signatur` – dann ist die Herkunft **nicht** geprüft (nur Pakete aus sicherer Quelle).
+
+## Sicherheit (v208/v212)
+
+- **Confluence:** nur `https://` und nur freigegebene Hosts (Standard `confluence.bit.admin.ch`; Liste per Richtlinie `HKLM\SOFTWARE\Policies\AURA`, Wert `ConfluenceHosts`). Links mit Port oder Zugangsdaten werden abgelehnt, Weiterleitungen auf andere Hosts ebenfalls. Der Token geht nur an den freigegebenen Host.
+- **Confluence-Token:** verschlüsselt mit Windows DPAPI (nur dein Windows-Konto kann ihn lesen), Datei `data\confluence_token.dpapi`. Setzen: `py tools\confluence_token_setzen.py`. Eine alte `data\confluence_token.txt` wird beim ersten Sync verschlüsselt und danach gelöscht; klappt die Verschlüsselung nicht, wird der Token nicht verwendet (kein Klartext-Rückfall).
+- **Workflows** lesen nur Dateien aus dem eigenen Workflow-Ordner und die Dateien, die du beim Start ausgewählt hast. Vorlagen müssen im Workflow-Ordner liegen. Recap-Ordner nur innerhalb von `C:\aura`.
+- **Workflow-Pakete:** Manifest und Sammlungsnamen werden vollständig geprüft; Import gemeinsamer Sammlungen wird bei Fehlern zurückgerollt.
+- **Grenzen:** ZIP max. 20 000 Einträge, 512 MB je Datei, 2 GB gesamt, Kompressionsverhältnis 200; Dokumente max. 200 MB, PDF max. 3 000 Seiten bzw. 300 s Textextraktion, Word-Inhalt max. 64 MB (`aura\sicherheit.py`).
+- **Quellen im Sprachmodell** sind als Daten markiert; Anweisungen darin sollen ignoriert werden. Das senkt das Risiko von Prompt Injection, verhindert es aber nicht sicher – Ergebnisse zu Freigaben, Beträgen, Fristen und Zuständigkeiten immer an der Quelle prüfen.
+- **Skills:** der Baustein «Mail an mich» läuft in einem Skill nur, wenn der Skill freigegeben ist und das Recht `extern` deklariert. Die Freigabe-Prüfsumme (SHA-256) zeigt Änderungen an, belegt aber **nicht** den Autor.
+- **Betriebsvoraussetzungen (prüft AURA nicht selbst):** persönliches Windows-Konto; Festplattenverschlüsselung (BitLocker o.ä.); lokaler, nicht synchronisierter Installationsordner; Netzwerkzugriff nur auf den Confluence-Endpunkt. NTFS-Rechte der Datenordner auf «nur ich + SYSTEM + Administratoren» setzen: `py tools\datenordner_absichern.py --setzen` (sichert die alten Rechte; Rückgängig mit `--zurueck <Sicherungsdatei>`).
+- **Live-Quellen (Acta Nova, Intranet, SharePoint):** nur freigegebene https-Origins, exakt verglichen (Schema, Host, Port) – Standard `www.vbs.gever.admin.ch`, `intranet.ar.admin.ch`, `portal.collab.admin.ch`; per Richtlinie `HKLM\SOFTWARE\Policies\AURA`, Werte `LiveOrigins_actanova`, `LiveOrigins_intranet`, `LiveOrigins_sharepoint`. Eingetragene URLs, Suchtreffer, neue Tabs und Navigationen ausserhalb davon werden abgelehnt; vor dem Auslesen wird die aktuelle Seite erneut geprüft (Redirects).
+- **Datenfluss bei eingeschalteten Live-Quellen:** der Suchbegriff geht an die jeweilige Quelle (nur diese), die gelesenen Treffer/Seiten bleiben im Arbeitsspeicher und gehen nur ans lokale Sprachmodell; nichts an externe Dienste. AURA ist dann nicht mehr vollständig offline.
+- **AURA-Edge:** eigenes Profil `data\edge_profil`; Edge wählt den Debug-Port selbst, AURA verbindet nur, wenn die Browser-ID im Profil passt (kein Port 9222, keine fremde Instanz). Dialoge: nur Hinweise («alert») werden bestätigt, Rückfragen («confirm», «prompt», «Seite verlassen?») immer abgelehnt. Edge schliesst nach 60 min ohne Nutzung (Einstellung `edge_leerlauf_min`, 0 = nie) und beim Beenden von AURA; bleibt Edge hängen, wird das im Log gemeldet. **Restrisiko:** die Debug-Schnittstelle hat keine Anmeldung – solange die AURA-Edge offen ist, kann jeder Prozess auf dem Gerät sie bedienen.
+- **Was im Edge-Profil bleibt:** Cookies, Local Storage, IndexedDB und Einstellungen (für SSO nötig). Beim Beenden gelöscht: Caches, Sitzungsdaten, Verlauf der AURA-Edge. Schliessen ist **kein** Logout am Server. Das Profil liegt unter `data\` und wird von `tools\datenordner_absichern.py` mitgeschützt.
+- **Diagnose** `tools\edge_test.py` nutzt ein eigenes Profil (`data\edge_profil_diagnose`) und Port 9333 und schreibt Seiteninhalte nach `tools\` – danach löschen.
+- **Grenzen Live-Quellen:** Intranet 50 Treffer, 200 000 Zeichen je Seite, 200 Textstellen; SharePoint 40 Treffer, 2000 Zeichen je Feld; Acta-Nova-Export 50 MB, 20 000 Zeilen, 200 Spalten, keine DTD/Entities.
+- Tests: `py -m unittest discover -s tests -v`.
 
 ## Datenschutz
 

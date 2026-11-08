@@ -4,6 +4,59 @@ Neueste Version zuerst. Versionsnummern entsprechen `VERSION` in `aura/__init__.
 
 ---
 
+## v212 – 08.11.2026 · Sicherheits-Review v21 (V20-01 bis V21-05)
+
+- Übernommen aus v208 (dort für v20 erstellt): Update-Prüfung mit Signatur und Rollback, Confluence-Host-Allowlist + DPAPI-Token, Workflow-Lese-Freigaben, Manifest-Prüfung mit transaktionalem Import, ZIP-/Dokumentgrenzen, Prompt-Abgrenzung, Skill-Rechte (SHA-256).
+- Edge/CDP: Port durch Edge gewählt, Bindung an die Browser-ID im AURA-Profil, kein Fallback 9222, WebSocket nur zu 127.0.0.1:<Port>, Leerlauf-Abschaltung, Beenden mit Kontrolle und Meldung.
+- Dialoge: nur «alert» bestätigen, «confirm»/«prompt»/«beforeunload» ablehnen (auch bei Timeout).
+- Live-Quellen: zentrale Origin-Allowlist `aura\engine\herkunft.py` (Richtlinie `LiveOrigins_*`) für eingetragene URLs, Suchtreffer, Tabs, Navigation und vor dem Auslesen; GUI nutzt dieselbe Prüfung.
+- Grenzen: Intranet-Seiten/Treffer/Textstellen, SharePoint-Treffer, Acta-Nova-XLSX (Grösse, Zeilen, Spalten, Strings, keine DTD).
+- Edge-Profil: Verlauf/Sitzungsdaten werden beim Beenden gelöscht; Cookies/Local Storage bleiben bewusst (SSO).
+- Diagnose `tools\edge_test.py` mit eigenem Profil/Port. Versionen in `aura\__init__.py`, README und CHANGELOG angeglichen.
+- Neu: `aura\engine\herkunft.py`, `tests\test_live.py`.
+
+## v211 – 06.–08.11.2026 · Live-Quellen: Acta Nova, Intranet, SharePoint
+
+**Live-Quellen (neu)**
+- Drei Quellen, die **bei der Frage** durchsucht werden – nichts wird gespeichert. Ein/aus über die Schalter **Acta Nova**, **Intranet**, **SharePoint** im Chat (grüner Punkt = ein). Einrichten unter **Wissen → Quellen → Live-Quellen**.
+- Eigenes Edge-Fenster von AURA (Profil `data\edge_profil`): Anmeldung mit Karte/PIN bzw. Windows-Konto durch den Menschen, AURA arbeitet danach minimiert im Hintergrund. Nur lesen – AURA speichert, ändert oder erstellt nichts in den Systemen.
+- **Antwortaufbau:** zuerst «Lokal», dann je Live-Quelle eine Trefferliste (sofort lesbar), am Schluss **eine** Zusammenfassung über alle Quellen. Belege der Zusammenfassung stehen vorne in der Quellenliste, die übrigen Treffer neueste zuerst. Dauer mit allen Quellen rund 150 statt 380 s; das Sprachmodell bleibt geladen.
+
+**Acta Nova**
+- Suche in Dossiertiteln und im Volltext, alle Treffer über den Excel-Export (Datei wird sofort gelöscht); «Geschäftsobjektstatus» wird geleert, damit auch Abgeschlossenes gefunden wird.
+- Ranking per Regel: Begriff im Namen/Dossier, Nähe zum **Ordnungssystem**, Ablageort in beiden Suchen, Aktualität, eigenes Team, Mail-Kontakte. Ergebnis: Top 5 Ablageorte mit Aktenzeichen und Ordnungsposition; bei «neuste …» zuerst die neuesten Dokumente.
+- Vorschlag «Ablage gemäss Ordnungssystem»; Eingrenzen mit «nur 044» ohne neue Suche; Klick auf eine Quelle öffnet das Dossier.
+- Ordnungssystem als Excel-Export aus Acta Nova einlesen, ansehen, entfernen (`wissen\ordnungssystem.csv`); funktioniert für jedes Amt.
+- Stabilität: jede Suche startet auf der Startseite (keine volle Brotkrümelleiste mehr), abgelaufene Sitzung wird in höchstens 15 s erkannt; optional «Sitzung offen halten».
+
+**Intranet**
+- Adresse unter Wissen (alle VBS-Intranets mit gleicher Suche). Treffer werden nach Bedeutung neu gewichtet, die vier besten Seiten parallel gelesen.
+
+**SharePoint**
+- Suche über alle Sites mit Berechtigung (Antwort in unter einer Sekunde); eingetragene Sites werden bevorzugt. Jeder Treffer mit **Amt und Site**, Liste nach Amt gruppiert.
+
+**Oberfläche**
+- Wissen › Quellen: neuer Abschnitt «Live-Quellen» mit «Einrichten» je Quelle.
+- Sendetaste aus dem Logo (Dreieck, gedreht); während der Antwort Stopp-Taste.
+- Grüne Punkte für aktive Quellen (Schalter und rechte Leiste).
+- «Entwickelt von armasuisse» mit Menü (Entwickler, Amt, R+S IT).
+- Die Ansicht springt beim Schreiben nicht mehr nach unten, wenn man hochgescrollt hat.
+- «Max. Quellen» gilt auch für Listen ohne Sprachmodell.
+- Satz bei fehlenden Treffern je Quelle («Dazu finde ich in den lokalen Quellen nichts.» usw.).
+
+**Sicherheit**
+- Debug-Port des AURA-Edge: zufälliger Port je Start, nur lokal, Edge wird beim Beenden von AURA geschlossen. Restrisiko: Während AURA läuft, kann ein anderes Programm desselben Kontos die angemeldeten Sitzungen über den Port nutzen.
+- Seiten-Cache des AURA-Edge auf 50 MB begrenzt und beim Beenden gelöscht (keine Kopien von Acta-Nova- oder SharePoint-Seiten auf der Festplatte).
+
+**Neue Dateien und Einstellungen**
+- `aura/engine/edge.py`, `actanova.py`, `actanova_rang.py`, `ordnungssystem.py`, `intranet.py`, `sharepoint.py`; Testskripte `tools\edge_test.py`, `edge_test2.py`, `actanova_suche.py`, `intranet_test.py`, `sharepoint_test.py`.
+- `data\settings.json`: `actanova`, `actanova_url`, `actanova_llm`, `actanova_wach`, `intranet`, `intranet_url`, `sharepoint`, `sharepoint_sites`, `live_mit_lokal`, `edge_beim_beenden_schliessen`.
+- Ordner `data\edge_profil` (Edge-Profil von AURA) und `wissen\ordnungssystem.csv` gehören nicht ins GitHub-Repository.
+
+**Bekannte Grenzen**
+- Acta Nova: Nach einer Pause läuft die Sitzung ab, dann ist die PIN nötig. Rund 40–80 s je Suche (Acta Nova selbst braucht 2–9 s je Seitenwechsel).
+- Die Zusammenfassung stützt sich bei Acta Nova nur auf Titel, nicht auf Inhalte.
+
 ## v207 – 05.11.2026 · Edge und Confluence verbinden
 
 - Edge-Besuche werden über Seiten-ID oder Titel mit der Confluence-Seite verbunden.

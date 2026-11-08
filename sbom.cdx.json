@@ -1,0 +1,129 @@
+{
+ "bomFormat": "CycloneDX",
+ "specVersion": "1.5",
+ "serialNumber": "urn:uuid:83f33b18-12b7-4ecc-8100-669bca56a225",
+ "version": 1,
+ "metadata": {
+  "component": {
+   "type": "application",
+   "name": "AURA",
+   "version": "20261108v212"
+  },
+  "properties": [
+   {
+    "name": "aura:hinweis",
+    "value": "Python-Standardbibliothek (CPython 3.10+) nicht aufgeführt; Tests von comtypes nicht Teil der Laufzeit"
+   }
+  ]
+ },
+ "components": [
+  {
+   "type": "library",
+   "name": "comtypes",
+   "version": "1.4.17",
+   "purl": "pkg:pypi/comtypes@1.4.17",
+   "description": "Outlook/COM-Zugriff",
+   "properties": [
+    {
+     "name": "aura:pfad",
+     "value": "vendor/comtypes"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "customtkinter",
+   "version": "6.0.0",
+   "purl": "pkg:pypi/customtkinter@6.0.0",
+   "description": "Oberfläche",
+   "properties": [
+    {
+     "name": "aura:pfad",
+     "value": "vendor/customtkinter"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "darkdetect",
+   "version": "0.8.0",
+   "purl": "pkg:pypi/darkdetect@0.8.0",
+   "description": "Abhängigkeit customtkinter",
+   "properties": [
+    {
+     "name": "aura:pfad",
+     "value": "vendor/darkdetect"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "packaging",
+   "version": "26.3",
+   "purl": "pkg:pypi/packaging@26.3",
+   "description": "Abhängigkeit customtkinter",
+   "properties": [
+    {
+     "name": "aura:pfad",
+     "value": "vendor/packaging"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "typing_extensions",
+   "version": "unbekannt (vendor/typing_extensions.py)",
+   "description": "Abhängigkeit",
+   "properties": [
+    {
+     "name": "aura:pfad",
+     "value": "vendor/typing_extensions.py"
+    }
+   ],
+   "hashes": [
+    {
+     "alg": "SHA-256",
+     "content": "4040ca1a1ecbee00d1385c12a93084d1c5bd46f0b774f07e5ae7e91c4f55e696"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "pypdf",
+   "version": "6.19.0",
+   "purl": "pkg:pypi/pypdf@6.19.0",
+   "description": "PDF-Text (Wheel)",
+   "properties": [
+    {
+     "name": "aura:pfad",
+     "value": "vendor/wheels/pypdf-6.19.0-py3-none-any.whl"
+    }
+   ],
+   "hashes": [
+    {
+     "alg": "SHA-256",
+     "content": "7e5d6e730e7dae87d560a2cee218b852f6498c8be61966f3cd02ead971e48d14"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "typing_extensions",
+   "version": "4.16.0",
+   "purl": "pkg:pypi/typing-extensions@4.16.0",
+   "description": "Abhängigkeit pypdf (Wheel)",
+   "properties": [
+    {
+     "name": "aura:pfad",
+     "value": "vendor/wheels/typing_extensions-4.16.0-py3-none-any.whl"
+    }
+   ],
+   "hashes": [
+    {
+     "alg": "SHA-256",
+     "content": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8"
+    }
+   ]
+  }
+ ]
+}
