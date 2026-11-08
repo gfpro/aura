@@ -11,3 +11,8 @@ __pycache__/
 *.pyc
 wissen/ordnungssystem.csv
 aura/engine/ordnungssystem_ar.csv
+tools/*
+!tools/patch_einspielen.py
+!tools/patch_signieren.py
+!tools/ordner_pruefen.py
+!tools/wf_run.py
