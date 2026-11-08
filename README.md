@@ -154,9 +154,9 @@ Bei beiden Varianten bleiben die Datenordner `data\`, `models\`, `workflows\` un
 | `tools\` | Updates, Workflows, Speicherplatz | ja (nur `*.py`) |
 | `vendor\` | mitgelieferte Pakete | ja |
 | `anleitung\` | Anleitungen | ja |
-| `rollen\` | Rollen für Chat und Sprachmodell-Schritte (Markdown) | nur nicht vertrauliche |
-| `pruefpakete\` | fertige Prüfpunkte für Prüflisten | ja |
-| `workflows\` | Workflow-Pakete (`workflow.json`, Vorlagen, Wissen, Läufe) | nur `workflow.json` (Vorlagen nach Prüfung) |
+| `rollen\` | Rollen für Chat und Sprachmodell-Schritte (Markdown) | nein |
+| `pruefpakete\` | fertige Prüfpunkte für Prüflisten | nein |
+| `workflows\` | Workflow-Pakete (`workflow.json`, Vorlagen, Wissen, Läufe) | nur `workflow.json` (Vorlagen auf Confluence) |
 | `wissen\` | gemeinsame Wissenssammlungen | nur `LIESMICH.md` |
 | `models\` | Sprach- und Embedding-Modelle | nein |
 | `data\`, `logs\` | Datenbank, Einstellungen, Protokolle – entstehen beim ersten Start | nein |
