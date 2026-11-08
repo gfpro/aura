@@ -126,7 +126,6 @@ Bei beiden Varianten bleiben die Datenordner `data\`, `models\`, `workflows\` un
 - **Datenfluss bei eingeschalteten Live-Quellen:** der Suchbegriff geht an die jeweilige Quelle (nur diese), die gelesenen Treffer/Seiten bleiben im Arbeitsspeicher und gehen nur ans lokale Sprachmodell; nichts an externe Dienste. AURA ist dann nicht mehr vollständig offline.
 - **AURA-Edge:** eigenes Profil `data\edge_profil`; Edge wählt den Debug-Port selbst, AURA verbindet nur, wenn die Browser-ID im Profil passt (kein Port 9222, keine fremde Instanz). Dialoge: nur Hinweise («alert») werden bestätigt, Rückfragen («confirm», «prompt», «Seite verlassen?») immer abgelehnt. Edge schliesst nach 60 min ohne Nutzung (Einstellung `edge_leerlauf_min`, 0 = nie) und beim Beenden von AURA; bleibt Edge hängen, wird das im Log gemeldet. **Restrisiko:** die Debug-Schnittstelle hat keine Anmeldung – solange die AURA-Edge offen ist, kann jeder Prozess auf dem Gerät sie bedienen.
 - **Was im Edge-Profil bleibt:** Cookies, Local Storage, IndexedDB und Einstellungen (für SSO nötig). Beim Beenden gelöscht: Caches, Sitzungsdaten, Verlauf der AURA-Edge. Schliessen ist **kein** Logout am Server. Das Profil liegt unter `data\` und wird von `tools\datenordner_absichern.py` mitgeschützt.
-- **Diagnose** `tools\edge_test.py` nutzt ein eigenes Profil (`data\edge_profil_diagnose`) und Port 9333 und schreibt Seiteninhalte nach `tools\` – danach löschen.
 - **Grenzen Live-Quellen:** Intranet 50 Treffer, 200 000 Zeichen je Seite, 200 Textstellen; SharePoint 40 Treffer, 2000 Zeichen je Feld; Acta-Nova-Export 50 MB, 20 000 Zeilen, 200 Spalten, keine DTD/Entities.
 - Tests: `py -m unittest discover -s tests -v`.
 
@@ -152,7 +151,7 @@ Bei beiden Varianten bleiben die Datenordner `data\`, `models\`, `workflows\` un
 | --- | --- | --- |
 | `AURA.pyw` | Startskript (Doppelklick) | ja |
 | `aura\` | Programm: Oberfläche, Suche, Konnektoren, GPU-Engine, Workflow-Engine, Präsentationsvorlage (`assets\`) | ja |
-| `tools\` | Kommandozeilenwerkzeuge (`wf_run.py`, `ordner_pruefen.py`, Updates, Messungen) | ja (nur `*.py`, ohne `tools\lxml_test\`) |
+| `tools\` | Updates, Workflows, Speicherplatz | ja (nur `*.py`) |
 | `vendor\` | mitgelieferte Pakete | ja |
 | `anleitung\` | Anleitungen | ja |
 | `rollen\` | Rollen für Chat und Sprachmodell-Schritte (Markdown) | nur nicht vertrauliche |
