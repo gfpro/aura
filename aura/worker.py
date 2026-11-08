@@ -437,6 +437,9 @@ class Worker(threading.Thread):
 
     def _llm(self, backend_id):
         """Liefert das (geladene) Sprachmodell; nur eines ist gleichzeitig im GPU-Speicher."""
+        if backend_id == "extractive" and getattr(self, "_nur_lokal", False):   # Liste im Live-Abschnitt: Modell NICHT entladen
+            fac = dict((i, f) for i, _, f in discover(MODELS)).get("extractive")
+            be = fac(); be.progress = self.progress; return be
         cur = getattr(self, "llm", None)
         if cur and cur[0] != backend_id: cur[1].unload(); self.llm = cur = None
         if not cur:
@@ -449,10 +452,11 @@ class Worker(threading.Thread):
         return be
 
     def _llm_state(self):
+        if getattr(self, "_nur_lokal", False): return                   # innerer Listen-Aufruf aendert die Anzeige nicht
         cur = getattr(self, "llm", None)
         if cur and cur[0] != "extractive" and cur[1].loaded():
             self.emit("llm_state", "ready", f"bereit · geladen in {getattr(cur[1], 'load_s', 0):.0f} s")
-        elif cur and cur[0] == "extractive": self.emit("llm_state", "none", "kein Laden noetig")
+        elif cur and cur[0] == "extractive": self.emit("llm_state", "none", "kein Laden nötig")
         else: self.emit("llm_state", "off", "nicht geladen")
 
     def job_load_llm(self, backend_id):
@@ -603,6 +607,72 @@ class Worker(threading.Thread):
         if vorne: self.progress(f"Zusammenhang: {len(vorne)} Quellen aus dem Graphen ergänzt")
         return vorne + [h for h in hits if h.get("item_id") not in ids]
 
+    def _live_antworten(self, live, asked, backend_id, prev, ref, t_start, question=None, follow=None):
+        """Eine Antwort, mehrere Abschnitte: jede Quelle liefert sofort ihre Trefferliste (ohne Sprachmodell),
+        am Schluss EINE Zusammenfassung über die besten Treffer aller Quellen. Quellennummern durchgehend:
+        die Belege der Zusammenfassung stehen vorne in der Quellenliste."""
+        orig, abschnitte, meta, start, kopf = self.emit, [], {}, [False], [None]
+        def emit(kind, *a):
+            if kind == "answer_start":
+                if start[0]: return
+                start[0] = True; orig(kind, *a)
+                if kopf[0]: orig("token", kopf[0]); kopf[0] = None
+                return
+            if kind == "sources":
+                abschnitte[-1][1].extend(a[0] or []); meta.update(a[1] if len(a) > 1 and a[1] else {}); return
+            if kind == "llm_state": return                               # Anzeige bleibt beim gewaehlten Modell
+            orig(kind, *a)
+        if backend_id != "extractive":
+            orig("llm_state", "ready", "fasst am Schluss zusammen")
+        teile = ([("Lokal", None)] if load_settings().get("live_mit_lokal", True) else []) + live
+        self.emit = emit
+        try:
+            for name, fn in teile:
+                if self.cancel.is_set(): break
+                abschnitte.append((name, []))
+                titel = f"— {name} —\n"
+                if start[0]: orig("token", "\n\n" + titel)
+                else: kopf[0] = titel
+                try:
+                    if fn is None:
+                        self._nur_lokal = True
+                        try: self.job_ask(question or asked, "extractive", follow, None)     # Liste, ohne Modell
+                        finally: self._nur_lokal = False
+                    else:
+                        fn(self, asked, "extractive", prev, ref, t_start)                   # Liste, ohne Modell
+                except Exception as e:
+                    if not start[0]: emit("answer_start", asked, "live", ref)
+                    orig("token", f"{name}: Fehler ({e})")
+                if kopf[0] and not start[0]: kopf[0] = None
+        finally:
+            self.emit = orig; self._nur_lokal = False
+        # Belege fuer die Zusammenfassung: je Quelle die besten 2 mit Text (Acta Nova liefert nur Titel -> nicht dabei)
+        belege, rest = [], []
+        for name, hs in abschnitte:
+            mit = [h for h in hs if (h.get("text") or "").strip()]
+            for h in mit[:2]:
+                h = dict(h); h["title"] = f"{h.get('title') or ''} [{name}]"; belege.append(h)
+        ids = {id(h) for h in belege}
+        for name, hs in abschnitte:
+            rest.extend(h for h in hs)
+        if belege and backend_id != "extractive" and not self.cancel.is_set():
+            orig("token", "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nZUSAMMENFASSUNG ÜBER ALLE QUELLEN\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+            try:
+                st = load_settings()
+                be = self._llm(backend_id); be.settings = dict(st, llm_top_k=len(belege), leer_satz="Dazu finde ich in den Quellen nichts."); be.used = None
+                t2 = time.perf_counter()
+                be.generate(f"{asked}\n(Die Quellen stammen aus verschiedenen Systemen; die Herkunft steht in eckigen "
+                            f"Klammern im Titel. Nenne sie bei jeder Aussage.)", belege, lambda x: orig("token", x), self.cancel.is_set)
+                log.get().info(f"DIAG live zusammenfassung llm={time.perf_counter() - t2:.1f}s belege={len(belege)}")
+            except Exception as e:
+                orig("token", f"(Zusammenfassung übersprungen: {e})")
+        titel_belege = {(h.get("item_id"), h.get("chunk_id"), (h.get("title") or "").rsplit(" [", 1)[0]) for h in belege}
+        weitere = [h for h in rest if (h.get("item_id"), h.get("chunk_id"), h.get("title")) not in titel_belege]
+        weitere.sort(key=lambda h: (h.get("ts") or "")[:10], reverse=True)   # Belege vorne (Nummern!), Rest: neuste zuerst
+        meta["total"] = time.perf_counter() - t_start; meta["list"] = False
+        orig("sources", belege + weitere, meta)
+        self._llm_state()
+
     def job_ask(self, question, backend_id, follow=None, force=None):
         t_start = time.perf_counter()
         from .praesentation import WUNSCH                               # v152: «Mach eine Präsentation …» mit Anhang
@@ -610,6 +680,21 @@ class Worker(threading.Thread):
         prev = self._followup(question, load_settings(), follow)         # v65/v67
         ref = prev[-1] if prev else ""                                   # v67: Anzeige «Bezug: …» in der Oberflaeche
         asked = question                                                 # Originalfrage (Anzeige, Modell)
+        try:                                                             # Live-Quellen (Schalter im Chat): alle eingeschalteten
+            from .engine import actanova_rang, intranet
+            st = load_settings()
+            if getattr(self, "_nur_lokal", False): raise StopIteration      # innerer Aufruf: nur lokaler Index
+            if force is None and actanova_rang.ist_eingrenzung(asked, self):
+                return actanova_rang.antworten(self, asked, backend_id, prev, ref, t_start)
+            live = []
+            if force is None and intranet.soll_suchen(asked, st): live.append(("Intranet", intranet.antworten))
+            if force is None and st.get("actanova", False): live.append(("Acta Nova", actanova_rang.antworten))
+            from .engine import sharepoint
+            if force is None and sharepoint.soll_suchen(asked, st): live.append(("SharePoint", sharepoint.antworten))
+            if live:
+                return self._live_antworten(live, asked, backend_id, prev, ref, t_start, question, follow)
+        except StopIteration: pass
+        except Exception as e: log.get().info(f"Live-Quellen übersprungen: {e}")
         if prev:                                                         # Suche mit dem bisherigen Thema
             question = " ".join(prev[-2:] + [asked]); self.progress(f"Folgefrage zu: {prev[-1][:60]}")
         try:                                                             # v198: Glossar erweitert nur die Suche
@@ -788,6 +873,8 @@ class Worker(threading.Thread):
         if backend_id != "extractive" and "qwen3" in lab and "instruct" not in lab:
             q_llm += " /no_think"        # Qwen3-Hybridmodelle (z.B. 8B): Denkteil abschalten, sonst frisst er llm_max_new
         hw = self._confluence_hinweis(question, int(s.get("confluence_hinweis_tage", 14)))[0]   # v121: nur Anzeige
+        if backend_id == "extractive":                                  # Liste ohne Modell: Anzahl = Regler «Max. Quellen»
+            hits = hits[:max(1, int(s.get("llm_top_k", 4)))]
         try:
             be.generate(q_llm, hits, lambda t: self.emit("token", t), self.cancel.is_set)
             if hw: self.emit("token", "\n\n" + hw)

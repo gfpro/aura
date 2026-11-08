@@ -4,19 +4,28 @@ from datetime import datetime
 from pathlib import Path
 from .base import Connector
 from ..text import clean
+from .. import sicherheit as SI
 
 EXT = {".txt", ".md", ".docx", ".pdf"}
 
 def read_text(p):
+    """v208: Grössen-, Seiten- und Zeitgrenzen (aura/sicherheit.py)."""
+    import time
     s = p.suffix.lower()
-    if s in (".txt", ".md"): return p.read_text(encoding="utf-8", errors="replace")
+    if s in (".txt", ".md"): SI.pruefe_dokument(p); return p.read_text(encoding="utf-8", errors="replace")
     if s == ".docx":
-        xml = zipfile.ZipFile(p).read("word/document.xml").decode("utf-8", "replace")
+        xml = SI.docx_xml(p)
         xml = re.sub(r"</w:p>", "\n\n", xml)
         return re.sub(r"<[^>]+>", "", xml)
     if s == ".pdf":
         from pypdf import PdfReader                    # optional: pypdf-Ordner in vendor\ ablegen
-        return "\f".join(pg.extract_text() or "" for pg in PdfReader(str(p)).pages)
+        SI.pruefe_dokument(p); r = PdfReader(str(p))
+        if len(r.pages) > SI.DOC_MAX_SEITEN: raise SI.SicherheitsFehler(f"{p.name}: {len(r.pages)} Seiten – Grenze {SI.DOC_MAX_SEITEN}")
+        out, t0 = [], time.monotonic()
+        for pg in r.pages:
+            if time.monotonic() - t0 > SI.DOC_MAX_SEKUNDEN: raise SI.SicherheitsFehler(f"{p.name}: Textextraktion dauert zu lange")
+            out.append(pg.extract_text() or "")
+        return "\f".join(out)
     return ""
 
 def doc_meta(p):
@@ -24,7 +33,7 @@ def doc_meta(p):
     autor = ""
     try:
         if p.suffix.lower() == ".docx":
-            m = re.search(r"<dc:creator[^>]*>([^<]*)<", zipfile.ZipFile(p).read("docProps/core.xml").decode("utf-8", "replace"))
+            m = re.search(r"<dc:creator[^>]*>([^<]*)<", SI.docx_xml(p, "docProps/core.xml", 2**20))
             autor = m.group(1).strip() if m else ""
         elif p.suffix.lower() == ".pdf":
             from pypdf import PdfReader

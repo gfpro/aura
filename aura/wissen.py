@@ -17,7 +17,13 @@ WF_DIR = ROOT / "workflows"
 def folder(name):
     """Sammlung -> Ordner. «wf:<workflow>» = Wissen eines Workflow-Pakets (workflows\\<workflow>\\wissen),
     sonst gemeinsame Sammlung (wissen\\<name>)."""
-    return WF_DIR / name[3:] / "wissen" if name.startswith("wf:") else WISSEN_DIR / name
+    # v208: Name muss ein einzelnes sicheres Segment sein und im erlaubten Ordner bleiben (auch über Links)
+    from .sicherheit import ziel_in, SicherheitsFehler
+    try:
+        if not isinstance(name, str): raise SicherheitsFehler("kein Text")
+        return ziel_in(WF_DIR, name[3:], "Workflow") / "wissen" if name.startswith("wf:") else ziel_in(WISSEN_DIR, name, "Sammlung")
+    except SicherheitsFehler as e:
+        raise ValueError(f"Unzulässiger Sammlungsname {str(name)[:60]!r}: {e}") from None
 CHUNKER = 5                                            # erhoehen = alle Dokumente neu zerlegen
 EXT = {".pdf", ".docx", ".txt", ".md", ".html", ".htm"}
 # Artikel/Anhang am Zeilenanfang - auch hinter einem Gliederungstitel auf derselben Zeile

@@ -31,6 +31,7 @@
 # v55: «Letzte Ergebnisse» auf der Startseite eingerahmt.
 # v54: Ansicht «Ergebnisse» (Startseite, Seitenleiste mit «n neu»), Zeitplan-Läufe nur noch als kurzer Hinweis im Chat.
 # v53: Zeitplan-Takt. v38: Infotexte. v46: Slide-In (Kontext), Vollansicht (Workflows/Wissen). v47: Quellen/Ordner als Vollansicht, kein Zahnrad, Fenster 20 % kleiner.
+import threading
 import ctypes, queue, re, time, tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import customtkinter as ctk
@@ -41,6 +42,14 @@ from .config import MODELS, load_settings, save_settings, location_warning
 from .connectors import CONNECTORS
 from .llm import discover
 from .opener import open_item
+CREDITS = "Entwickelt von armasuisse"
+STOPP_MARKE = "iVBORw0KGgoAAAANSUhEUgAAAA4AAAAOCAYAAAAfSC3RAAAAG0lEQVR42mP8////fwYyABMDmWBU46jGoaIRAJEIBBhmnnttAAAAAElFTkSuQmCC"
+PUNKT_AN = "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAABE0lEQVR4Xm1QvUoDQRD+ZnbPy0U9CHYpDn0hIcgdWAgKgfS+QLgnSCMoUbC/WAgi5AGsFEvroC8gYmHM7e7IbsiRgF8xzM833/wAK1S5avx/cjrkhkNGUdpsnB9wwofOuFQJTWdF9QIBgSAUlIqJzW7yE07UBWudim82FvanHn307869EPmO7Drf5y1+AyNxC1uDAAKzSmNlv3577/3qnoOsRo/aUSARUUSgCCIixjqwnPkB7I0IdiAQgGjtIPIFCLYbolKYorZEYW0YCKwAhmLNTvCwJFa5mp1Onu28Hqm0pbgdaU4ipTut2H7On+Lu99XymNV7ytJlt8URazoW43YJeNxbdC5fB+M6vKjBRrCBQPoDa1ZpDkggcc4AAAAASUVORK5CYII="
+PUNKT_AUS = "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAABKElEQVR4Xm1QsUrEQBCd2U1MICeC+Af6C/6A5SHYLceJmOIw2J21RVg4sLI3FzApNIfh7CRiK7Z2Z3uFYCdyYpndHdlgDg6caubxZt68B/BXZVnytv8PcywYx8SEQJ3kk+011znS2mwg4b0Q4iWOYyalNGgvCSF0mt8OXM8fGaUftdY/zOEHStVPUXh4YslIRHiVFTuMwSsHvj8Ie89WJUmSLfQ6Mw14dhr2JwwRiSGGSDi1pKqqvCzL/CiKPon4kBNEdpE1jxOtA+CiNREEgbFyDMyCAH2LN2aI0RTR3F2m6ajb7X61C+O8OEdDD3ZemhlnRer53p6qa6mV+maOMzSkNz/m7i7Am8I2HinRXN+UfUA41sp0GFD1Pu9dWNwaXoa7MqxWQ/oFQNuIoo1uxhoAAAAASUVORK5CYII="
+SEND_MARKE = "iVBORw0KGgoAAAANSUhEUgAAABIAAAASCAYAAABWzo5XAAABnUlEQVR42pXUu2tUQRQG8LNrDCvBB4kLothYKKLgo4qoIAQbUYuAWChoYQq7IDaif4AopLbQgI1l7G0UFC1EO7GQGAsL8RkUXIKPn4Xn4nh3WdcPLjN8Z+a735k5ZyJqwDE0cj5UzQcCluV32m/cxXgZH1gox1P4mmLfMIPRjDXR7CfSzPEk9mID5vzBCxwv1vdON/+0udh4FatwBAsFfxtb+qaLNbmwwgKOYnUKV/iECxguzrZRiezHFYyki5c1FxuxAw8K/jEm/nJXbHyFw1hRc9HBebRwFotF7Draldok5ovgvXSxC4/wM/l57MvLuIXvyb/HdDMi2hGxvDiyNxHxIyLGIqIVEdUNvY2ITkSMRsTKiKhKYTEivgSep/JTjGMtZguH73AiU7uEpeSXcBkjVWo78wyGMYUPhci1FJ7As4K/g91dpYA2HhYLn2AP1uFmwb/GVM/izILclC3Rwbm8uTP4WIjcwPrc0+hql6JFDmEbtuN+zd3B0kW/fhvKcboQ+IyLaHVV8QDPyGTWzRy2/vczUhM98M9O74FfF0XCs6fmBLwAAAAASUVORK5CYII="  # weiss, aus aura.ico ohne Sechseck, nach rechts gedreht
+CREDITS_AUTOR = "Entwickelt von GF Prozzillo"
+CREDITS_MAIL = "gianfranco.prozzillo@ar.admin.ch"
+CREDITS_2 = "Im Auftrag der Schweizer Bundesverwaltung"
 from .worker import Worker
 
 APP_NAME = "AURA"
@@ -251,7 +260,39 @@ class App:
                       hover_color=BORDER, text_color=INK, command=self.w.cancel.set).grid(row=0, column=1, padx=(6, 0))
         vl = ctk.CTkLabel(side, text=f"Version {VERSION}  ·  lokal, ohne Cloud", font=font(10), text_color=MUTED, cursor="hand2")
         vl.bind("<Button-1>", lambda e: self.open_log()); hilfe.tip(vl, "#version")
-        vl.grid(row=3, column=0, sticky="sw", padx=20, pady=(2, 10))
+        vl.grid(row=3, column=0, sticky="sw", padx=20, pady=(2, 0))
+        cr = ctk.CTkFrame(side, fg_color="transparent")                  # Credits: zwei Zeilen ohne Abstand
+        cr.grid(row=4, column=0, sticky="sw", padx=20, pady=(0, 10))
+        l1 = ctk.CTkLabel(cr, text=CREDITS, font=ctk.CTkFont(family=F, size=10, underline=True), text_color=MUTED,
+                          cursor="hand2", height=14, pady=0)
+        l1.bind("<Button-1>", lambda e: self._credits_menu(e))
+        l1.pack(anchor="w", pady=0)
+        ctk.CTkLabel(cr, text=CREDITS_2, font=font(10), text_color=MUTED, height=14, pady=0).pack(anchor="w", pady=0)
+
+    def _send_icons(self):
+        """Sende-Taste: Dreieck-Marke des Logos ohne Sechseck, 90° nach rechts gedreht (weiss auf Rot); Stopp-Quadrat
+        waehrend der Antwort. Fertige PNG (18/14 px) als tk.PhotoImage – braucht kein Pillow."""
+        import tkinter as tk, warnings
+        warnings.filterwarnings("ignore", message=".*CTkImage.*")
+        self._ic_send = tk.PhotoImage(master=self.root, data=SEND_MARKE)
+        self._ic_stop = tk.PhotoImage(master=self.root, data=STOPP_MARKE)
+
+    def _ask_modus(self, stopp):
+        """Taste zeigt Senden (Chevron) oder Stopp (Quadrat, bricht die laufende Antwort ab)."""
+        self._stoppen = stopp
+        try:
+            self.b_ask.configure(image=self._ic_stop if stopp else self._ic_send, text="", state="normal",
+                                 fg_color=ACCENT, hover_color=ACCENT_HI)
+        except Exception: pass
+
+    def _credits_menu(self, e):
+        import tkinter as tk, webbrowser
+        m = tk.Menu(self.root, tearoff=0)
+        m.add_command(label=CREDITS_AUTOR + "  ✉", command=lambda: webbrowser.open("mailto:" + CREDITS_MAIL))
+        m.add_command(label="Bundesamt für Rüstung armasuisse", command=lambda: None)
+        m.add_command(label="R+S IT", command=lambda: None)
+        try: m.tk_popup(e.x_root, e.y_root - 70)
+        finally: m.grab_release()
 
     def _grp(self, menu, name, tiptext):
         """v109: Gruppenkopf (Wort ohne Pfeil) + Inhalt; Klick klappt auf/zu."""
@@ -405,8 +446,9 @@ class App:
                          text_color=MUTED, anchor="w").grid(row=0, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
             for i, c in enumerate(CONNECTORS, start=1):
                 x = st.get(c.id)
-                ctk.CTkLabel(self.rb_vsrc, text=("● " if x else "○ ") + c.label, font=font(11), anchor="w",
-                             text_color=INK if x else MUTED).grid(row=i, column=0, sticky="w", padx=4)
+                zl = ctk.CTkFrame(self.rb_vsrc, fg_color="transparent"); zl.grid(row=i, column=0, sticky="w", padx=4)
+                ctk.CTkLabel(zl, text="●" if x else "○", font=font(11), text_color=OK if x else MUTED, width=12).pack(side="left")
+                ctk.CTkLabel(zl, text=" " + c.label, font=font(11), anchor="w", text_color=INK if x else MUTED).pack(side="left")
                 ctk.CTkLabel(self.rb_vsrc, text=fmt(x.get("items", 0)) if x else "–", font=font(11), text_color=MUTED,
                              anchor="e").grid(row=i, column=1, sticky="e", padx=4)
             auto = "ein" if self.s.get("autosync", True) else "aus"
@@ -604,7 +646,26 @@ class App:
             b = ctk.CTkButton(btns, text="Sync", width=48, height=24, corner_radius=0, font=font(11, "bold"),
                               fg_color=ACCENT, hover_color=ACCENT_HI, command=lambda c=c: self.sync(c)); b.pack(side="left")
             self.src_btns.append(b); self.rows[c.id] = (dot, info)
-        rz = ctk.CTkFrame(w, fg_color="transparent"); rz.grid(row=2 + len(CONNECTORS), column=0, sticky="ew", pady=(24, 0))   # v60
+        # Live-Quellen: werden bei der Frage abgefragt (Schalter im Chat), hier nur einmalig einrichten
+        n0 = 2 + len(CONNECTORS)
+        ctk.CTkLabel(w, text="Live-Quellen (Suche bei der Frage, nichts wird gespeichert)", font=font(11, "bold"),
+                     text_color=MUTED, anchor="w").grid(row=n0, column=0, sticky="w", padx=4, pady=(18, 4))
+        from .engine import ordnungssystem as _os, intranet as _in
+        npos = len(_os.positionen())
+        live = [("Acta Nova", f"{self.s.get('actanova_url') or 'Standard: GEVER VBS'} · Ordnungssystem: "
+                              + (f"{npos} Positionen" if npos else "nicht eingelesen"), self.open_live_acta, npos > 0),
+                ("Intranet", self.s.get("intranet_url") or "keine URL eingetragen", self.open_live_intra, bool(_in.basis()[0])),
+                ("SharePoint", (f"{len(self.s.get('sharepoint_sites') or [])} bevorzugte Sites · sucht überall mit Berechtigung"),
+                 self.open_live_sp, True)]
+        for k, (name, txt, cmd, ok) in enumerate(live):
+            card = ctk.CTkFrame(w, fg_color=CARD, corner_radius=0)
+            card.grid(row=n0 + 1 + k, column=0, sticky="ew", pady=3); card.grid_columnconfigure(1, weight=1)
+            ctk.CTkLabel(card, text="●", text_color=OK if ok else OFF, font=font(11), width=12).grid(row=0, column=0, rowspan=2, padx=(12, 6))
+            ctk.CTkLabel(card, text=name, font=font(12, "bold"), text_color=INK, anchor="w", height=18).grid(row=0, column=1, sticky="w", pady=(7, 0))
+            ctk.CTkLabel(card, text=txt[:90], font=font(10), text_color=MUTED, anchor="w", height=16).grid(row=1, column=1, sticky="w", pady=(0, 7))
+            ctk.CTkButton(card, text="Einrichten", width=76, height=24, corner_radius=0, font=font(11), fg_color=BORDER,
+                          hover_color=MUTED, text_color=INK, command=cmd).grid(row=0, column=2, rowspan=2, padx=(12, 10))
+        rz = ctk.CTkFrame(w, fg_color="transparent"); rz.grid(row=n0 + 5, column=0, sticky="ew", pady=(24, 0))   # v60
         ctk.CTkButton(rz, text="Alles zurücksetzen …", height=28, corner_radius=0, font=font(11), fg_color="transparent",
                       border_width=1, border_color=ERR, hover_color=BORDER, text_color=ERR, command=self.reset_all).pack(side="left")
         ctk.CTkLabel(rz, text="  Löscht alle eingelesenen Daten und beendet alle Synchronisationen.", font=font(10),
@@ -682,7 +743,8 @@ class App:
                                     wrap="word", border_width=0, activate_scrollbars=False)
         self.entry.grid(row=0, column=0, sticky="ew", padx=(14, 6), pady=10)
         self.entry.bind("<Return>", self._enter); self.entry.focus_set(); hilfe.tip(self.entry, "#frage")
-        self.b_ask = ctk.CTkButton(bar, text="\uE724", width=34, height=34, corner_radius=0, font=ctk.CTkFont(family="Segoe MDL2 Assets", size=14),
+        self._send_icons(); self._stoppen = False
+        self.b_ask = ctk.CTkButton(bar, text="", image=self._ic_send, width=34, height=34, corner_radius=0,
                                    fg_color=ACCENT, hover_color=ACCENT_HI, command=self.ask)
         self.b_ask.grid(row=0, column=2, padx=(0, 12), pady=10, sticky="se"); self.buttons.append(self.b_ask)
         from .mikrofon import Mikrofon                                   # v182: Spracheingabe im Chat
@@ -703,6 +765,19 @@ class App:
                                       fg_color="transparent", hover_color=BORDER, text_color=MUTED, border_width=1,
                                       border_color=BORDER, command=self.add_anhang)
         self.b_anhang.pack(side="left", padx=(8, 0)); self.buttons.append(self.b_anhang)
+        self.b_acta = ctk.CTkButton(tools, text="🗂 Acta Nova", height=24, corner_radius=0, font=font(11),
+                                    hover_color=BORDER, border_width=1, command=self.toggle_acta)
+        self.b_acta.pack(side="left", padx=(8, 0)); self._acta_farbe()
+        if self.s.get("actanova_wach"):
+            try:
+                from .engine import actanova as _an0; _an0.wach_halten_starten()
+            except Exception: pass
+        self.b_intra = ctk.CTkButton(tools, text="🌐 Intranet", height=24, corner_radius=0, font=font(11),
+                                     hover_color=BORDER, border_width=1, command=self.toggle_intra)
+        self.b_intra.pack(side="left", padx=(8, 0)); self._intra_farbe()
+        self.b_sp = ctk.CTkButton(tools, text="▦ SharePoint", height=24, corner_radius=0, font=font(11),
+                                  hover_color=BORDER, border_width=1, command=self.toggle_sp)
+        self.b_sp.pack(side="left", padx=(8, 0)); self._sp_farbe()
         self.anh_box = ctk.CTkFrame(tools, fg_color="transparent", width=1, height=1)   # v98: leer = keine Hoehe
         self.embed_hint = ctk.CTkLabel(tools, text="⏳ Vektoren werden berechnet – Fragen bitte später nochmals versuchen "
                                        "(oder links «Pause»).", font=font(11, "bold"), text_color=AMBER)   # v129: nur sichtbar beim Einbetten
@@ -821,7 +896,7 @@ class App:
         b.grid(row=0, column=1 if right else 0, sticky="e" if right else "w", padx=8)
         lbl = ctk.CTkLabel(b, text=text, font=font(14), text_color=fg, justify="left", anchor="w", wraplength=self._wrap())
         lbl.pack(padx=16, pady=11, anchor="w"); self.msgs.append(lbl)
-        self._scroll(); return b, lbl
+        self._scroll(force=True); return b, lbl
 
     def _vorschau(self, hits):
         """v160: Sofort anklickbar zeigen, welche Quellen das Modell gerade liest."""
@@ -922,10 +997,10 @@ class App:
         self.embedding = on
         try:
             if on:
-                self.b_ask.configure(state="normal", text="⏳", fg_color=AMBER, hover_color=AMBER_HI)
+                self.b_ask.configure(state="normal", text="⏳", image=None, fg_color=AMBER, hover_color=AMBER_HI)
                 self.embed_hint.pack(side="left", padx=(12, 0))
             else:
-                self.b_ask.configure(text="➤", fg_color=ACCENT, hover_color=ACCENT_HI)
+                self.b_ask.configure(text="", image=self._ic_send, fg_color=ACCENT, hover_color=ACCENT_HI)
                 self.embed_hint.pack_forget()
         except Exception: pass
 
@@ -998,15 +1073,41 @@ class App:
         self.status.configure(text="Gespeicherter Chat – neue Fragen werden angehängt. Für eine Folgefrage «↳ Bezug zur letzten Frage».")
 
     def open_original(self, item_id):
+        if isinstance(item_id, str) and item_id.startswith("http"):        # Live-Quelle Intranet: Seite im Browser
+            from .engine.herkunft import ist_erlaubt                       # v212: nur freigegebene Quellen oeffnen
+            if not ist_erlaubt(item_id):
+                self.status.configure(text="Adresse nicht freigegeben – nicht geöffnet."); return
+            import webbrowser; webbrowser.open(item_id); self.status.configure(text="Intranetseite geöffnet."); return
+        if isinstance(item_id, str) and item_id.startswith("acta:"):       # Live-Quelle Acta Nova: Ablageort oeffnen
+            az = item_id[5:]
+            if getattr(self.w, "current", None):
+                self.status.configure(text="Bitte warten, bis AURA fertig ist – dann den Ablageort nochmals anklicken."); return
+            self.status.configure(text=f"Acta Nova: öffne {az} …")
+            def los():
+                try:
+                    from .engine import actanova
+                    actanova.oeffnen(az); msg = f"Acta Nova: {az} geöffnet (Edge-Fenster)."
+                    kopie = False
+                except Exception as x:
+                    kopie = True; msg = f"Acta Nova: nicht geöffnet ({x}) – Aktenzeichen kopiert."
+                self.root.after(0, lambda: (self._copy(az) if kopie else None, self.status.configure(text=msg)))
+            threading.Thread(target=los, daemon=True).start(); return
         self.status.configure(text="Öffne Original ...")
         open_item(item_id, lambda msg: self.w.events.put(("progress", (msg, None, None))))
 
     def _copy(self, t): self.root.clipboard_clear(); self.root.clipboard_append(t)
-    def _scroll(self):
-        self.root.update_idletasks()
+    def _scroll(self, force=False):
+        """Nach unten mitlaufen nur, wenn man schon unten ist (oder bei neuer Frage). Wer hochscrollt, um Listen zu
+        lesen, bleibt dort – auch während das Sprachmodell weiterschreibt."""
         try:
             cv = self.chat._parent_canvas
-            cv.configure(scrollregion=cv.bbox("all")); cv.yview_moveto(1.0)
+            unten = cv.yview()[1] >= 0.98
+        except Exception:
+            cv, unten = None, True
+        self.root.update_idletasks()
+        try:
+            cv.configure(scrollregion=cv.bbox("all"))
+            if force or unten: cv.yview_moveto(1.0)
         except Exception: pass
 
     # ------------------------------------------------------------------ Aktionen
@@ -1021,6 +1122,112 @@ class App:
                                    "entfernen?\n\nDie Dateien im Ordner bleiben unberührt.", parent=self.root): return
         self.s["docs_folder"] = ""; save_settings(self.s)
         self.w.submit("delete_source", "folder_docs")
+
+    # ---- Live-Quellen einrichten
+    def _live_view(self, key, titel, text):
+        body = self.view(key, titel)
+        w = ctk.CTkFrame(body, fg_color="transparent"); w.grid(row=0, column=0, sticky="nw", padx=24, pady=12)
+        w.grid_columnconfigure(0, weight=1, minsize=520)
+        ctk.CTkLabel(w, text=text, font=font(11), text_color=MUTED, anchor="w", justify="left", wraplength=520).grid(
+            row=0, column=0, sticky="w", pady=(0, 8))
+        return w
+
+    def _url_feld(self, w, row, key, placeholder, nachher):
+        e = ctk.CTkEntry(w, placeholder_text=placeholder, height=28); e.grid(row=row, column=0, sticky="ew", pady=(4, 0))
+        if self.s.get(key): e.insert(0, self.s[key])
+        def save():
+            u = e.get().strip()
+            q = {"actanova_url": "actanova", "intranet_url": "intranet"}.get(key)
+            from .engine.herkunft import ist_erlaubt, erlaubt          # v212: gleiche Pruefung wie in der Engine
+            if u and not ist_erlaubt(u, q):
+                messagebox.showerror(APP_NAME, "Adresse nicht freigegeben. Erlaubt: " + ", ".join(sorted("https://" + h for _, h, _p in erlaubt(q))), parent=self.root); return
+            self.s = load_settings(); self.s[key] = u; save_settings(self.s); nachher()
+        ctk.CTkButton(w, text="Speichern", height=28, corner_radius=0, font=font(11, "bold"), fg_color=ACCENT,
+                      hover_color=ACCENT_HI, command=save).grid(row=row + 1, column=0, sticky="w", pady=6)
+
+    def open_live_acta(self):
+        from .engine import ordnungssystem as _os, actanova as _an
+        w = self._live_view("live_acta", "Acta Nova einrichten",
+            "Acta Nova wird bei der Frage live durchsucht (Schalter «Acta Nova» im Chat). Anmeldung mit Karte/PIN im "
+            "Edge-Fenster von AURA. Gespeichert werden nur die Einstellungen, keine Inhalte.")
+        ctk.CTkLabel(w, text="Start-Adresse (leer = GEVER VBS)", font=font(11, "bold"), text_color=INK, anchor="w").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        self._url_feld(w, 2, "actanova_url", _an.STANDARD_URL, self.open_live_acta)
+        npos = len(_os.positionen()); inf = _os.info()
+        ctk.CTkLabel(w, text="Ordnungssystem", font=font(11, "bold"), text_color=INK, anchor="w").grid(row=4, column=0, sticky="w", pady=(14, 0))
+        ctk.CTkLabel(w, text=(f"{npos} Positionen, eingelesen am {inf['stand']} – gewichtet die Treffer nach Ablageort und "
+                              f"schlägt Ablagepositionen vor." if npos else
+                              "Nicht eingelesen. In Acta Nova das Ordnungssystem öffnen, «Excel-Export» wählen und die Datei hier einlesen."),
+                     font=font(10), text_color=MUTED, anchor="w", justify="left", wraplength=520).grid(row=5, column=0, sticky="w")
+        def einlesen():
+            f = filedialog.askopenfilename(parent=self.root, title="Excel-Export des Ordnungssystems",
+                                           filetypes=[("Excel/CSV", "*.xlsx *.csv")])
+            if not f: return
+            try: n = _os.importieren(f)
+            except Exception as x: messagebox.showerror(APP_NAME, f"Nicht eingelesen: {x}", parent=self.root); return
+            messagebox.showinfo(APP_NAME, f"{n} Positionen eingelesen. Die Vektoren werden bei der ersten Acta-Nova-Frage "
+                                          "einmalig berechnet (ca. 1–2 Minuten).", parent=self.root)
+            self.open_live_acta()
+        knoepfe = ctk.CTkFrame(w, fg_color="transparent"); knoepfe.grid(row=6, column=0, sticky="w", pady=6)
+        ctk.CTkButton(knoepfe, text="Ordnungssystem einlesen …", height=28, corner_radius=0, font=font(11), fg_color=BORDER,
+                      hover_color=MUTED, text_color=INK, command=einlesen).pack(side="left")
+        if inf:
+            ctk.CTkButton(knoepfe, text="Datei öffnen", height=28, corner_radius=0, font=font(11), fg_color=BORDER, hover_color=MUTED,
+                          text_color=INK, command=lambda: os.startfile(inf["datei"])).pack(side="left", padx=(8, 0))
+            def entfernen():
+                if messagebox.askyesno(APP_NAME, "Ordnungssystem entfernen? Das Ranking läuft danach ohne Ablageort-Gewichtung.",
+                                       parent=self.root):
+                    _os.entfernen(); self.open_live_acta()
+            ctk.CTkButton(knoepfe, text="Entfernen", height=28, corner_radius=0, font=font(11), fg_color="transparent",
+                          border_width=1, border_color=ACCENT, text_color=ACCENT, hover_color=BORDER,
+                          command=entfernen).pack(side="left", padx=(8, 0))
+        def anmelden():
+            try:
+                from .engine import edge
+                edge.starten(_an.start_url())
+                t = edge.tab_finden("actanova") or edge.tab_neu(_an.start_url())
+                edge.fenster(t, "normal"); t.schliessen()
+            except Exception as x: messagebox.showerror(APP_NAME, f"Edge nicht geöffnet: {x}", parent=self.root)
+        ctk.CTkButton(w, text="Edge öffnen und anmelden", height=28, corner_radius=0, font=font(11), fg_color=BORDER,
+                      hover_color=MUTED, text_color=INK, command=anmelden).grid(row=7, column=0, sticky="w", pady=(14, 0))
+        llm_var = ctk.BooleanVar(value=bool(self.s.get("actanova_llm", False)))
+        def llm_set():
+            self.s = load_settings(); self.s["actanova_llm"] = bool(llm_var.get()); save_settings(self.s)
+        wach_var = ctk.BooleanVar(value=bool(self.s.get("actanova_wach", False)))
+        def wach_set():
+            self.s = load_settings(); self.s["actanova_wach"] = bool(wach_var.get()); save_settings(self.s)
+            if self.s["actanova_wach"]: _an.wach_halten_starten()
+        ctk.CTkCheckBox(w, text="Sitzung offen halten (lädt alle 10 Min. die Startseite neu, solange «Acta Nova» an ist)",
+                        variable=wach_var, command=wach_set, font=font(11)).grid(row=8, column=0, sticky="w", pady=(14, 0))
+
+    def open_live_sp(self):
+        w = self._live_view("live_sp", "SharePoint einrichten",
+            "SharePoint wird bei der Frage über die Suche durchsucht (Schalter «SharePoint» im Chat) – über alle Sites, "
+            "auf die du Zugriff hast. Jeder Treffer wird mit Amt und Site ausgewiesen. Hier eingetragene Sites werden "
+            "bevorzugt. Eine Adresse pro Zeile, z. B. https://portal.collab.admin.ch/sites/500-IKTVBS")
+        ctk.CTkLabel(w, text="Bevorzugte Sites", font=font(11, "bold"), text_color=INK, anchor="w").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        tb = ctk.CTkTextbox(w, height=140, font=font(11), border_width=1); tb.grid(row=2, column=0, sticky="ew", pady=(4, 0))
+        tb.insert("1.0", "\n".join(self.s.get("sharepoint_sites") or []))
+        def save():
+            from .engine.sharepoint import site_url
+            z = [x.strip() for x in tb.get("1.0", "end").splitlines() if x.strip()]
+            from .engine.herkunft import ist_erlaubt                   # v212
+            falsch = [x for x in z if not ist_erlaubt(x, "sharepoint")]
+            if falsch:
+                messagebox.showerror(APP_NAME, "Bitte vollständige Adressen mit https:// eintragen:\n" + "\n".join(falsch[:5]), parent=self.root); return
+            self.s = load_settings(); self.s["sharepoint_sites"] = sorted({site_url(x) for x in z}); save_settings(self.s)
+            self.open_live_sp()
+        ctk.CTkButton(w, text="Speichern", height=28, corner_radius=0, font=font(11, "bold"), fg_color=ACCENT,
+                      hover_color=ACCENT_HI, command=save).grid(row=3, column=0, sticky="w", pady=6)
+        ctk.CTkLabel(w, text="Tipp: Ein Link auf eine Dokumentbibliothek genügt – AURA kürzt ihn auf die Site.",
+                     font=font(10), text_color=MUTED, anchor="w").grid(row=4, column=0, sticky="w")
+
+    def open_live_intra(self):
+        w = self._live_view("live_intra", "Intranet einrichten",
+            "Adresse des Intranets eintragen (z. B. die Startseite). Gesucht wird bei der Frage über die Suche des "
+            "Intranets (Schalter «Intranet» im Chat); Anmeldung automatisch über das Windows-Konto. Alle VBS-Intranets "
+            "mit gleicher Suchlogik funktionieren.")
+        ctk.CTkLabel(w, text="Intranet-Adresse", font=font(11, "bold"), text_color=INK, anchor="w").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        self._url_feld(w, 2, "intranet_url", "https://intranet.ar.admin.ch/de", self.open_live_intra)
 
     # ---- v78: Confluence-Links (Seite = inkl. Unterseiten, Bereich = alles)
     def open_confluence(self):
@@ -1159,6 +1366,63 @@ class App:
             self.status.configure(text="Bitte warten, bis der laufende Auftrag fertig ist."); return
         self.w.submit("ask", q, backend, False, items)
 
+    def toggle_acta(self):
+        """Acta Nova als Live-Quelle ein/aus (bleibt gespeichert). Aus = schnelle Suche nur im lokalen Index."""
+        self.s = load_settings(); self.s["actanova"] = not self.s.get("actanova", False); save_settings(self.s)
+        self._acta_farbe()
+        if self.s["actanova"]:                                           # Anmeldung braucht Karte/PIN im sichtbaren Fenster
+            try:
+                from .engine import edge, actanova
+                edge.starten(actanova.start_url())
+                t = edge.tab_finden("actanova") or edge.tab_neu(actanova.start_url())
+                edge.fenster(t, "normal"); t.schliessen()
+            except Exception as e:
+                log.get().info(f"Acta Nova: Edge nicht geöffnet: {e}")
+            messagebox.showinfo(APP_NAME, "Acta Nova ist eingeschaltet.\n\nBitte zuerst im Edge-Fenster mit Karte und PIN "
+                                "bei Acta Nova anmelden (Startseite «Aktuelle Informationen» muss sichtbar sein).\n\n"
+                                "Danach minimiert AURA das Fenster bei jeder Suche selbst.", parent=self.root)
+        self.status.configure(text="Acta Nova: ein – Fragen nach Ablage/Dossiers suchen live (dauert länger)."
+                              if self.s["actanova"] else "Acta Nova: aus – schnelle Suche nur in AURA.")
+
+    def toggle_intra(self):
+        """Intranet als Live-Quelle ein/aus. Ein = jede Frage (ausser Acta-Nova-Fragen) geht ans Intranet."""
+        if not load_settings().get("intranet", False) and not (load_settings().get("intranet_url") or "").strip():
+            messagebox.showinfo(APP_NAME, "Zuerst unter «Wissen → Intranet → Einrichten» die Adresse des Intranets eintragen.",
+                                parent=self.root); return
+        self.s = load_settings(); self.s["intranet"] = not self.s.get("intranet", False); save_settings(self.s)
+        self._intra_farbe()
+        self.status.configure(text="Intranet: ein – Fragen werden im Intranet gesucht (dauert länger)."
+                              if self.s["intranet"] else "Intranet: aus – schnelle Suche nur in AURA.")
+
+    def _punkt(self, on):
+        """Gruener Punkt = Quelle aktiv, grauer Kreis = aus (als Bild, damit nur der Punkt farbig ist)."""
+        if not hasattr(self, "_pkt"):
+            import tkinter as tk
+            self._pkt = {True: tk.PhotoImage(master=self.root, data=PUNKT_AN), False: tk.PhotoImage(master=self.root, data=PUNKT_AUS)}
+        return self._pkt[bool(on)]
+
+    def toggle_sp(self):
+        """SharePoint als Live-Quelle ein/aus: sucht überall (berechtigungsgefiltert), eigene Sites bevorzugt."""
+        self.s = load_settings(); self.s["sharepoint"] = not self.s.get("sharepoint", False); save_settings(self.s)
+        self._sp_farbe()
+        self.status.configure(text="SharePoint: ein – Treffer aus allen berechtigten Sites, nach Amt ausgewiesen."
+                              if self.s["sharepoint"] else "SharePoint: aus.")
+
+    def _sp_farbe(self):
+        on = bool(load_settings().get("sharepoint", False))
+        self.b_sp.configure(text=" SharePoint", image=self._punkt(on), compound="left", fg_color=CARD if on else "transparent",
+                             text_color=INK if on else MUTED, border_color=OK if on else BORDER, border_width=2 if on else 1)
+
+    def _intra_farbe(self):
+        on = bool(load_settings().get("intranet", False))
+        self.b_intra.configure(text=" Intranet", image=self._punkt(on), compound="left", fg_color=CARD if on else "transparent",
+                             text_color=INK if on else MUTED, border_color=OK if on else BORDER, border_width=2 if on else 1)
+
+    def _acta_farbe(self):
+        on = bool(load_settings().get("actanova", False))
+        self.b_acta.configure(text=" Acta Nova", image=self._punkt(on), compound="left", fg_color=CARD if on else "transparent",
+                             text_color=INK if on else MUTED, border_color=OK if on else BORDER, border_width=2 if on else 1)
+
     def toggle_follow(self, on=None):
         """v67: Folgefrage-Knopf. Gilt nur fuer die naechste Frage."""
         self.follow = (not self.follow) if on is None else on
@@ -1167,6 +1431,11 @@ class App:
                                 border_color=ACCENT if self.follow else BORDER)
 
     def ask(self):
+        if getattr(self, "_stoppen", False):                             # Stopp-Taste: laufende Antwort abbrechen
+            self.w.cancel.set(); self.status.configure(text="Antwort wird abgebrochen …"); return
+        return self._ask_senden()
+
+    def _ask_senden(self):
         q = self.entry.get("1.0", "end").strip()
         if self.embedding:                                               # v129: Frage bleibt stehen
             self.status.configure(text="Gerade werden Vektoren berechnet – bitte später nochmals versuchen (oder links «Pause»).")
@@ -1552,6 +1821,7 @@ class App:
                         except Exception: pass                           # v46: Slide-In evtl. schon geschlossen
                     self._anon("on_busy", *d)                            # v113
                     self._embed_state(bool(d[0]) and len(d) > 1 and d[1] == "embed")   # v129
+                    if len(d) > 1 and d[1] == "ask": self._ask_modus(bool(d[0]))      # Antwort laeuft -> Stopp-Taste
                     if d[0]: self._pb_start()                            # v109: blau = läuft
                     else: self._pb_done()                                # grün = fertig (rot, falls Fehler)
                 elif kind == "stats":
@@ -1670,3 +1940,8 @@ def main():
     root.after(400, lambda: _scharfes_icon(root, ico))       # v147: nach dem Anzeigen (und nach dem Symbol von CustomTkinter)
     root.report_callback_exception = lambda t, v, tb: lg.error("Fehler in der Oberflaeche", exc_info=(t, v, tb))
     App(root); root.mainloop(); lg.info("AURA beendet")
+    try:                                                                 # Debug-Port schliessen: AURA-Edge beenden
+        from .config import load_settings as _ls
+        if _ls().get("edge_beim_beenden_schliessen", True):
+            from .engine import edge as _edge; _edge.beenden(); lg.info("AURA-Edge geschlossen")
+    except Exception: pass

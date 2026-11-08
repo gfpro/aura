@@ -176,10 +176,14 @@ def n_themen_bericht(p, state, ctx):
         L += [f"- {e['art']} {_zt(e['zeit'])} · {e['von'][:40]} · {e['titel']}" for e in g["elemente"]]
         L += [f"_verknüpft über: {'; '.join(g['begruendung'])}_"]
     L += ["", f"## Einzeln ({len(einzeln)})"] + [f"- {e['art']} {_zt(e['zeit'])} · {e['titel']}" for e in einzeln]
+    from ..config import ROOT
+    from ..sicherheit import liegt_in
     o = Path(as_text(p.get("ordner") or "recap"))
     if not o.is_absolute(): o = Path(ctx.wf_dir).parent.parent / o
+    if not liegt_in(o, ROOT): raise RuntimeError(f"Ordner «{o}» liegt ausserhalb von AURA – nur Unterordner von {ROOT} erlaubt")   # v208
     o.mkdir(parents=True, exist_ok=True)
-    f = o / f"{as_text(p.get('name') or jetzt.strftime('%Y-%m-%d'))}.md"
+    nm = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "_", as_text(p.get('name') or jetzt.strftime('%Y-%m-%d'))).strip(" .")[:80] or jetzt.strftime('%Y-%m-%d')
+    f = o / f"{nm}.md"
     md = "\n".join(L) + "\n"; f.write_text(md, encoding="utf-8")
     (o / "neuester.json").write_text(json.dumps({"datei": str(f), "erstellt": jetzt.strftime("%Y-%m-%d %H:%M"), "von": von, "bis": bis,
         "themen": themen, "einzeln": len(einzeln), "heute": [{"zeit": t.get("beginn", "")[11:16], "ende": (t.get("ende") or "")[11:16],

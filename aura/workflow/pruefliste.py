@@ -31,8 +31,9 @@ def _heading_styles(z):
 def docx_paragraphs(path):
     """[(ist_ueberschrift, text)] eines Word-Dokuments."""
     import html
-    with zipfile.ZipFile(path) as z:
-        hs = _heading_styles(z); xml = z.read("word/document.xml").decode("utf-8", "replace")
+    from .. import sicherheit as SI
+    xml = SI.docx_xml(path)                                                   # v208: Grenzen
+    with zipfile.ZipFile(path) as z: hs = _heading_styles(z)
     out = []
     for para in re.split(r"</w:p>", xml):
         st = re.search(r'<w:pStyle w:val="([^"]+)"', para)
@@ -276,7 +277,9 @@ def n_pruefliste(p, state, ctx):
     files = p.get("files") or []
     if isinstance(files, str): files = [files]
     if not files: raise RuntimeError("Keine Datei zum Prüfen")
-    doc = {"text": "\n\n".join(read_doc(f) for f in files)}
+    from .nodes import freigaben
+    fg = freigaben(ctx)                                                       # v208: nur ausgewählte Eingaben / Workflow-Ordner
+    doc = {"text": "\n\n".join(read_doc(fg.lesen(as_text(f), "Datei")) for f in files)}
     ctx.progress(f"Prüfliste: {len(doc['text'])} Zeichen gelesen")
     res, warn = [], []
     punkte = [normalize(x) for x in p.get("punkte") or []]

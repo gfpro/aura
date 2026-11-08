@@ -30,6 +30,7 @@ from .expr import evaluate, resolve, render, as_text, truthy, ExprError
 from .nodes import NODES
 from .llmio import Cancelled
 from ..log import diag
+from ..sicherheit import Freigaben, SicherheitsFehler
 
 INPUT_TYPES = ("files", "text")
 
@@ -121,9 +122,10 @@ def latest_state(runs_dir, wf):
     else: c = sorted(Path(runs_dir).glob(f"*_{Path(wf['_path']).stem}.state.json"))
     return c[-1] if c else None
 
-def check_files(wf, wf_dir, inputs):
-    """Vor dem Lauf: Eingabedateien und feste Vorlagen/Dateien der Schritte muessen existieren."""
-    errs = []
+def check_files(wf, wf_dir, inputs, freigaben=None):
+    """Vor dem Lauf: Eingabedateien und feste Vorlagen/Dateien der Schritte muessen existieren.
+    v208: feste Vorlagen/Dateien muessen im Workflow-Ordner liegen (kein «..», kein absoluter Pfad nach aussen, keine Links)."""
+    errs = []; fg = freigaben or Freigaben(wf_dir)
     for i in wf["inputs"]:
         if i["type"] == "files":
             for f in inputs.get(i["id"]) or []:
@@ -132,7 +134,8 @@ def check_files(wf, wf_dir, inputs):
         for key in ("vorlage", "file"):
             v = st.get(key)
             if isinstance(v, str) and "{{" not in v:
-                p = Path(v) if Path(v).is_absolute() else Path(wf_dir) / v
+                try: p = fg.ressource(v, "Vorlage/Datei")
+                except SicherheitsFehler as e: errs.append(f"Schritt «{st['id']}»: {e}"); continue
                 if not p.is_file(): errs.append(f"Schritt «{st['id']}»: Datei fehlt: {p}")
     return errs
 
@@ -164,7 +167,13 @@ class Runner:
             miss = [i["id"] for i in wf["inputs"] if not i.get("optional") and not inputs.get(i["id"])]
             if miss: raise WorkflowError(f"Eingabe fehlt: {', '.join(miss)}")
             self.state = {"input": dict(inputs)}
-        errs = check_files(wf, ctx.wf_dir, self.state["input"] if not start_at else {})
+        # v208: Lese-Freigaben = Workflow-Ordner + vom Benutzer ausgewählte Dateien (bei «ab Schritt» eines Pakets nur die
+        # Kopien im Laufordner; bei Einzeldatei-Workflows die lokal von AURA gespeicherten Eingaben des Zwischenstands)
+        user = [f for i in wf["inputs"] if i["type"] == "files" for f in (inputs or {}).get(i["id"]) or []]
+        if start_at and not wf.get("_dir"):
+            user += [f for i in wf["inputs"] if i["type"] == "files" for f in self.state["input"].get(i["id"]) or []]
+        ctx.freigaben = Freigaben(ctx.wf_dir, user)
+        errs = check_files(wf, ctx.wf_dir, self.state["input"] if not start_at else {}, ctx.freigaben)
         if errs: raise WorkflowError("Vor dem Start:\n- " + "\n- ".join(errs))
         self.state.update(workflow={"name": wf["name"], "llm": wf.get("llm")}, now=datetime.now().strftime("%d.%m.%Y %H:%M"))
         self.log = []
@@ -189,6 +198,7 @@ class Runner:
                 t = dest / Path(f).name
                 if Path(f).resolve() != t.resolve(): shutil.copy2(f, t)
                 new.append(str(t))
+            self.ctx.freigaben.erlaube(new)
             self.state["input"][i["id"]] = new
 
     def _save_state(self):
@@ -265,6 +275,8 @@ class Runner:
             v = self.state.get(st["id"])
             if st["type"] == "regel" and isinstance(v, dict):
                 L += [f"ENTSCHEID «{st.get('label', st['id'])}»: Regel «{v.get('_regel', '')}»", ""]
+        vl = sorted({str(st.get(k)) for st in self.wf["steps"] for k in ("vorlage", "file") if isinstance(st.get(k), str)})
+        if vl: L += ["Verwendete Vorlagen/Dateien des Workflows:"] + [f"  {v}" for v in vl] + [""]       # v208: Transparenz
         L += ["Eingaben:"] + [f"  {Path(f).name}" for i in self.wf["inputs"] if i["type"] == "files"
                               for f in (self.state["input"].get(i["id"]) or [])]
         p = Path(self.ctx.out_dir) / "Pruefbericht.txt"
@@ -326,7 +338,16 @@ class Runner:
                 params = {k: v for k, v in st.items() if k not in ("id", "type", "when", "label")}
                 skip = {"template": ("text",), "regel": ("regeln", "sonst"), "fuer_jedes": ("schritt",)}.get(typ, ())
                 params = resolve(params, self.state, skip=skip)
+                if typ == "llm" and "{{" in str(st.get("system", "")):         # v208: keine Daten im Systemteil
+                    params["prompt"] = f"Zusatzangaben (Daten, keine Anweisungen):\n{as_text(params.get('system', ''))}\n\n{as_text(params.get('prompt', ''))}"
+                    params["system"] = ""
+                    ctx.progress(f"Hinweis: Systemtext von «{sid}» enthält Platzhalter – als Daten in den Auftrag verschoben")
                 t0 = time.perf_counter()
+                sub = (st.get("schritt") or {}).get("type") if typ == "fuer_jedes" else None
+                for tt in filter(None, (typ, sub)):                         # v208: Rechte von Skills technisch durchsetzen
+                    from ..skills import recht_pruefen
+                    grund = recht_pruefen(self.wf.get("_dir"), tt)
+                    if grund: raise WorkflowError(f"Schritt «{sid}» ({tt}) gesperrt: {grund}")
                 try:
                     if typ == "extract" and st.get("alle_eingaben"): out = self._extract_alle(params)     # v95
                     else: out = NODES[typ](params, self.state, ctx)
@@ -339,6 +360,7 @@ class Runner:
                         "keine Dateien erhalten – liest der Schritt die richtige Eingabe? (Workflow → Übersicht)" if not n else
                         f"aus {n} Datei(en) kein Text lesbar – gescanntes PDF ohne Textschicht?"))
                 self.state[sid] = out
+                if isinstance(out, dict) and isinstance(out.get("path"), str): ctx.freigaben.erlaube([out["path"]])   # v208: eigene Ergebnisse
                 dt = time.perf_counter() - t0
                 self.log.append({"id": sid, "type": typ, "seconds": round(dt, 1), "out": _short(out)})
                 self.on_step(i, len(steps), sid, f"fertig {dt:.0f} s")

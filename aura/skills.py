@@ -33,11 +33,24 @@ def _slug(t, n=60):
 
 
 def _hash(*pfade):
+    """v208: SHA-256 (voll) über Name+Länge+Inhalt. Schützt gegen unbemerkte Änderung nach der Freigabe – ist KEIN Herkunftsnachweis."""
+    h = hashlib.sha256()
+    for p in pfade:
+        p = Path(p)
+        if p.is_file():
+            b = p.read_bytes(); h.update(f"{p.name}\0{len(b)}\0".encode("utf-8")); h.update(b)
+    return h.hexdigest()
+
+def _hash_alt(*pfade):
+    """Bis v207: SHA-1, auf 64 Bit gekürzt (zu kurz gegen gezielte Kollisionen). Nur noch für die einmalige Umstellung."""
     h = hashlib.sha1()
     for p in pfade:
         p = Path(p)
         if p.is_file(): h.update(p.read_bytes())
     return h.hexdigest()[:16]
+
+def _dateien(e):
+    return [e["pfad"]] if e["art"] == "rolle" else [e["pfad"] / "skill.json", e["pfad"] / "workflow.json", e["pfad"] / "anleitung.md"]
 
 
 def _titel_aus(body, fallback):
@@ -77,12 +90,28 @@ def skills():
 
 def alle():
     """Skills und Rollen mit Freigabestatus: aktiv (freigegeben, unverändert), geaendert (freigegeben, Inhalt seither neu)."""
-    fg = load_settings().get("skills_freigabe") or {}
-    out = skills() + rollen()
+    s = load_settings(); fg = s.get("skills_freigabe") or {}
+    out = skills() + rollen(); umgestellt = False
     for e in out:
         alt = fg.get(e["key"])
+        if alt and len(alt) == 16 and alt == _hash_alt(*_dateien(e)):    # v208: alte Freigabe einmalig auf SHA-256 umstellen
+            fg[e["key"]] = alt = e["hash"]; umgestellt = True
         e["aktiv"] = alt == e["hash"]; e["geaendert"] = bool(alt) and alt != e["hash"]
+    if umgestellt: s["skills_freigabe"] = fg; save_settings(s)
     return out
+
+# v208: Fähigkeiten, die ein Skill ausdrücklich deklarieren (skill.json «rechte») UND freigegeben haben muss.
+# Normale lokale Bausteine (Dateien im Laufordner, Lesen, Sprachmodell) brauchen kein Recht.
+BAUSTEIN_RECHTE = {"mail_an_mich": "extern"}
+
+def recht_pruefen(wf_dir, typ):
+    """Vor einem sensiblen Baustein: None = erlaubt, sonst Begründung. Gilt für Workflow-Pakete mit skill.json."""
+    recht = BAUSTEIN_RECHTE.get(typ)
+    if not recht or not wf_dir or not (Path(wf_dir) / "skill.json").exists(): return None
+    e = next((x for x in alle() if x["art"] == "skill" and Path(x["pfad"]).resolve() == Path(wf_dir).resolve()), None)
+    if not e or not e["aktiv"]: return "Skill ist nicht freigegeben (oder seit der Freigabe verändert)"
+    if recht not in e["rechte"]: return f"Skill hat das Recht «{recht}» nicht deklariert"
+    return None
 
 
 def freigeben(key, an=True):
