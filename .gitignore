@@ -9,3 +9,5 @@ eval/*.txt
 *.db-shm
 __pycache__/
 *.pyc
+wissen/ordnungssystem.csv
+aura/engine/ordnungssystem_ar.csv
