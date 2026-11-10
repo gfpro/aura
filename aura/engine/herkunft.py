@@ -67,11 +67,25 @@ def alle_erlaubt():
     return out
 
 
+# v216: Intranets der Bundesverwaltung frei waehlbar (Feld unter «Wissen»), aber nur unter dieser Domain.
+# Gilt nur ohne Gruppenrichtlinie LiveOrigins_intranet – ist sie gesetzt, gilt allein sie.
+DOMAIN = {"intranet": "admin.ch"}
+
+
+def _domain_ok(o, quelle):
+    d = DOMAIN.get(quelle)
+    return bool(d) and not _policy(quelle) and o[2] == 443 and o[1].endswith("." + d) and not _IP.search(o[1])
+
+
 def ist_erlaubt(url, quelle=None):
-    """True nur, wenn die URL exakt zu einem freigegebenen Origin gehoert (quelle=None: irgendeine Live-Quelle)."""
+    """True nur, wenn die URL exakt zu einem freigegebenen Origin gehoert (quelle=None: irgendeine Live-Quelle).
+    Intranet: zusaetzlich jeder https-Host unter *.admin.ch (Port 443)."""
     menge = alle_erlaubt() if quelle is None else erlaubt(quelle)
-    try: return origin(url, ip_erlaubt=True) in menge
-    except HerkunftFehler: return False
+    try: o = origin(url)
+    except HerkunftFehler:
+        try: return origin(url, ip_erlaubt=True) in menge
+        except HerkunftFehler: return False
+    return o in menge or any(_domain_ok(o, q) for q in ([quelle] if quelle else DOMAIN))
 
 
 def pruefe(url, quelle=None):

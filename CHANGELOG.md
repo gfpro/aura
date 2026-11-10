@@ -4,6 +4,29 @@ Neueste Version zuerst. Versionsnummern entsprechen `VERSION` in `aura/__init__.
 
 ---
 
+## v213–v216 – 09.–10.11.2026 · Quellen öffnen, Anzeige, Acta-Nova-Start, mehrere Intranets
+
+**Live-Quellen**
+- SharePoint: Klick auf eine Quelle öffnet das Dokument im angemeldeten AURA-Edge. Pfade mit Leerzeichen/Umlauten werden vor der Herkunftsprüfung kodiert (vorher still abgelehnt); Standardbrowser nur als Rückfall.
+- Abgelehnte Adressen nennen den Host und werden kopiert; Acta-Nova-Aktenzeichen wird beim Klick sofort kopiert, Meldung statt stillem Abbruch, solange AURA arbeitet.
+- Acta Nova: genau ein Tab (Start-Tab abwarten, Doppel schliessen). Startseite wird vor der Suche nur noch neu geladen, wenn sie nicht bereit ist – der Neustart des Clients blieb jedes zweite Mal bei «Client wird gestartet» hängen. Hänger: Fenster sichtbar machen, nach 30 s neu laden, sonst klare Meldung (`init …` in `acta_nova.log`).
+- Acta Nova ist bei jedem Start aus; Einschalten öffnet Edge zur Anmeldung mit Karte/PIN.
+- Intranet: mehrere Adressen (eine pro Zeile), alle werden durchsucht und gemeinsam gewichtet; Herkunft je Treffer in Klammern. Freigabe für das Intranet: jeder https-Host unter `*.admin.ch` (Port 443); mit Richtlinie `LiveOrigins_intranet` gilt nur diese. Acta Nova und SharePoint bleiben auf feste Adressen beschränkt.
+
+**Antworten**
+- Text markier- und kopierbar (Ctrl+C, Ctrl+A).
+- Je Quelle ein farbiger Block (Lokal, Intranet, Acta Nova, SharePoint, Confluence) und eigener Block «Zusammenfassung über alle Quellen»; folgt Hell/Dunkel.
+- Aufzählungen («- ») und einfache Tabellen («A | B») erlaubt und ausgerichtet dargestellt; Schrift in Pixeln wie die übrige Oberfläche.
+- Höhe der Antwort passt sich der tatsächlichen Breite an (kein Abschneiden, keine Lücke, kein Flackern).
+- Begriffe in Anführungszeichen ("…", «…», „…“) müssen wörtlich vorkommen; sonst «Den genauen Begriff … finde ich nicht.» ohne Modelllauf. Gilt für die lokale Suche, noch nicht für Live-Quellen und den Listenmodus.
+
+**Geänderte Dateien**
+- `aura\gui.py`, `aura\worker.py`, `aura\llm\native.py`, `aura\engine\actanova.py`, `aura\engine\intranet.py`, `aura\engine\herkunft.py`, `aura\__init__.py` (Version `20261110v216`).
+
+**Bekannte Grenzen**
+- Acta Nova: «Ablageort öffnen» findet Subdossiers über das Feld «Aktenzeichen» teils nicht.
+- Tippfehler in Anführungszeichen werden nicht korrigiert (Vorschlag «Meintest du …?» offen).
+
 ## v212 – 08.11.2026 · Sicherheits-Review v21 (V20-01 bis V21-05)
 
 - Übernommen aus v208 (dort für v20 erstellt): Update-Prüfung mit Signatur und Rollback, Confluence-Host-Allowlist + DPAPI-Token, Workflow-Lese-Freigaben, Manifest-Prüfung mit transaktionalem Import, ZIP-/Dokumentgrenzen, Prompt-Abgrenzung, Skill-Rechte (SHA-256).

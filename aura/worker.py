@@ -656,7 +656,7 @@ class Worker(threading.Thread):
         for name, hs in abschnitte:
             rest.extend(h for h in hs)
         if belege and backend_id != "extractive" and not self.cancel.is_set():
-            orig("token", "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nZUSAMMENFASSUNG ÜBER ALLE QUELLEN\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+            orig("token", "\n\n— Zusammenfassung über alle Quellen —\n")   # v214d: eigener Block in der Anzeige
             try:
                 st = load_settings()
                 be = self._llm(backend_id); be.settings = dict(st, llm_top_k=len(belege), leer_satz="Dazu finde ich in den Quellen nichts."); be.used = None
@@ -763,6 +763,18 @@ class Worker(threading.Thread):
             self.emit("answer_start", asked, mode, ref)
             self.emit("token", f"Keine Objekte für diesen Filter gefunden ({', '.join(info)}).")
             self.emit("sources", []); return
+        # v214: Begriffe in Anfuehrungszeichen ("…", «…», „…“) muessen woertlich vorkommen
+        phr = [x.strip() for x in re.findall(r'"([^"]{2,})"|«([^»]{2,})»|„([^“”]{2,})[“”]|“([^”]{2,})”', question)
+               for x in x if x.strip()]
+        if phr:
+            sql = "SELECT DISTINCT item_id FROM chunks WHERE " + " AND ".join(["text LIKE ?"] * len(phr))
+            ids = {r[0] for r in self.conn.execute(sql, [f"%{x}%" for x in phr])}
+            if items is not None: ids &= set(items)
+            if not ids:
+                self.emit("answer_start", asked, mode, ref)
+                self.emit("token", "Den genauen Begriff " + ", ".join(f"«{x}»" for x in phr) + " finde ich in den Quellen nicht.")
+                self.emit("sources", []); return
+            items = list(ids); self.progress(f"Genauer Begriff: {', '.join(phr)} ({len(items)} Objekte)")
         # v77: «neueste» ohne Filter (items None) ist eine Themenfrage -> Suche mit staerkerem Aktualitaetsbonus
         searched = not (it and items is not None and (it.get("recent") or (it.get("range") and len(items) <= k)))   # v110
         if it and items is not None and (it.get("recent") or (it.get("range") and len(items) <= k)):
@@ -836,6 +848,9 @@ class Worker(threading.Thread):
                     hits[:n] = sorted(hits[:n], key=lambda h: h["ts"], reverse=not CHRONO.search(asked))
         self.emit("answer_start", asked, mode, ref)
         t_search = time.perf_counter() - t_start
+        if phr:                                                          # v214: nur Stellen mit dem genauen Begriff
+            _n = lambda t: re.sub(r"\s+", " ", (t or "")).lower()
+            hits = [h for h in hits if all(_n(x) in _n(h.get("text")) or _n(x) in _n(h.get("title")) for x in phr)] or hits
         if not hits:                                                     # v160: nichts gefunden -> kein Modelllauf
             self.emit("token", "Dazu habe ich in deinen Quellen nichts gefunden.")
             self.emit("sources", [], {"search": t_search, "total": t_search}); return

@@ -90,6 +90,143 @@ def hfont(size=18): return ctk.CTkFont(family=FH, size=size, weight="bold")
 def fmt(v): return f"{v:,}".replace(",", "'")
 def secs(v): return f"{v:.0f} s" if v >= 10 else f"{v:.1f} s"
 
+
+class SelText(tk.Text):
+    """v214: Antworttext markier- und kopierbar (statt CTkLabel), mit einfacher Struktur: «- » -> Aufzaehlung,
+    **fett**, Zeilen mit «|» als ausgerichtete Tabelle. API wie Label: configure(text=..., wraplength=...)."""
+    def __init__(self, master, text="", bg="#FFFFFF", fg="#000000", family="Segoe UI", size=14, wraplength=600):
+        sc = ctk.ScalingTracker.get_widget_scaling(master) or 1.0
+        size = -max(9, round(size * sc))                                  # v214b: Pixel wie CTkFont, nicht Punkte
+        super().__init__(master, wrap="word", bd=0, highlightthickness=0, relief="flat", padx=0, pady=0, height=1,
+                         bg=self._f(bg, 0), fg=self._f(fg, 0), font=(family, size), cursor="xterm", insertwidth=0, takefocus=0,
+                         selectbackground="#B4D5FE", selectforeground="#000000")
+        self._fam, self._sz, self._txt = family, size, None
+        self.tag_configure("b", font=(family, size, "bold"))
+        self.tag_configure("tab", font=("Consolas", size + 1))
+        for name, (hell, dk, strich) in self.QUELLFARBE.items():            # v214b: Quellen farbig abgesetzt
+            self.tag_configure("q_" + name, lmargin1=10, lmargin2=10, rmargin=10, spacing1=1, spacing3=1)
+            self.tag_configure("h_" + name, foreground=strich, font=(family, size, "bold"), spacing1=8)
+        self._bgfg = (bg, fg)                                             # v214g: Hell/Dunkel live umschalten
+        self._modus(ctk.get_appearance_mode())
+        try: ctk.AppearanceModeTracker.add(self._modus, self)
+        except Exception: pass
+        self.tag_configure("li", lmargin1=6, lmargin2=24)
+        self.bind("<Key>", lambda e: None if (e.state & 4 and e.keysym.lower() in ("c", "a")) else "break")
+        self.bind("<Control-a>", lambda e: (self.tag_add("sel", "1.0", "end-1c"), "break")[1])
+        self.bind("<MouseWheel>", lambda e: (self.master.event_generate("<MouseWheel>", delta=e.delta), "break")[1])
+        self._breite(wraplength); self.configure(text=text)
+        self.bind("<Configure>", self._breite_neu)                               # v214i: nur bei Breitenwechsel
+
+    def _breite(self, px):
+        import tkinter.font as tkf
+        self.config(width=max(20, int(px / max(1, tkf.Font(family=self._fam, size=self._sz).measure("0")))))
+
+    QUELLFARBE = {"lokal": ("#EEF2F7", "#232A33", "#5B7083"), "intranet": ("#EAF5EC", "#1F2E23", "#2E8B57"),
+                  "acta": ("#FDF3E3", "#33291B", "#C77D12"), "sharepoint": ("#E6F4F6", "#1B2E31", "#0F7C8C"),
+                  "confluence": ("#F1ECF8", "#2A2433", "#6B4FA3"),
+                  "zusammenfassung": ("#FBEDEE", "#341F22", "#B5121B")}
+
+    @staticmethod
+    def _f(c, i): return c[i] if isinstance(c, (tuple, list)) else c
+
+    def _modus(self, m):
+        i = 1 if str(m).lower().startswith("dark") or m == 1 else 0
+        try:
+            tk.Text.configure(self, bg=self._f(self._bgfg[0], i), fg=self._f(self._bgfg[1], i), insertbackground=self._f(self._bgfg[1], i))
+            for name, (hell, dk, strich) in self.QUELLFARBE.items():
+                self.tag_configure("q_" + name, background=dk if i else hell)
+        except Exception: pass
+
+    @classmethod
+    def _quelle(cls, titel):
+        t = titel.lower().replace(" ", "")
+        if t.startswith("zusammenfassung"): return "zusammenfassung"
+        for k in cls.QUELLFARBE:
+            if k in t: return k
+        return "lokal"
+
+    @staticmethod
+    def _tabelle(zeilen):
+        rows = [[c.strip() for c in z.strip().strip("|").split("|")] for z in zeilen
+                if not re.fullmatch(r"\s*\|?[\s:|-]+\|?\s*", z)]
+        n = max(len(r) for r in rows); w = [max(len(r[i]) if i < len(r) else 0 for r in rows) for i in range(n)]
+        return ["  ".join((r[i] if i < len(r) else "").ljust(w[i]) for i in range(n)).rstrip() for r in rows]
+
+    def configure(self, cnf=None, **kw):
+        if "wraplength" in kw: self._breite(kw.pop("wraplength"))
+        if "text" not in kw: return super().configure(cnf, **kw) if (cnf or kw) else None
+        t = str(kw.pop("text"))
+        if kw: super().configure(cnf, **kw)
+        if t == self._txt: return
+        t = re.sub(r"━+\n(ZUSAMMENFASSUNG ÜBER ALLE QUELLEN)\n━+", r"— Zusammenfassung über alle Quellen —", t)
+        self._txt = t; zeilen = t.split("\n"); out = []; i = 0
+        while i < len(zeilen):
+            if zeilen[i].count("|") >= 2:
+                j = i
+                while j < len(zeilen) and zeilen[j].count("|") >= 2: j += 1
+                out += [(z, "tab") for z in self._tabelle(zeilen[i:j])]; i = j; continue
+            m = re.match(r"^\s*(?:[-*•]|\d+[.)])\s+(.*)", zeilen[i])
+            out.append(("• " + m.group(1) if not re.match(r"^\s*\d", zeilen[i]) else zeilen[i].strip(), "li") if m
+                       else (zeilen[i].lstrip("# "), None)); i += 1
+        super().configure(state="normal"); self.delete("1.0", "end")
+        sek = None                                                        # v214b: aktueller Quellenblock
+        if not any(re.fullmatch(r"\s*—\s*.+?\s*—\s*", z) for z, _ in out): sek = False
+        for k, (z, tag) in enumerate(out):
+            m = re.fullmatch(r"\s*—\s*(.+?)\s*—\s*", z) if sek is not False else None
+            if m:
+                sek = self._quelle(m.group(1))
+                if k: self.insert("end", "\n")
+                self.insert("end", m.group(1).upper(), ("q_" + sek, "h_" + sek))
+            else:
+                if sek and not z.strip() and (k + 1 >= len(out) or re.fullmatch(r"\s*—.+—\s*", out[k + 1][0])): continue
+                for n, teil in enumerate(re.split(r"\*\*(.+?)\*\*", z)):
+                    self.insert("end", teil, tuple(x for x in (tag, "b" if n % 2 else None, "q_" + sek if sek else None) if x))
+            if k < len(out) - 1: self.insert("end", "\n", ("q_" + sek,) if sek else ())
+        if sek: self.insert("end", "\n", ("q_" + sek,))                      # v214g: letzte Blockzeile ganz farbig
+        self._hoehe()
+
+    def _hoehe(self, _e=None):
+        """v214f: Hoehe nachziehen, bis die letzte Zeile sichtbar ist – ohne update_idletasks (keine Rekursion),
+        schrittweise per after(); hoechstens ein Lauf gleichzeitig."""
+        if getattr(self, "_h_lauf", False): return
+        self._h_lauf = True
+        try:
+            h = self.count("1.0", "end", "displaylines")
+            h = max(1, (h[0] if isinstance(h, tuple) else h) or 1)
+        except Exception:
+            h = int(self.index("end-1c").split(".")[0])
+        tk.Text.configure(self, height=h)
+        self.after(30, self._h_schritt, 0)
+
+    def _breite_neu(self, e):
+        """Hoehenaenderungen loesen auch <Configure> aus – darauf nicht reagieren, sonst Endlosschleife (Flackern)."""
+        if e.width == getattr(self, "_w_alt", None) or getattr(self, "_h_lauf", False): return
+        self._w_alt = e.width; self.after_idle(self._hoehe)
+
+    def _ganz(self):
+        d = self.dlineinfo("end-1c")
+        return d is not None and d[1] + d[3] <= self.winfo_height()
+
+    def _h_schritt(self, n, schrumpfen=False):
+        """v214h: erst wachsen, bis alles sichtbar ist, dann zeilenweise schrumpfen, solange noch alles sichtbar ist."""
+        try:
+            self.yview_moveto(0); h = int(self.cget("height"))
+            if not schrumpfen:
+                if not self._ganz() and n < 80:
+                    tk.Text.configure(self, height=h + 1); self.after(40, self._h_schritt, n + 1); return
+                if h > 1 and n < 160:
+                    tk.Text.configure(self, height=h - 1); self.after(40, self._h_schritt, n + 1, True); return
+            else:
+                if not self._ganz():
+                    tk.Text.configure(self, height=h + 1)                 # eine zu viel geschrumpft -> zurueck, fertig
+                elif h > 1 and n < 160:
+                    tk.Text.configure(self, height=h - 1); self.after(40, self._h_schritt, n + 1, True); return
+        except Exception:
+            pass
+        self._h_lauf = False
+
+    config = configure
+
 class App:
     def __init__(self, root):
         from .db import vor_start_zuruecksetzen                        # v60: vor dem Öffnen der Datenbank
@@ -765,6 +902,8 @@ class App:
                                       fg_color="transparent", hover_color=BORDER, text_color=MUTED, border_width=1,
                                       border_color=BORDER, command=self.add_anhang)
         self.b_anhang.pack(side="left", padx=(8, 0)); self.buttons.append(self.b_anhang)
+        if self.s.get("actanova"):                                       # v215: bei jedem Start aus – Einschalten
+            self.s["actanova"] = False; save_settings(self.s)               # oeffnet Edge zur Anmeldung mit Karte/PIN
         self.b_acta = ctk.CTkButton(tools, text="🗂 Acta Nova", height=24, corner_radius=0, font=font(11),
                                     hover_color=BORDER, border_width=1, command=self.toggle_acta)
         self.b_acta.pack(side="left", padx=(8, 0)); self._acta_farbe()
@@ -881,7 +1020,8 @@ class App:
         sc = ctk.ScalingTracker.get_widget_scaling(self.chat) or 1.0
         return max(320, int(self.chat.winfo_width() / sc * 0.72))
     def _rewrap(self):
-        for lbl in self.msgs: lbl.configure(wraplength=self._wrap())
+        sc = ctk.ScalingTracker.get_widget_scaling(self.chat) or 1.0
+        for lbl in self.msgs: lbl.configure(wraplength=self._wrap() * (sc if isinstance(lbl, SelText) else 1))
 
     def bubble(self, text, kind="a"):
         """kind: q (Frage, rechts) | a (Antwort, links) | err"""
@@ -894,7 +1034,11 @@ class App:
         fg = {"q": "white", "a": INK, "err": ERR}[kind]
         b = ctk.CTkFrame(holder, fg_color=bg, corner_radius=0, border_width=0 if kind != "a" else 1, border_color=BORDER)
         b.grid(row=0, column=1 if right else 0, sticky="e" if right else "w", padx=8)
-        lbl = ctk.CTkLabel(b, text=text, font=font(14), text_color=fg, justify="left", anchor="w", wraplength=self._wrap())
+        if kind == "a":                                                   # v214: Antwort markier-/kopierbar
+            lbl = SelText(b, text=text, bg=bg, fg=fg, family=F, size=14,        # v214g: Farbpaare (hell, dunkel)
+                          wraplength=self._wrap() * (ctk.ScalingTracker.get_widget_scaling(self.chat) or 1.0))
+        else:
+            lbl = ctk.CTkLabel(b, text=text, font=font(14), text_color=fg, justify="left", anchor="w", wraplength=self._wrap())
         lbl.pack(padx=16, pady=11, anchor="w"); self.msgs.append(lbl)
         self._scroll(force=True); return b, lbl
 
@@ -1073,16 +1217,35 @@ class App:
         self.status.configure(text="Gespeicherter Chat – neue Fragen werden angehängt. Für eine Folgefrage «↳ Bezug zur letzten Frage».")
 
     def open_original(self, item_id):
-        if isinstance(item_id, str) and item_id.startswith("http"):        # Live-Quelle Intranet: Seite im Browser
+        if isinstance(item_id, str) and item_id.startswith("http"):        # Live-Quelle Intranet/SharePoint
+            from urllib.parse import quote, urlsplit
             from .engine.herkunft import ist_erlaubt                       # v212: nur freigegebene Quellen oeffnen
-            if not ist_erlaubt(item_id):
-                self.status.configure(text="Adresse nicht freigegeben – nicht geöffnet."); return
-            import webbrowser; webbrowser.open(item_id); self.status.configure(text="Intranetseite geöffnet."); return
+            url = quote(item_id.strip(), safe=":/?#[]@!$&'()*+,;=%~")      # v213: Leerzeichen/Umlaute in SharePoint-Pfaden
+            if not ist_erlaubt(url):
+                self.status.configure(text=f"Adresse nicht freigegeben ({urlsplit(url).hostname}) – nicht geöffnet.")
+                self._copy(url); return
+            if ist_erlaubt(url, "sharepoint"):                             # v213: in der angemeldeten AURA-Edge-Sitzung
+                self.status.configure(text="SharePoint: öffne Dokument …")
+                def sp():
+                    try:
+                        from .engine import edge
+                        t = edge.tab_neu(url); edge.fenster(t, "normal")
+                        try: t.ws.cdp("Page.bringToFront")
+                        except Exception: pass
+                        msg = "SharePoint: im Edge-Fenster geöffnet."
+                    except Exception as x:
+                        import webbrowser; webbrowser.open(url); msg = f"SharePoint: im Standardbrowser geöffnet ({x})."
+                    self.root.after(0, lambda: self.status.configure(text=msg))
+                threading.Thread(target=sp, daemon=True).start(); return
+            import webbrowser; webbrowser.open(url); self.status.configure(text="Intranetseite geöffnet."); return
         if isinstance(item_id, str) and item_id.startswith("acta:"):       # Live-Quelle Acta Nova: Ablageort oeffnen
             az = item_id[5:]
             if getattr(self.w, "current", None):
-                self.status.configure(text="Bitte warten, bis AURA fertig ist – dann den Ablageort nochmals anklicken."); return
-            self.status.configure(text=f"Acta Nova: öffne {az} …")
+                self._copy(az)                                             # v213: sichtbare Reaktion statt stiller Abbruch
+                messagebox.showinfo(APP_NAME, f"AURA arbeitet noch ({self.w.current}).\nAktenzeichen {az} ist kopiert – "
+                                    "bitte danach nochmals anklicken.", parent=self.root); return
+            self._copy(az)
+            self.status.configure(text=f"Acta Nova: suche {az} im Edge-Fenster (bis ~30 s) – Aktenzeichen ist kopiert …")
             def los():
                 try:
                     from .engine import actanova
@@ -1133,14 +1296,20 @@ class App:
         return w
 
     def _url_feld(self, w, row, key, placeholder, nachher):
-        e = ctk.CTkEntry(w, placeholder_text=placeholder, height=28); e.grid(row=row, column=0, sticky="ew", pady=(4, 0))
-        if self.s.get(key): e.insert(0, self.s[key])
+        mehr = key == "intranet_url"                                      # v216: mehrere Intranets, eine pro Zeile
+        if mehr:
+            e = ctk.CTkTextbox(w, height=96, font=font(12), border_width=2); e.grid(row=row, column=0, sticky="ew", pady=(4, 0))
+            e.insert("1.0", "\n".join(x for x in re.split(r"[\s,;]+", self.s.get(key) or "") if x) or placeholder)
+        else:
+            e = ctk.CTkEntry(w, placeholder_text=placeholder, height=28); e.grid(row=row, column=0, sticky="ew", pady=(4, 0))
+            if self.s.get(key): e.insert(0, self.s[key])
         def save():
-            u = e.get().strip()
+            u = (" ".join(x for x in re.split(r"[\s,;]+", e.get("1.0", "end")) if x) if mehr else e.get().strip())
             q = {"actanova_url": "actanova", "intranet_url": "intranet"}.get(key)
             from .engine.herkunft import ist_erlaubt, erlaubt          # v212: gleiche Pruefung wie in der Engine
-            if u and not ist_erlaubt(u, q):
-                messagebox.showerror(APP_NAME, "Adresse nicht freigegeben. Erlaubt: " + ", ".join(sorted("https://" + h for _, h, _p in erlaubt(q))), parent=self.root); return
+            falsch = [x for x in re.split(r"[\s,;]+", u) if x and not ist_erlaubt(x, q)]   # v216: mehrere Adressen
+            if falsch:
+                messagebox.showerror(APP_NAME, f"Nicht freigegeben: {', '.join(falsch)}\n\nErlaubt: " + ", ".join(sorted("https://" + h for _, h, _p in erlaubt(q))), parent=self.root); return
             self.s = load_settings(); self.s[key] = u; save_settings(self.s); nachher()
         ctk.CTkButton(w, text="Speichern", height=28, corner_radius=0, font=font(11, "bold"), fg_color=ACCENT,
                       hover_color=ACCENT_HI, command=save).grid(row=row + 1, column=0, sticky="w", pady=6)
@@ -1223,10 +1392,10 @@ class App:
 
     def open_live_intra(self):
         w = self._live_view("live_intra", "Intranet einrichten",
-            "Adresse des Intranets eintragen (z. B. die Startseite). Gesucht wird bei der Frage über die Suche des "
-            "Intranets (Schalter «Intranet» im Chat); Anmeldung automatisch über das Windows-Konto. Alle VBS-Intranets "
-            "mit gleicher Suchlogik funktionieren.")
-        ctk.CTkLabel(w, text="Intranet-Adresse", font=font(11, "bold"), text_color=INK, anchor="w").grid(row=1, column=0, sticky="w", pady=(6, 0))
+            "Adressen der Intranets eintragen, eine pro Zeile (z. B. die Startseite). Gesucht wird bei der Frage in allen "
+            "eingetragenen Intranets (Schalter «Intranet» im Chat); Anmeldung automatisch über das Windows-Konto. "
+            "Erlaubt sind Adressen unter admin.ch; alle VBS-Intranets mit gleicher Suchlogik funktionieren.")
+        ctk.CTkLabel(w, text="Intranet-Adressen (eine pro Zeile)", font=font(11, "bold"), text_color=INK, anchor="w").grid(row=1, column=0, sticky="w", pady=(6, 0))
         self._url_feld(w, 2, "intranet_url", "https://intranet.ar.admin.ch/de", self.open_live_intra)
 
     # ---- v78: Confluence-Links (Seite = inkl. Unterseiten, Bereich = alles)
@@ -1374,8 +1543,13 @@ class App:
             try:
                 from .engine import edge, actanova
                 edge.starten(actanova.start_url())
-                t = edge.tab_finden("actanova") or edge.tab_neu(actanova.start_url())
-                edge.fenster(t, "normal"); t.schliessen()
+                def _init():                                             # v213b: ein Tab, Haenger selbst loesen
+                    t = actanova.ein_tab()                                          # v213: haengende Initialisierung selbst loesen
+                    try: actanova.init_haenger_loesen(t)
+                    finally:
+                        try: t.schliessen()
+                        except Exception: pass
+                threading.Thread(target=_init, daemon=True).start()
             except Exception as e:
                 log.get().info(f"Acta Nova: Edge nicht geöffnet: {e}")
             messagebox.showinfo(APP_NAME, "Acta Nova ist eingeschaltet.\n\nBitte zuerst im Edge-Fenster mit Karte und PIN "

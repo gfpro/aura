@@ -5,17 +5,33 @@ import math, re, time
 from urllib.parse import quote
 from . import edge
 
-def basis():
-    """Aus der Intranet-URL unter «Wissen»: ('https://intranet.ar.admin.ch', '/de'). Leer, wenn nicht eingetragen."""
+def basen():
+    """v216: Eine oder mehrere Intranet-Adressen unter «Wissen» (getrennt durch Leerzeichen, Komma oder Semikolon)
+    -> [('https://intranet.ar.admin.ch', '/de'), ...]. Nur freigegebene Origins (herkunft.py)."""
     from urllib.parse import urlparse
     from ..config import load_settings
     from .herkunft import ist_erlaubt
-    roh = (load_settings().get("intranet_url") or "").strip()
-    u = urlparse(roh)
-    if not u.scheme or not u.netloc or not ist_erlaubt(roh, "intranet"):     # v212: nur freigegebener Origin
-        return "", ""
-    m = re.match(r"^/(de|fr|it|en|rm)\b", u.path or "")
-    return f"{u.scheme}://{u.netloc}", "/" + (m.group(1) if m else "de")
+    out = []
+    for roh in re.split(r"[\s,;]+", (load_settings().get("intranet_url") or "").strip()):
+        u = urlparse(roh)
+        if not roh or not u.scheme or not u.netloc or not ist_erlaubt(roh, "intranet"):
+            continue
+        m = re.match(r"^/(de|fr|it|en|rm)\b", u.path or "")
+        b = (f"{u.scheme}://{u.netloc}", "/" + (m.group(1) if m else "de"))
+        if b not in out: out.append(b)
+    return out
+
+
+def basis():
+    """Erste Adresse (Kompatibilitaet). ('', '') wenn keine."""
+    b = basen()
+    return b[0] if b else ("", "")
+
+
+def _name(b):
+    """'https://intranet.ar.admin.ch' -> 'AR'  (Kurzname fuer die Anzeige)."""
+    teile = b[0].split("//", 1)[-1].split(".")
+    return (teile[1] if len(teile) > 2 and teile[0] == "intranet" else teile[0]).upper()
 
 
 SUCH_PFAD = "/search?search={q}&searchType=pages&sort=relevance&page={p}&display=list"
@@ -74,9 +90,9 @@ def soll_suchen(frage, settings):
     return bool(settings.get("intranet", False))
 
 
-def suchen(tab, begriff):
+def suchen(tab, begriff, b=None):
     from .herkunft import ist_erlaubt
-    BASIS, sprache = basis()
+    BASIS, sprache = b or basis()
     if not BASIS: raise RuntimeError("Intranet-Adresse fehlt oder ist nicht freigegeben")
     treffer, anzahl = [], 0
     for p in range(1, MAX_SEITEN_SUCHE + 1):
@@ -176,7 +192,14 @@ def antworten(w, asked, backend_id, prev, ref, t0):
         edge.verstecken()                                          # Intranet braucht keine Anmeldung (SSO)
         w.progress(f"Intranet: suche «{begriff}» …")
         tab = edge.tab_neu("about:blank")
-        treffer, anzahl = suchen(tab, begriff)
+        treffer, anzahl, mehrere = [], 0, len(basen()) > 1            # v216: alle eingetragenen Intranets
+        for b in basen():
+            try:
+                tr, n = suchen(tab, begriff, b)
+            except Exception as x:
+                _diag(f"{b[0]}: {x}"); continue
+            for t in tr: t["netz"] = _name(b)
+            treffer += tr; anzahl += n
         if not treffer:
             w.emit("token", f"Im Intranet gibt es zu «{begriff}» keine Treffer.")
             w.emit("sources", [], {"total": time.perf_counter() - t0, "list": True}); return
@@ -213,7 +236,7 @@ def antworten(w, asked, backend_id, prev, ref, t0):
         if tab: edge.tab_zu(tab)
     stellen.sort(key=lambda x: -x[0])
     n = min(4, int(s.get("llm_top_k", 4)))                     # kurz halten: Sprachmodell ist der langsamste Teil
-    hits = [{"title": t["titel"], "source": "intranet", "ts": "", "author": t["datum"], "item_id": t["url"], "chunk_id": None,
+    hits = [{"title": t["titel"] + (f" ({t['netz']})" if len(basen()) > 1 else ""), "source": "intranet", "ts": "", "author": t["datum"], "item_id": t["url"], "chunk_id": None,
              "location": t["url"], "url": t["url"], "text": st} for _, t, st in stellen[:n]]
     t_search = time.perf_counter() - t0
     if backend_id != "extractive" and hits:
@@ -228,7 +251,7 @@ def antworten(w, asked, backend_id, prev, ref, t0):
             w.emit("token", f"(Sprachmodell übersprungen: {e})")
     seiten = []
     for t in treffer[:5]:
-        seiten.append(f"– {t['titel']} ({t['datum']}): {t['url']}")
+        seiten.append(f"– {t['titel']} ({t['datum']}{', ' + t['netz'] if len(basen()) > 1 else ''}): {t['url']}")
     w.emit("token", f"\n\nIntranet: {anzahl} Treffer zu «{begriff}», gewichtet; die passendsten Seiten:\n" + "\n".join(seiten))
     w.emit("sources", hits, {"search": t_search, "total": time.perf_counter() - t0, "list": backend_id == "extractive"})
     w.chat = {"qs": (prev + [asked])[-3:], "hits": [], "t": time.time()}

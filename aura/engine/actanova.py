@@ -112,19 +112,66 @@ class ActaNovaFehler(RuntimeError):
     pass
 
 
+def ein_tab(warten=15.0):
+    """v213b: Genau EIN Acta-Nova-Tab. Nach dem Edge-Start bis `warten` s auf den Start-Tab warten (er laedt noch
+    ueber die Anmeldung), Doppel schliessen, erst dann notfalls einen neuen Tab oeffnen."""
+    from .herkunft import ist_erlaubt
+    ende = time.time() + warten
+    while True:
+        offen = [t for t in edge.tabs() if ist_erlaubt(t.get("url", ""), "actanova")]
+        if offen or time.time() > ende:
+            break
+        time.sleep(0.5)
+    for x in offen[1:]:                                          # Doppel weg: zwei Initialisierungen blockieren sich
+        edge.tab_zu(edge.Tab(x))
+    return edge.Tab(offen[0]) if offen else edge.tab_neu(start_url())
+
+
+def _zeigen(tab):
+    edge.fenster(tab, "normal")
+    try: tab.ws.cdp("Page.bringToFront")
+    except Exception: pass
+
+
+def init_haenger_loesen(tab, warten=20.0, versuche=2):
+    """v213b: Haengt «DmsInitializationForm» («Client wird gestartet …»), zuerst Fenster sichtbar machen
+    (der Client initialisiert offenbar nur sichtbar – so wirkt auch das manuelle Aus/Ein), danach neu laden."""
+    for i in range(versuche + 1):
+        _zeigen(tab)
+        ende = time.time() + warten
+        while time.time() < ende:
+            try: href = tab.js("location.href") or ""
+            except Exception: href = ""
+            if href and "DmsInitializationForm" not in href:
+                _log(f"init ok nach Versuch {i}")
+                return True
+            time.sleep(0.5)
+        _log(f"init haengt ({href[:60]}) - Versuch {i + 1}")
+        if i < versuche:
+            try: tab.ws.cdp("Page.reload", ignoreCache=True)
+            except Exception as x: _log(f"reload fehlgeschlagen: {x}")
+    return False
+
+
 def verbinden():
     """Haengt sich an die offene Acta-Nova-Sitzung. Startet Edge, falls noetig (Anmeldung macht der Mensch)."""
     edge.starten(start_url())
-    tab = edge.tab_finden("actanova")
+    tab = ein_tab(5.0)                                             # v213b: Doppel-Tabs vermeiden
     if tab: tab.dialog_schliessen()
     if not tab:
         raise ActaNovaFehler("Kein Acta-Nova-Tab offen - bitte im Edge-Fenster anmelden.")
     # Frisch starten: Startseite neu laden. Setzt die Brotkruemel zurueck und zeigt sofort (statt nach 90 s),
     # ob die Sitzung abgelaufen ist.
-    try:
-        tab.navigieren(start_url(), "actanova")
-    except Exception:
-        pass
+    # v214c: Nicht jedes Mal neu laden – jedes Neuladen startet den Acta-Nova-Client neu, und genau dieser Neustart
+    # bleibt jedes zweite Mal haengen (Log 10.11.). Nur laden, wenn die Seite nicht schon bereit ist.
+    bereit = False
+    try: bereit = "DmsInitializationForm" not in (tab.js("location.href") or "") and _warten(tab, "AN.text('Suchen', true)", 2, 0.3)
+    except Exception: pass
+    if not bereit:
+        try: tab.navigieren(start_url(), "actanova")
+        except Exception: pass
+    if not init_haenger_loesen(tab, 30.0, 1):                      # v213b
+        raise ActaNovaFehler("Acta Nova bleibt bei «Client wird gestartet» stehen – Fenster ist offen, bitte prüfen.")
     if not _warten(tab, "AN.text('Suchen', true)", 15, 0.4):
         edge.fenster(tab, "normal")                                # Anmeldung braucht das sichtbare Fenster
         try: tab.ws.cdp("Page.bringToFront")
