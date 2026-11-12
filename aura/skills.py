@@ -1,4 +1,4 @@
-# aura/skills.py — Skills und Rollen: finden, freigeben, importieren. Version 20261103v172 (v172: Inhalt speichern mit Sicherungskopie)
+# aura/skills.py — Skills und Rollen: finden, freigeben, importieren. Version 20261112v229 (v229: Rolle/Skill im Formular erstellen; v172: Inhalt speichern mit Sicherungskopie)
 # Rolle  = Markdown-Datei in C:\aura\rollen\<name>.md (Haltung, Arbeitsgrundsätze). Wird als Zusatz zum Systemtext verwendet:
 #          im Chat (Auswahl «Rolle» über dem Chat) oder im Baustein «Anweisung ans Sprachmodell» (Feld «Rolle»).
 # Skill  = Workflow-Paket mit skill.json (Anzeigename, Beschreibung, Rolle, Rechte, Version, Autor). Erscheint in der Palette
@@ -216,3 +216,49 @@ def als_vorlage(e, titel):
     wj = ziel / "workflow.json"; wf = json.loads(wj.read_text(encoding="utf-8")); wf["name"] = titel.strip()
     wj.write_text(json.dumps(wf, ensure_ascii=False, indent=1), encoding="utf-8")
     return ziel
+
+
+# ------------------------------------------------------------------ v229: Neu erstellen (Formular -> Markdown, ohne Sprachmodell)
+def _liste(txt, nummeriert=False):
+    z = [re.sub(r"^\s*(?:[-*•]|\d+[.)])\s*", "", x).strip() for x in (txt or "").splitlines()]
+    z = [x for x in z if x]
+    return "\n".join((f"{i}. {x}" if nummeriert else f"- {x}") for i, x in enumerate(z, 1))
+
+
+def md_bauen(art, f):
+    """f: titel, beschreibung, autor, version + Rolle: haltung, grundsaetze, nicht | Skill: aufgabe, eingaben, schritte,
+    ausgabe, pruefen, rolle (Name). Leere Abschnitte entfallen."""
+    kopf = ["---", f"name: {_slug(f['titel'])}", f"description: {f.get('beschreibung', '').strip()}",
+            f"version: {f.get('version') or '1'}", f"author: {f.get('autor', '').strip()}", "---", ""]
+    if art == "rolle":
+        teile = [f"# Rolle: {f['titel'].strip()}", ("## Haltung", f.get("haltung", "").strip()),
+                 ("## Arbeitsgrundsätze", _liste(f.get("grundsaetze"))), ("## Nicht tun", _liste(f.get("nicht")))]
+    else:
+        r = f.get("rolle", "")
+        teile = [f"# Skill: {f['titel'].strip()}" + (f"\n\nArbeite nach der Rolle «{r}»." if r else ""),
+                 ("## Aufgabe", f.get("aufgabe", "").strip()), ("## Eingaben", _liste(f.get("eingaben"))),
+                 ("## Schritte", _liste(f.get("schritte"), True)), ("## Ergebnis", f.get("ausgabe", "").strip()),
+                 ("## Prüfpunkte", _liste(f.get("pruefen")))]
+    out = [teile[0]] + [f"{h}\n\n{t}" for h, t in teile[1:] if t]
+    return "\n".join(kopf) + "\n\n".join(out) + "\n"
+
+
+def neu_erstellen(art, f):
+    """Legt Rolle bzw. Skill aus dem Formular an – wie ein Import: nicht freigegeben. Liefert den Pfad."""
+    titel = (f.get("titel") or "").strip()
+    if not titel: raise ValueError("Bitte einen Titel eingeben.")
+    md = md_bauen(art, f)
+    if art == "rolle":
+        ROLLEN_DIR.mkdir(exist_ok=True); ziel = ROLLEN_DIR / f"{_slug(titel)}.md"
+        if ziel.exists(): raise ValueError(f"Rolle «{ziel.stem}» gibt es schon – anderen Titel wählen.")
+        ziel.write_text(md, encoding="utf-8"); return ziel
+    from .workflow import paket
+    d = paket.create(titel)                                    # wirft, wenn es den Workflow schon gibt
+    (d / "anleitung.md").write_text(md, encoding="utf-8")
+    (d / "skill.json").write_text(json.dumps({
+        "titel": titel, "beschreibung": f.get("beschreibung", "").strip(), "rolle": f.get("rolle", ""),
+        "rechte": [r for r in f.get("rechte", []) if r in RECHTE], "version": f.get("version") or "1",
+        "autor": f.get("autor", "").strip(), "quelle": "in AURA erstellt",
+        "status": "Rohbau – Schritte, Feldplan und Regeln noch einrichten (siehe anleitung.md)"},
+        ensure_ascii=False, indent=1), encoding="utf-8")
+    return d

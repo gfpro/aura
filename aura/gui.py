@@ -1,4 +1,4 @@
-# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261112v227 (v227: kein Flackern beim Schreiben; v166: Antwortlaenge als Schieberegler)
+# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261112v229 (v229: Skills & Rollen unter Werkzeuge; v227: kein Flackern beim Schreiben; v166: Antwortlaenge als Schieberegler)
 # v129: Senden-Knopf orange «⏳» + Hinweis, solange Vektoren berechnet werden (Frage bleibt im Eingabefeld).
 #       «＋ Neuer Chat» und «🕘 Verlauf» über dem Chat; Chats werden 30 Tage gespeichert (chatlog.py, data\chats.db;
 #       Einstellungen chats_behalten, chats_tage). «⌂» startet ebenfalls einen neuen Chat (setzt den Bezug im Worker zurück).
@@ -355,6 +355,8 @@ class App:
         hilfe.tip(self._item(b, "Text anonymisieren", self.open_anon, 0), hilfe.TEXTE["haupt"]["Text anonymisieren"])
         hilfe.tip(self._item(b, "Code prüfen", self.open_code, 1),                                         # v142
                   "Projektordner einlesen, Code ohne und mit Sprachmodell prüfen, Vorschläge als Diff übernehmen (mit Sicherung).")
+        hilfe.tip(self._item(b, "Skills & Rollen", self.open_skills, 2),                                   # v229: aus Einstellungen
+                  "Skills und Rollen ansehen, erstellen, importieren und freigeben. Neues oder Geändertes ist aus, bis du es freigibst.")
 
         # ---- Einstellungen
         b = self._grp(menu, "Einstellungen", "Abgleich, Anzeige und Protokoll.")
@@ -371,8 +373,6 @@ class App:
         self._switch(b, "Info-Leiste rechts", self.rb_var, self.toggle_rb, 3)
         self.start_var = tk.BooleanVar(value=self.s.get("startseite") == "widgets")          # v82
         self._switch(b, "Beim Start Widgets zeigen", self.start_var, self.set_start, 4)
-        hilfe.tip(self._item(b, "Skills & Rollen", self.open_skills, 6),                                   # v146
-                  "Verfügbare Skills und Rollen ansehen, importieren und freigeben. Neues oder Geändertes ist aus, bis du es freigibst.")
         self.sb_mode = ctk.CTkSegmentedButton(b, values=list(MODI), height=26, font=font(11), command=self.set_mode,  # v69
                                               selected_color=ACCENT, selected_hover_color=ACCENT_HI, unselected_color=SIDE,
                                               unselected_hover_color=BORDER, fg_color=SIDE, text_color=INK)

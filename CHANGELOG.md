@@ -4,6 +4,18 @@ Neueste Version zuerst. Versionsnummern entsprechen `VERSION` in `aura/__init__.
 
 ---
 
+## v229 – 12.11.2026 · Skills & Rollen erstellen, neuer Platz im Menü
+
+- **Skills & Rollen** liegt neu unter **Werkzeuge** (bisher Einstellungen).
+- Neuer Knopf **«＋ Neu …»**: Rolle oder Skill über ein Formular erstellen, ohne Sprachmodell (kein LLM-Router, Grundsatz v144).
+  - Rolle: Titel, Kurzbeschreibung, Autor, Haltung, Arbeitsgrundsätze, «Nicht tun» → `rollen\<titel>.md` mit Kopfzeilen (name, description, version, author).
+  - Skill: Aufgabe, Eingaben, Schritte (nummeriert), Ergebnis, Prüfpunkte, Rolle, Rechte → Workflow-Paket mit `anleitung.md` und `skill.json` (Rohbau wie beim Import).
+  - «Vorschau» zeigt das Markdown vor dem Erstellen; leere Abschnitte entfallen.
+  - Neu Erstelltes ist aus, bis es freigegeben wird.
+- «Markdown importieren …» bleibt als zweiter Knopf.
+- Geänderte Dateien: `aura\gui.py`, `aura\skills.py` (`md_bauen`, `neu_erstellen`), `aura\skills_gui.py`, `aura\__init__.py` (Version `20261112v229`).
+- Bekannte Grenze: Der erzeugte Skill-Text nennt die Rolle mit Dateinamen statt Titel (Verknüpfung über `skill.json` funktioniert).
+
 ## v226–v228 – 12.11.2026 · Ganzes Dokument statt Ausschnitte, Acta Nova in der Zusammenfassung
 
 **Aufträge zu angehängten Dokumenten (neu)**
