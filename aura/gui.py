@@ -1,4 +1,4 @@
-# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261103v166 (v166: Antwortlaenge als Schieberegler)
+# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261112v227 (v227: kein Flackern beim Schreiben; v166: Antwortlaenge als Schieberegler)
 # v129: Senden-Knopf orange «⏳» + Hinweis, solange Vektoren berechnet werden (Frage bleibt im Eingabefeld).
 #       «＋ Neuer Chat» und «🕘 Verlauf» über dem Chat; Chats werden 30 Tage gespeichert (chatlog.py, data\chats.db;
 #       Einstellungen chats_behalten, chats_tage). «⌂» startet ebenfalls einen neuen Chat (setzt den Bezug im Worker zurück).
@@ -101,6 +101,7 @@ class SelText(tk.Text):
                          bg=self._f(bg, 0), fg=self._f(fg, 0), font=(family, size), cursor="xterm", insertwidth=0, takefocus=0,
                          selectbackground="#B4D5FE", selectforeground="#000000")
         self._fam, self._sz, self._txt = family, size, None
+        self.live = False                                                 # v227: waehrend des Schreibens nur wachsen
         self.tag_configure("b", font=(family, size, "bold"))
         self.tag_configure("tab", font=("Consolas", size + 1))
         for name, (hell, dk, strich) in self.QUELLFARBE.items():            # v214b: Quellen farbig abgesetzt
@@ -183,18 +184,19 @@ class SelText(tk.Text):
                     self.insert("end", teil, tuple(x for x in (tag, "b" if n % 2 else None, "q_" + sek if sek else None) if x))
             if k < len(out) - 1: self.insert("end", "\n", ("q_" + sek,) if sek else ())
         if sek: self.insert("end", "\n", ("q_" + sek,))                      # v214g: letzte Blockzeile ganz farbig
-        self._hoehe()
+        self._hoehe(); self.after(900, self._hoehe)                         # v221: Nachkontrolle nach dem Layout
 
     def _hoehe(self, _e=None):
         """v214f: Hoehe nachziehen, bis die letzte Zeile sichtbar ist – ohne update_idletasks (keine Rekursion),
         schrittweise per after(); hoechstens ein Lauf gleichzeitig."""
-        if getattr(self, "_h_lauf", False): return
-        self._h_lauf = True
+        if getattr(self, "_h_lauf", False): self._h_nochmal = True; return   # v220: nicht verwerfen, danach nachholen
+        self._h_lauf = True; self._h_nochmal = False
         try:
             h = self.count("1.0", "end", "displaylines")
             h = max(1, (h[0] if isinstance(h, tuple) else h) or 1)
         except Exception:
             h = int(self.index("end-1c").split(".")[0])
+        if self.live: h = max(h, int(self.cget("height")))                  # v227: kein Schrumpfen beim Streamen (Flackern)
         tk.Text.configure(self, height=h)
         self.after(30, self._h_schritt, 0)
 
@@ -214,7 +216,7 @@ class SelText(tk.Text):
             if not schrumpfen:
                 if not self._ganz() and n < 80:
                     tk.Text.configure(self, height=h + 1); self.after(40, self._h_schritt, n + 1); return
-                if h > 1 and n < 160:
+                if h > 1 and n < 160 and not self.live:
                     tk.Text.configure(self, height=h - 1); self.after(40, self._h_schritt, n + 1, True); return
             else:
                 if not self._ganz():
@@ -224,6 +226,8 @@ class SelText(tk.Text):
         except Exception:
             pass
         self._h_lauf = False
+        if getattr(self, "_h_nochmal", False):                               # v220: Text kam waehrend des Laufs dazu
+            self._h_nochmal = False; self.after(30, self._hoehe)
 
     config = configure
 
@@ -629,6 +633,15 @@ class App:
         m = MODI.get(label, "system"); ctk.set_appearance_mode(m)
         self.s = load_settings(); self.s["darstellung"] = m; save_settings(self.s)
 
+    def _dunkel(self):
+        return ctk.get_appearance_mode().lower() == "dark"
+
+    def _modus_symbol(self):                                             # v217: Symbol zeigt das Ziel
+        self.b_modus.configure(text="☀" if self._dunkel() else "☾")
+
+    def toggle_modus(self):
+        self.set_mode("Hell" if self._dunkel() else "Dunkel"); self._modus_symbol()
+
     def toggle_rb(self):
         self.s = load_settings(); self.s["rechte_leiste"] = bool(self.rb_var.get()); save_settings(self.s)
         self._rb_apply()
@@ -863,7 +876,12 @@ class App:
         self.m_rolle = ctk.CTkOptionMenu(hd, values=["Keine Rolle"], height=30, width=170, corner_radius=0, font=font(12),
                                          dropdown_font=font(12), fg_color=CARD, button_color=CARD, button_hover_color=BORDER,
                                          text_color=INK, command=self._rolle_gewaehlt)                       # v146
-        self.m_rolle.grid(row=0, column=3, padx=(8, 0))
+        self.b_modus = ctk.CTkButton(hd, text="", width=34, height=30, corner_radius=0, font=font(15), fg_color="transparent",
+                                     hover_color=BORDER, text_color=INK, border_width=1, border_color=BORDER,
+                                     command=self.toggle_modus)                                      # v217: Tag/Nacht oben
+        self.b_modus.grid(row=0, column=3, padx=(8, 0)); self._modus_symbol()
+        hilfe.tip(self.b_modus, "Tag/Nacht umschalten")
+        self.m_rolle.grid(row=0, column=4, padx=(8, 0))
         hilfe.tip(self.m_rolle, "Rolle für die Antworten im Chat (freigegeben unter Einstellungen › Skills & Rollen). Die Regeln von "
                   "AURA – nur Quellen, mit Belegen – gehen immer vor.")
         self.refresh_rolle()
@@ -917,7 +935,11 @@ class App:
         self.b_sp = ctk.CTkButton(tools, text="▦ SharePoint", height=24, corner_radius=0, font=font(11),
                                   hover_color=BORDER, border_width=1, command=self.toggle_sp)
         self.b_sp.pack(side="left", padx=(8, 0)); self._sp_farbe()
-        self.anh_box = ctk.CTkFrame(tools, fg_color="transparent", width=1, height=1)   # v98: leer = keine Hoehe
+        self.b_agent = ctk.CTkButton(tools, text=" Agent", width=34, height=24, corner_radius=0, font=font(11),     # v217 Pilot
+                                     hover_color=BORDER, border_width=1, command=self.toggle_agent)
+        self.b_agent.pack(side="left", padx=(8, 0)); self._agent_farbe()
+        hilfe.tip(self.b_agent, "Agent: AURA sucht selbständig in mehreren Schritten (Kalender, Mail, Acta Nova falls ein)")
+        self.anh_box = ctk.CTkFrame(bar, fg_color="transparent", width=1, height=1)   # v226: eigene Zeile, sonst bei schmalem Fenster abgeschnitten
         self.embed_hint = ctk.CTkLabel(tools, text="⏳ Vektoren werden berechnet – Fragen bitte später nochmals versuchen "
                                        "(oder links «Pause»).", font=font(11, "bold"), text_color=AMBER)   # v129: nur sichtbar beim Einbetten
         self.status = ctk.CTkLabel(main, text="Enter = senden  ·  Shift+Enter = neue Zeile", font=font(11),
@@ -1486,16 +1508,16 @@ class App:
 
     def _show_anhang(self, lst):
         for c in self.anh_box.winfo_children(): c.destroy()
-        if not lst: self.anh_box.pack_forget(); return
-        self.anh_box.pack(side="left", padx=(8, 0))
+        if not lst: self.anh_box.grid_remove(); return
+        self.anh_box.grid(row=2, column=0, columnspan=3, sticky="w", padx=(14, 12), pady=(0, 10))   # v226: eigene Zeile
         names = ", ".join(a["name"] for a in lst)
-        ctk.CTkLabel(self.anh_box, text=f"📎 {names[:60]}{'…' if len(names) > 60 else ''}  ·  nur in diesem Chat",
-                     font=font(11), text_color=ACCENT).pack(side="left")
-        ctk.CTkButton(self.anh_box, text="✕", width=24, height=22, corner_radius=0, font=font(11), fg_color="transparent",
-                      hover_color=BORDER, text_color=MUTED, command=lambda: self.w.submit("anhang_leeren")).pack(side="left", padx=(4, 0))
         b = ctk.CTkButton(self.anh_box, text="▶ Als Präsentation", height=22, corner_radius=0, font=font(11), fg_color=CARD,
                           hover_color=BORDER, text_color=INK, command=self._als_praesentation)                     # v152
-        b.pack(side="left", padx=(8, 0))
+        b.pack(side="left")                                                                  # v226: zuerst = immer sichtbar
+        ctk.CTkLabel(self.anh_box, text=f"📎 {names[:45]}{'…' if len(names) > 45 else ''}  ·  nur in diesem Chat",
+                     font=font(11), text_color=ACCENT).pack(side="left", padx=(8, 0))
+        ctk.CTkButton(self.anh_box, text="✕", width=24, height=22, corner_radius=0, font=font(11), fg_color="transparent",
+                      hover_color=BORDER, text_color=MUTED, command=lambda: self.w.submit("anhang_leeren")).pack(side="left", padx=(4, 0))
         hilfe.tip(b, "Macht aus dem Anhang eine PowerPoint-Präsentation in der Vorlage der Bundesverwaltung. Oder im Chat "
                   "schreiben, z.B. «Mach daraus eine Präsentation für die Geschäftsleitung».")
 
@@ -1596,6 +1618,31 @@ class App:
         on = bool(load_settings().get("actanova", False))
         self.b_acta.configure(text=" Acta Nova", image=self._punkt(on), compound="left", fg_color=CARD if on else "transparent",
                              text_color=INK if on else MUTED, border_color=OK if on else BORDER, border_width=2 if on else 1)
+
+    def toggle_agent(self):                                              # v217 Pilot: Terminvorbereitung
+        self.s = load_settings(); self.s["agent"] = not self.s.get("agent", False); save_settings(self.s)
+        self._agent_farbe()
+        self.status.configure(text="Agent: ein – AURA sucht selbständig in Kalender/Mail (und Acta Nova, falls ein); "
+                              "jeder Schritt wird angezeigt." if self.s["agent"] else "Agent: aus – normaler Chat.")
+
+    def _schritte(self, on):
+        """v219: Symbol «Schritte» (drei ansteigende Stufen mit Pfeil), gruen = ein."""
+        if not hasattr(self, "_sch"):
+            import tkinter as tk
+            self._sch = {}
+            for k, farbe in ((True, "#22C55E"), (False, "#8A94A3")):
+                img = tk.PhotoImage(master=self.root, width=16, height=16)
+                for x0, y0 in ((1, 11), (6, 7), (11, 3)):                  # Stufen
+                    img.put(farbe, to=(x0, y0, x0 + 4, y0 + 2))
+                    img.put(farbe, to=(x0 + 3, y0, x0 + 4, 15))
+                img.put(farbe, to=(1, 14, 16, 16))
+                self._sch[k] = img
+        return self._sch[bool(on)]
+
+    def _agent_farbe(self):
+        on = bool(load_settings().get("agent", False))
+        self.b_agent.configure(text=" Agent", image=self._schritte(on), compound="left", fg_color=CARD if on else "transparent",
+                               text_color=INK if on else MUTED, border_color=OK if on else BORDER, border_width=2 if on else 1)
 
     def toggle_follow(self, on=None):
         """v67: Folgefrage-Knopf. Gilt nur fuer die naechste Frage."""
@@ -2007,13 +2054,15 @@ class App:
                         ctk.CTkLabel(qb, text=f"↳ Bezug: {d[2][:70]}{'…' if len(d[2]) > 70 else ''}", font=font(11),
                                      text_color="#DCE3FF", anchor="w").pack(padx=16, pady=(0, 9), anchor="w")
                     self.cur, lbl = self.bubble("…", "a"); self.cur_lbl = lbl; self.cur_text = ""
+                    lbl.live = True                                      # v227
                     self.t_ask = time.perf_counter()
                 elif kind == "vorschau" and self.cur: self._vorschau(d[0])      # v160
                 elif kind == "token" and self.cur:
                     self.cur_text += d[0]
                 elif kind == "sources" and self.cur:
                     vis = visible(self.cur_text) or "(Keine Antwort – Token-Grenze im Denkteil erreicht)"
-                    self.cur_lbl.configure(text=vis)
+                    self.cur_lbl.live = False                            # v227: jetzt einmal genau einpassen
+                    self.cur_lbl.configure(text=vis); self.cur_lbl._hoehe()
                     if getattr(self, "cur_vor", None): self.cur_vor.destroy(); self.cur_vor = None   # v160: Quellen folgen unten
                     self.sources(self.cur, d[0], vis, d[1] if len(d) > 1 else None)
                     self.last_ans = self.cur; self.cur = None; self._scroll()       # v110

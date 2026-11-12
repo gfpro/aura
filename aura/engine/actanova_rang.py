@@ -233,14 +233,30 @@ def antworten(w, asked, backend_id, prev, ref, t0):
         dos = None
     try:
         if dos is not None: raise StopIteration
-        actanova.SPERRE.acquire()
+        actanova._log(f"chat '{begriff}' start")                                   # v222: Wegmarken fuer Haenger
+        if not actanova.SPERRE.acquire(timeout=30):
+            actanova._log("Sperre seit 30 s belegt (alter Lauf/Wachhalten haengt) – wird freigegeben")
+            try: actanova.SPERRE.release()
+            except RuntimeError: pass
+            actanova.SPERRE.acquire(timeout=5)
+        actanova._log("Sperre ok")
         w.progress(f"Acta Nova: suche «{begriff}» (Dossiers + Volltext) …")
-        tab = actanova.verbinden()
-        eigene_oe = (actanova._js(tab, "const m = (document.body.innerText||'').match(/\\(([A-Za-z0-9]+)@[A-Za-z0-9.]+\\)/); return m ? m[1] : '';") or "")
-        prot = []
-        dos = actanova._suchen(tab, "dossier", None, "titel", begriff, prot, export=True)
-        time.sleep(actanova.MIN_ABSTAND)
-        dok = actanova._suchen(tab, "dokument", "tab_inhalt", "inhalt", begriff, prot, export=True)
+        for versuch in (1, 2):                                   # v221: ganzer Ablauf einmal wiederholen, Fehler protokollieren
+            try:
+                tab = actanova.verbinden(); actanova._log("verbunden")
+                eigene_oe = (actanova._js(tab, "const m = (document.body.innerText||'').match(/\\(([A-Za-z0-9]+)@[A-Za-z0-9.]+\\)/); return m ? m[1] : '';") or "")
+                prot = []
+                dos = actanova._suchen(tab, "dossier", None, "titel", begriff, prot, export=True); actanova._log("dossiers ok")
+                time.sleep(actanova.MIN_ABSTAND)
+                dok = actanova._suchen(tab, "dokument", "tab_inhalt", "inhalt", begriff, prot, export=True)
+                break
+            except Exception as x:
+                actanova._log(f"chat '{begriff}' FEHLER Versuch {versuch}: {type(x).__name__}: {str(x)[:200]}")
+                if versuch == 2 or w.cancel.is_set(): raise
+                w.progress("Acta Nova: zweiter Versuch …")
+                try: tab.navigieren(actanova.start_url(), "actanova")
+                except Exception: pass
+                time.sleep(3)
         actanova._log(f"chat '{begriff}' -> dossiers {dos.get('anzahl')}, dokumente {dok.get('anzahl')}; {'; '.join(prot)}")
         actanova.SPERRE.release()
     except StopIteration:
@@ -297,9 +313,19 @@ def antworten(w, asked, backend_id, prev, ref, t0):
             ablage = "\n\nABLAGE GEMÄSS ORDNUNGSSYSTEM (für Neues zum Thema)\n" + "\n".join(
                 f"   {az}  {osys.positionen().get(az, '')}" for az, _ in best)
     w.emit("token", kopf + "\n\n" + liste + ablage + _rueckfrage(gruppen, voll))
+    # v228: Text (nur Metadaten) mitgeben, damit die Zusammenfassung über alle Quellen die Ablageorte kennt
     quellen = [{"title": g["label"], "source": "actanova", "ts": "",
                 "item_id": "acta:" + (osys.aus_aktenzeichen(g["label"])[1] or g["ast"] or g["label"]), "chunk_id": None,
-                "location": osys.pfad(g["pos"]) if g["pos"] else "", "text": ""} for g in top]
+                "location": osys.pfad(g["pos"]) if g["pos"] else "",
+                "text": (f"Ablageort in Acta Nova, Rang {i} von {len(gruppen)} (nach Regeln gewichtet): {g['label']}. "
+                         f"Ordnungssystem: {osys.pfad(g['pos']) if g['pos'] else '-'}. Enthaltene Dokumente: "
+                         + ("; ".join(_titel_az(d["name"])[0] for _, d in g["dokumente"][:4]) or "keine")
+                         + ". (Nur Titel, keine Inhalte.)")} for i, g in enumerate(top, 1)]
+    if ablage:
+        quellen.insert(0, {"title": "Ablagevorschlag gemäss Ordnungssystem", "source": "actanova", "ts": "", "item_id": "acta:" + best[0][0],
+                           "chunk_id": None, "location": "",
+                           "text": "Passendste Ordnungspositionen für neue Unterlagen zum Thema: " + "; ".join(
+                               f"{az} {osys.positionen().get(az, '')}" for az, _ in best)})
     w.emit("sources", quellen, {"search": t_search, "total": time.perf_counter() - t0, "list": backend_id == "extractive"})
     w.chat = {"qs": (prev + [asked])[-3:], "hits": [], "t": time.time()}
     w.progress(f"Fertig (Acta Nova, {len(gruppen)} Ablageorte)")

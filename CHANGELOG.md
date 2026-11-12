@@ -4,6 +4,65 @@ Neueste Version zuerst. Versionsnummern entsprechen `VERSION` in `aura/__init__.
 
 ---
 
+## v226–v228 – 12.11.2026 · Ganzes Dokument statt Ausschnitte, Acta Nova in der Zusammenfassung
+
+**Aufträge zu angehängten Dokumenten (neu)**
+- Aufträge wie «Fasse zusammen», «Überblick», «Optimierungen», «Empfehlungen», «Risiken», «nächste Schritte» oder «bewerten» lesen bei einem Anhang das **ganze Dokument** statt nur der passendsten Textstücke (vorher sah das Modell 4 Ausschnitte).
+- **Durchgang 1:** Das Dokument wird an Kapitelüberschriften geteilt (höchstens 12 Abschnitte à ~3500 Zeichen), jeder Abschnitt wird zu Kernaussagen verdichtet. Läuft **im Hintergrund direkt nach dem Anhängen**, sofern ein Sprachmodell geladen ist; eine Frage unterbricht und liest ab dem erreichten Abschnitt weiter. Ergebnis bleibt je Anhang im Chat gespeichert (Folgeaufträge ohne erneutes Lesen).
+- **Zusammenfassung ohne Sprachmodell:** je Abschnitt Titel mit [n] und bis zu 7 Kernaussagen – kein Abschnitt fällt mehr weg.
+- **Optimierungen in festen Feldern** (`llmio.structured`): je Massnahme Bereich, Problem mit [n], Massnahme, Herkunft. Herkunft ist eine Auswahl «Dokument» / «Vorschlag» (keine leere Spalte mehr). Leere und doppelte Massnahmen werden verworfen. Nächste Schritte und Fazit im selben Modelllauf.
+- Quellen [n] = Kapitel des Dokuments (Kapiteltitel zuerst); «Kontext» zeigt die Kernaussagen.
+- Gemessen am «Abschlussbericht Zentralisierung Postein- und Postausgang» (Qwen3.5-9B): 126 s statt 363 s (v226), alle Kapitel abgedeckt.
+- Einstellungen: `dok_ganz`, `dok_vorlesen`, `dok_block` (3500), `dok_max_abschnitte` (12), `dok_map_tokens` (260), `dok_optimierungen` (5).
+
+**Live-Quellen**
+- Zusammenfassung über alle Quellen sieht jetzt auch **Acta Nova**: Ablageorte gehen als Metadaten-Text (Rang, Aktenzeichen, Ordnungssystem, Dokumenttitel) und der «Ablagevorschlag gemäss Ordnungssystem» mit. Vorher fielen sie mangels Text weg; die Zusammenfassung meldete «nicht angegeben», obwohl die Liste darüber die Ablageorte zeigte. Hinweis ans Modell: Acta-Nova-Quellen sind Ablageorte, keine Inhalte.
+
+**Oberfläche**
+- Anhang-Zeile («📎 … nur in diesem Chat») in eigener Zeile, «▶ Als Präsentation» zuerst – bei schmalem Fenster nicht mehr abgeschnitten.
+- Kein Flackern mehr beim Schreiben: Antwortblöcke wachsen während des Streamens nur noch und werden am Ende einmal eingepasst (vorher Wachsen/Schrumpfen Zeile für Zeile, zweimal pro Sekunde).
+
+**Geänderte Dateien**
+- `aura\gui.py` (v227), `aura\worker.py` (v228), `aura\engine\actanova_rang.py`, `aura\__init__.py` (Version `20261112v228`).
+
+**Bekannte Grenzen**
+- Optimierungen geben oft die Lösung des Dokuments wieder («Dokument») statt Lücken zu benennen; geplant: mindestens zwei «Vorschläge» mit Bezug zu Einwänden im Dokument.
+- Schreiben mit 2,6 Tokens/s (Qwen3.5-9B) bzw. 1,8–2,1 (Apertus) – lange Aufträge brauchen 1–3 Minuten.
+- Agent (Pilot) bleibt unverändert; Überarbeitung folgt.
+
+## 20261111v225
+- Teams-Testbaustein zurückgebaut (engine/teams.py entfernt, Freigabe teams.cloud.microsoft/teams.microsoft.com gestrichen): Edge trennt die Fernsteuerung, sobald Teams lädt (Richtlinie) – Thema beendet.
+
+## 20261111v224
+- Test: Teams Web als Live-Quelle (engine/teams.py), nur lesend, noch nicht im Chat; Freigabe teams.microsoft.com (Quelle «teams»); Protokoll und Diagnose in logs/teams.log.
+
+## 20261111v223
+- Acta Nova: hängt «Client wird gestartet», lädt AURA die Startseite frisch (neues Sitzungs-Token) statt die Init-Seite mit dem alten Token neu zu laden; Diagnose der Init-Seite (Text, angefragte Hosts, Sichtbarkeit) in logs/actanova.log.
+
+## 20261111v222
+- Acta Nova: Sperre wartet höchstens 30 s (bisher unbegrenzt – mögliche Ursache für Hänger ohne Fehlermeldung); Wegmarken jedes Schritts in logs/actanova.log, um Hänger zu lokalisieren.
+
+## 20261111v221
+- Agent: Kalender und Mail-Suche zum Termintitel macht der Code fest (Engine); das Modell ergänzt nur noch (max. 3 Schritte), allgemeine Suchwörter wie «nächster Termin» werden vermieden. Notiz bis 700 Tokens (bisher bei 250 abgeschnitten).
+- Zusammenfassung über alle Quellen bis 700 Tokens; Antwortblöcke prüfen ihre Höhe nach dem Layout ein zweites Mal.
+- Acta Nova: Fehler im Chat-Ablauf werden in logs/actanova.log protokolliert; der ganze Ablauf (Verbinden + Suchen) wird einmal wiederholt.
+
+## 20261111v220
+- Chat: Höhe der Antwortblöcke wird nachgeführt, wenn während der Anpassung Text dazukommt (abgeschnittene letzte Zeilen der Zusammenfassung).
+- Zusammenfassung über alle Quellen und Agent-Notiz laufen mindestens auf «Normal», auch wenn «Kurz» gewählt ist (bisher max. zwei Sätze).
+- Acta Nova: bleibt die Trefferseite aus, wird die Startseite neu geladen und die Suche einmal wiederholt (Protokoll in logs/actanova.log).
+
+## 20261111v219
+- Agent: Schlussnotiz mit konkretem Ziel (erster gefundener Termin + Mails als Hintergrund) statt «bereite vor» – behebt «Dazu habe ich nichts gefunden» trotz Treffern; Zieltermin wird angezeigt.
+- Agent-Schalter: Symbol «Schritte» (Stufen) mit Beschriftung, grün = ein.
+
+## 20261111v218
+- Agent: Kalender ignoriert generische Begriffe («nächster Termin») und liefert dann die nächsten Termine; dem Modell werden nur verfügbare Werkzeuge angeboten (Acta Nova nur, wenn eingeschaltet); Termintitel und Teilnehmende fliessen in den nächsten Schritt; Anzeigefehler KeyError 'search' behoben.
+- Oberfläche: Agent-Schalter als Symbol 🤖 (grüner Rahmen = ein); Tag/Nacht als Symbol ☀/☾ oben neben «Neuer Chat».
+
+## 20261111v217
+- Pilot Agent: neuer Schalter «Agent» im Chat. Das Sprachmodell wählt pro Schritt Werkzeug + Suchbegriff (Kalender, Mail, Acta Nova falls ein), der Code führt nur lesend aus; max. 5 Schritte, Wiederholungen werden abgelehnt, jeder Schritt sichtbar. Danach Vorbereitungsnotiz mit Quellen. Protokoll je Lauf in logs/agent_protokoll.jsonl (Modellvergleich).
+
 ## v213–v216 – 09.–10.11.2026 · Quellen öffnen, Anzeige, Acta-Nova-Start, mehrere Intranets
 
 **Live-Quellen**

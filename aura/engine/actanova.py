@@ -133,6 +133,18 @@ def _zeigen(tab):
     except Exception: pass
 
 
+def _init_diagnose(tab):
+    """v223: Was wartet die Init-Seite? Text, angefragte Hosts (z.B. localhost des Acta-Nova-Clients), Fehler."""
+    try:
+        info = tab.js("""(() => { const r = performance.getEntriesByType('resource').map(e => e.name.split('?')[0]);
+            const hosts = [...new Set(r.map(u => { try { return new URL(u).host } catch(e) { return u } }))];
+            return JSON.stringify({text: (document.body ? document.body.innerText : '').slice(0, 200),
+                hosts: hosts, letzte: r.slice(-6), sichtbar: document.visibilityState, fokus: document.hasFocus()}); })()""")
+        _log(f"init diagnose: {str(info)[:900]}")
+    except Exception as x:
+        _log(f"init diagnose fehlgeschlagen: {x}")
+
+
 def init_haenger_loesen(tab, warten=20.0, versuche=2):
     """v213b: Haengt «DmsInitializationForm» («Client wird gestartet …»), zuerst Fenster sichtbar machen
     (der Client initialisiert offenbar nur sichtbar – so wirkt auch das manuelle Aus/Ein), danach neu laden."""
@@ -147,9 +159,10 @@ def init_haenger_loesen(tab, warten=20.0, versuche=2):
                 return True
             time.sleep(0.5)
         _log(f"init haengt ({href[:60]}) - Versuch {i + 1}")
-        if i < versuche:
-            try: tab.ws.cdp("Page.reload", ignoreCache=True)
-            except Exception as x: _log(f"reload fehlgeschlagen: {x}")
+        if i == 0: _init_diagnose(tab)
+        if i < versuche:                                       # v223: frisch zur Startseite (neues Token) statt Reload der
+            try: tab.navigieren(start_url(), "actanova")       # Init-Seite mit altem ReturnUrl-Token
+            except Exception as x: _log(f"neu laden fehlgeschlagen: {x}")
     return False
 
 
@@ -315,9 +328,21 @@ def _diag(text):
 
 
 def _suchen(tab, art, feld_tab, feld, begriff, protokoll, export=False):
+    """v220: Bleibt die Trefferseite aus (jede 2. Suche), Startseite neu laden und genau einmal wiederholen."""
+    try:
+        return _suchen_einmal(tab, art, feld_tab, feld, begriff, protokoll, export)
+    except ActaNovaFehler as e:
+        if "Trefferseite" not in str(e) and "Suchfeld" not in str(e) and "Suchen" not in str(e): raise
+        _log(f"wiederhole '{begriff}' ({art}) nach: {str(e)[:80]}"); protokoll.append("Neuladen + Wiederholung")
+        tab.navigieren(start_url(), "actanova"); _warten(tab, "document.readyState === 'complete'", 30); time.sleep(1.5)
+        return _suchen_einmal(tab, art, feld_tab, feld, begriff, protokoll, export)
+
+
+def _suchen_einmal(tab, art, feld_tab, feld, begriff, protokoll, export=False):
     f = FORM[art]
     t0 = time.perf_counter(); zeiten = {}
-    _formular_oeffnen(tab, art, protokoll); zeiten["maske"] = time.perf_counter() - t0
+    _log(f"  {art}: Maske oeffnen"); _formular_oeffnen(tab, art, protokoll); zeiten["maske"] = time.perf_counter() - t0
+    _log(f"  {art}: Maske offen")
     _klick_id(tab, "ResetSearchButton")
     _warten(tab, f"AN.el({json.dumps(f['tab_basis'])})", 20)
     _reiter(tab, f["tab_basis"], f["status"])
@@ -334,6 +359,7 @@ def _suchen(tab, art, feld_tab, feld, begriff, protokoll, export=False):
     # vorher evtl. vorhandene Trefferzeilen markieren, damit wir neue erkennen
     _js(tab, "AN.docs().forEach(d => d.querySelectorAll('tr.bocListDataRow').forEach(tr => tr.setAttribute('data-aura-alt', '1'))); return true;")
     zeiten["ausfuellen"] = time.perf_counter() - t0 - zeiten["maske"]
+    _log(f"  {art}: suche"); 
     if not _klick_id(tab, "SearchButton"):
         raise ActaNovaFehler("Knopf 'Suchen' fehlt")
     t1 = time.perf_counter()
@@ -341,7 +367,7 @@ def _suchen(tab, art, feld_tab, feld, begriff, protokoll, export=False):
     if not ok:
         raise ActaNovaFehler(f"Keine Trefferseite nach 90 s – Seite: {tab.zustand()[:120]}")
     zeiten["suche"] = time.perf_counter() - t1
-    erg = _treffer_lesen(tab)
+    _log(f"  {art}: Treffer lesen"); erg = _treffer_lesen(tab)
     t2 = time.perf_counter()
     if export and erg["treffer"] and (erg["weitere"] or (erg["anzahl"] or 0) > len(erg["treffer"])):
         alle = exportieren(tab)
@@ -542,6 +568,7 @@ def wach_halten_starten(minuten=10):
                 continue
             if not SPERRE.acquire(blocking=False):
                 continue
+            _log("wach halten: start")
             try:
                 if edge.laeuft():
                     t = edge.tab_finden("actanova")
