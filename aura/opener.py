@@ -50,7 +50,21 @@ def _open_onenote(ext_id, meta):                              # v87
     from .connectors.onenote import app
     app().NavigateTo(meta.get("page_id") or ext_id.split("|")[0], "", False)
 
-HANDLERS = {"onenote": _open_onenote, "outlook_mail": _open_mail, "outlook_calendar": _open_event,
+def _open_ims(ext_id, meta):                                  # v246: PDF per Windows-Anmeldung holen, im PDF-Programm öffnen
+    import shutil, tempfile
+    from pathlib import Path
+    from .connectors.ims import _Client, API_PDF
+    from . import sicherheit as SI
+    did = int(meta.get("dok_id") or ext_id.split("|")[0])
+    d = Path(tempfile.gettempdir()) / "aura_ims"
+    shutil.rmtree(d, ignore_errors=True); d.mkdir(exist_ok=True)   # nur das zuletzt geöffnete PDF bleibt liegen
+    cl = _Client()
+    try: typ, daten = cl.get(f"{API_PDF}{did}", max_bytes=SI.DOC_MAX_BYTES)
+    finally: cl.schliessen()
+    if "pdf" not in typ or daten[:4] != b"%PDF": raise RuntimeError("IMS lieferte kein PDF")
+    f = d / f"IMS_{did}.pdf"; f.write_bytes(daten); os.startfile(str(f))
+
+HANDLERS = {"ims": _open_ims, "onenote": _open_onenote, "outlook_mail": _open_mail, "outlook_calendar": _open_event,
             "edge_history": _open_web, "folder_docs": _open_doc, "confluence": _open_web}
 
 def open_item(item_id, report):

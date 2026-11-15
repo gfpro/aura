@@ -1,4 +1,4 @@
-# aura/workflow/schema.py — Beschreibung der Bausteine für den Schritt-Editor (Reiter «Schritte»). Version 20261031v146
+# aura/workflow/schema.py — Beschreibung der Bausteine für den Schritt-Editor (Reiter «Schritte»). Version 20261113v244
 #
 # Jeder Baustein (Schritt-Typ) beschreibt hier seine Felder in Alltagssprache. Die Oberfläche baut daraus das Formular;
 # ein neuer Baustein braucht nur einen Eintrag hier, keine Änderung an der Oberfläche.
@@ -21,6 +21,19 @@ BAUSTEINE = {
             {"key": "max_chars", "label": "Höchstens Zeichen", "typ": "zahl", "standard": 12000,
              "hilfe": "Längere Texte werden abgeschnitten. Das Sprachmodell verarbeitet etwa 20'000 Zeichen gut."}],
         "ergebnis": [("text", "der gelesene Text"), ("chars", "Anzahl Zeichen"), ("truncated", "ja, wenn gekürzt")]},
+    "tabellen": {
+        "titel": "Tabellen lesen", "gruppe": "Holen", "id": "tab",
+        "beschreibung": "Liest Word-Tabellen Zeile für Zeile – ohne Sprachmodell. Jede Zeile wird ein Element (für «Für jedes»).",
+        "felder": [
+            {"key": "files", "label": "Dateien", "typ": "text", "standard": "{{input.files}}", "pflicht": True, "wert_einfuegen": True},
+            {"key": "gruppen", "label": "Gruppen", "typ": "json", "pflicht": True, "standard": {"zeilen": {"id_beginnt": "", "spalten": {"id": 0, "text": 1}}},
+             "hilfe": "{name: {id_beginnt, kopf_enthaelt, spalten {feld: Spalte ab 0}}}. Zeilen ohne Ziffer nach id_beginnt (z.B. «ID-R-x») gelten als Platzhalter."},
+            {"key": "ignorieren", "label": "Platzhalter ignorieren", "typ": "liste", "hilfe": "Zeilen, deren Zellen nur so beginnen, werden übersprungen."},
+            {"key": "markieren", "label": "Wörter markieren", "typ": "json", "standard": {},
+             "hilfe": "{merkmal: [Wörter]}: Jede Zeile erhält das Merkmal mit den gefundenen Wörtern."},
+            {"key": "max_zeilen", "label": "Höchstens Zeilen je Gruppe", "typ": "zahl", "standard": 500}],
+        "ergebnis": [("text", "Übersicht der IDs"), ("markiert", "Zeilen mit markierten Wörtern"),
+                     ("liste_<gruppe>", "«ID: Text» je Zeile"), ("anzahl_<gruppe>", "Anzahl Zeilen")]},
     "rag": {
         "titel": "Wissen durchsuchen", "gruppe": "Holen", "id": "wissen",
         "beschreibung": "Sucht passende Stellen im Wissen (Reiter «Wissen») oder in Mails, Kalender, Dokumenten.",

@@ -14,7 +14,8 @@ PERSON_QUELLEN = {MAIL: ("schrieb", "empfing"), TERMIN: ("organisierte", "nahm_t
                   "confluence": ("bearbeitete", None), "folder_docs": ("erstellte", None)}   # v201, v206
 ART_TEXT = {"schrieb": "schrieb", "empfing": "empfing", "organisierte": "organisierte", "nahm_teil": "nahm teil", "empfing_cc": "empfing in CC", "optional": "optional eingeladen",
             "bearbeitete": "bearbeitete", "erstellte": "erstellte", "gleiche_seite": "gleiche Seite (besucht)", "gleiche_konversation": "gleiche Konversation",
-            "gleicher_titel": "gleicher Titel", "zeitlich_nah": "ähnlicher Titel, zeitlich nah"}
+            "gleicher_titel": "gleicher Titel", "zeitlich_nah": "ähnlicher Titel, zeitlich nah",
+            "zugewiesen": "zugewiesen", "kommentierte": "kommentierte"}
 MAX_WORT_DF, MAX_NAH_JE_OBJEKT, NAH_TAGE, TITEL_TAGE = 30, 5, 14, 30
 RANDLIMIT_PERSON = 40                       # Personen mit mehr Kanten werden in Stufe 2 nicht weiter aufgeklappt
 STOP = set("aber alle auch beim damit dass dein diese einer eines heute nicht noch oder sich sind unsere wegen werden wird zwischen "
@@ -107,6 +108,14 @@ def _aufbauen(db_path, ziel, tmp):
                             if e.get("a"): adresse[e["a"]].add(k)
                 else:
                     for k, n in personen(empf).items(): pers.setdefault(k, n); kanten.add((nid, f"p{k}", a2))
+        if src == "jira":                                            # v230: Melder/Bearbeiter/Kommentare mit Adresse
+            try: pl = json.loads(meta or "{}").get("personen") or []
+            except ValueError: pl = []
+            for e in pl:
+                k = person_key(e.get("n", ""))
+                if not k: continue
+                pers.setdefault(k, e["n"]); kanten.add((f"p{k}", nid, e.get("art") or "bearbeitete"))
+                if e.get("a"): adresse[e["a"]].add(k)
         if src == "edge_history":
             try: edge.append((nid, json.loads(meta or "{}").get("url") or "", titel or ""))
             except ValueError: pass

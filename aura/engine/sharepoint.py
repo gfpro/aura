@@ -43,6 +43,27 @@ def site_url(u):
     return f"{p.scheme}://{p.netloc}"
 
 
+def zusammenfuehren(antworten):
+    """v244 (FUN-01): Treffer mehrerer Sites vereinen. Reissverschluss nach Rang (Rang je Site bleibt fair), Dubletten
+    nach Path entfernt, hoechstens MAX_TREFFER. Sites ohne Status 200 werden als «fehlend» gemeldet, nie still verschluckt."""
+    listen, fehlend, total, status = [], [], 0, None
+    for url, a in antworten:
+        st = a.get("status")
+        if st == 200:
+            status = 200; total += int(a.get("total") or 0)
+            listen.append([x for x in (a.get("rows") or []) if isinstance(x, dict)])
+        else:
+            fehlend.append((url, st)); status = status or st
+    rows, gesehen = [], set()
+    for i in range(max((len(l) for l in listen), default=0)):
+        for l in listen:
+            if i < len(l):
+                key = (l[i].get("Path") or "").lower() or id(l[i])
+                if key in gesehen: continue
+                gesehen.add(key); rows.append(l[i])
+    return {"status": status, "rows": rows[:MAX_TREFFER], "total": total, "fehlend": fehlend}
+
+
 def _basis(sites):
     return site_url(sites[0]) if sites else STANDARD
 
@@ -127,11 +148,19 @@ def antworten(w, asked, backend_id, prev, ref, t0):
             w.emit("token", "SharePoint: bitte im Edge-Fenster von AURA einmal anmelden, dann nochmals fragen.")
             w.emit("sources", [], {"total": time.perf_counter() - t0, "list": True}); return
         tab.origin_pruefen("sharepoint")                            # v212: nur auf freigegebener Seite suchen
-        r = {}
-        for b in ([site_url(x) for x in sites] or [basis]):      # Suche ueber eine Site, auf die man Zugriff hat
-            r = tab.js(f"({JS_SUCHE})({json.dumps(b)}, {json.dumps(begriff)}, {MAX_TREFFER}, {json.dumps(SEL)})", timeout=40) or {}
-            if r.get("status") == 200: break
+        antworten = []                                            # v244 (FUN-01): ALLE Sites abfragen, nicht nach erster 200 stoppen
+        for b in ([site_url(x) for x in sites] or [basis]):
+            if getattr(w, "cancel", None) is not None and w.cancel.is_set(): break
+            try:
+                a = tab.js(f"({JS_SUCHE})({json.dumps(b)}, {json.dumps(begriff)}, {MAX_TREFFER}, {json.dumps(SEL)})", timeout=40) or {}
+            except Exception as e:
+                a = {"status": f"{type(e).__name__}"}
+            antworten.append((b, a))
         tab.schliessen()
+        r = zusammenfuehren(antworten)
+        if r["fehlend"] and sites and r["status"] == 200:     # Teilergebnis sichtbar machen
+            w.emit("token", "⚠ SharePoint: nicht abgefragt/fehlgeschlagen: "
+                            + ", ".join(f"{u} ({st})" for u, st in r["fehlend"]) + "\n")
         if r.get("status") == 403 and not sites:
             w.emit("token", "SharePoint: Die Suche braucht eine Site, auf die du Zugriff hast – bitte unter «Wissen → SharePoint "
                             "→ Einrichten» mindestens eine eintragen (gesucht wird trotzdem überall).")

@@ -10,6 +10,10 @@ def _lost(e):
     s = str(e)
     return "entfernt" in s or "HRESULT" in s or "0x887A" in s.upper()
 
+class EmbeddingAbgebrochen(RuntimeError):
+    """v244: Abbrechen-Knopf während der GPU-Wiederherstellung."""
+
+
 class Embedder:
     def __init__(self, model_dir):
         self.dir = Path(model_dir); self.tok = self.enc = self.dml = None
@@ -45,15 +49,18 @@ class Embedder:
         from .gpu import Encoder
         self.enc, self.kind = Encoder(Model(self.dir)), "native"
 
-    WAITS = (0, 5, 15, 30, 60, 60, 120, 120, 300, 300)    # ~17 min Geduld, z.B. nach Standby
+    WAITS = (0, 5, 15, 30, 60)        # v244 (FUN-05): max. ~110 s statt ~17 min, und abbrechbar
+    abbruch = None                    # threading.Event des Workers (Abbrechen-Knopf); None = nicht abbrechbar
 
     def _embed(self, text):
-        import time
+        import threading
         try: from .gpu import DeviceLost
         except Exception: DeviceLost = RuntimeError
         last = None
+        warte = self.abbruch if self.abbruch is not None else threading.Event()
         for wait in self.WAITS:
-            if wait: time.sleep(wait)
+            if wait and warte.wait(wait):             # True = Abbrechen gedrückt -> sofort zurück
+                raise EmbeddingAbgebrochen(f"Embedding abgebrochen während GPU-Wiederherstellung ({last})")
             try:
                 self.load(); ids = self.tok.encode(text)
                 return self.dml.vector(ids) if self.dml else self.enc.embed(ids)
@@ -61,7 +68,12 @@ class Embedder:
                 if not isinstance(e, DeviceLost) and not _lost(e): raise
                 last = e; self.resets += 1; self.last_reset = str(e)
                 self.close()                          # altes Geraet freigeben, neu laden, nochmals versuchen
-        raise last
+        try:
+            from .. import log
+            log.get().error(f"Embedding: GPU nach {sum(self.WAITS)} s nicht wieder verfügbar ({last}) – "
+                            "AURA neu starten oder «embed_engine» = native wählen.")
+        except Exception: pass
+        raise last                                    # Typ bleibt DeviceLost: Aufrufer (Prüfliste, Workflow) erkennen ihn
 
     def close(self):
         if self.enc:

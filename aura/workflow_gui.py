@@ -1,4 +1,6 @@
-# aura/workflow_gui.py — Ansicht «Workflows»: Pakete anlegen, ausfuehren, Wissen und Vorlagen pflegen. Version 20261031v149
+# aura/workflow_gui.py — Ansicht «Workflows»: Pakete anlegen, ausfuehren, Wissen und Vorlagen pflegen. Version 20261113v243
+# (v243: Prüfhinweise und Meldungen brechen nach der tatsächlichen Spaltenbreite um)
+# (v241: rechte Spalte «Ausführen» mit Scrollbalken; Ergebnisdateien zuoberst)
 # (v149: nur noch Reiter «Bauen» (Leinwand) und «Ausführen»; Übersicht, Ablauf und Expertenansicht entfallen; Wissen, Vorlagen &
 #  Feldplan und Prüfliste öffnen sich als Fenster; Neu laden, Ordner, Exportieren, workflow.json, Löschen im Menü «⋯»)
 # (v133: Regler auch bei Sprachmodell-Schritten innerhalb anderer Schritte, z.B. «Je Thema zusammenfassen»)
@@ -217,7 +219,8 @@ class WorkflowWindow:
                      font=G.font(11), text_color=G.MUTED, anchor="w", justify="left",
                      wraplength=380).grid(row=r, column=0, sticky="w", pady=(12, 0)); r += 1
         # rechts: Schritte, Status, Ergebnis
-        rf = ctk.CTkFrame(t, fg_color="transparent"); rf.grid(row=0, column=1, sticky="nsew"); rf.grid_columnconfigure(0, weight=1)
+        rf = ctk.CTkScrollableFrame(t, fg_color="transparent")          # v241: Prüfhinweise + Dateien erreichbar
+        rf.grid(row=0, column=1, sticky="nsew"); rf.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(rf, text="SCHRITTE", font=G.font(10, "bold"), text_color=G.MUTED, anchor="w").grid(row=0, column=0, sticky="w")
         sf = ctk.CTkFrame(rf, fg_color=G.BUBBLE, corner_radius=0); sf.grid(row=1, column=0, sticky="ew", pady=(4, 8))
         self.step_lbl = {}
@@ -233,6 +236,18 @@ class WorkflowWindow:
         last = latest_state(self.app_runs_dir(), self.wf)
         if last: ctk.CTkLabel(self.res, text=f"Letzter Lauf: {last.parent.name if self.wf.get('_dir') else last.name}",
                               font=G.font(11), text_color=G.MUTED).pack(anchor="w")
+
+    @staticmethod
+    def _umbruch(box, pad=28):
+        """v243: Labels im Kasten brechen nach der tatsaechlichen Breite um (feste wraplength schnitt Text ab)."""
+        def anp(e=None):
+            w = box.winfo_width()
+            if w < 50: return
+            for l in box.winfo_children():
+                if isinstance(l, ctk.CTkLabel):
+                    try: l.configure(wraplength=max(w - pad, 120))
+                    except Exception: pass
+        box.bind("<Configure>", anp, add="+"); box.after(50, anp)
 
     def _ausf_wirkt(self):
         """v132: Regler nur zeigen, wenn ein Sprachmodell-Schritt frei schreibt oder ein Feld «ausfuehrlich_ok» hat."""
@@ -367,11 +382,14 @@ class WorkflowWindow:
         if res.get("error"):
             for sid, (l, txt) in self.step_lbl.items():
                 if l.cget("text").startswith("▶"): l.configure(text=f"✕  {txt}", text_color=G.ERR)
+        for f in res.get("files") or []:
+            ctk.CTkButton(self.res, text=f"Öffnen: {Path(f).name}", height=28, corner_radius=0, font=G.font(11, "bold"), fg_color=G.ACCENT,
+                          hover_color=G.ACCENT_HI, command=lambda f=f: _open(f)).pack(anchor="w", pady=2)
         for m in res.get("meldungen") or []:                            # v53: Meldungen der Schritte
             box = ctk.CTkFrame(self.res, fg_color=G.BUBBLE, corner_radius=0); box.pack(fill="x", anchor="w", pady=(0, 6))
             ctk.CTkLabel(box, text=m.get("titel") or "Meldung", font=G.font(11, "bold"), anchor="w").pack(anchor="w", padx=10, pady=(6, 0))
             ctk.CTkLabel(box, text=(m.get("text") or "")[:3000], font=G.font(11), anchor="w", justify="left",
-                         wraplength=520).pack(anchor="w", padx=10, pady=(0, 6))
+                         wraplength=520).pack(anchor="w", padx=10, pady=(0, 6)); self._umbruch(box)
         pr = res.get("pruefungen") or []
         if pr:                                                          # v40: Pruefhinweise (Warnungen + Plausibilitaet)
             box = ctk.CTkFrame(self.res, fg_color=("#FEF3C7", "#3A2F12"), corner_radius=0); box.pack(fill="x", anchor="w", pady=(0, 6))
@@ -379,13 +397,10 @@ class WorkflowWindow:
                          text_color=("#92400E", "#FCD34D"), anchor="w").pack(anchor="w", padx=10, pady=(6, 2))
             for m in pr[:12]:
                 ctk.CTkLabel(box, text="• " + m, font=G.font(11), text_color=G.INK, anchor="w", justify="left",
-                             wraplength=500).pack(anchor="w", padx=10)
+                             wraplength=500).pack(anchor="w", padx=10, fill="x")
             if len(pr) > 12: ctk.CTkLabel(box, text=f"… und {len(pr) - 12} weitere (protokoll.json)", font=G.font(10),
                                           text_color=G.MUTED).pack(anchor="w", padx=10)
-            ctk.CTkFrame(box, height=6, fg_color="transparent").pack()
-        for f in res.get("files") or []:
-            ctk.CTkButton(self.res, text=f"Öffnen: {Path(f).name}", height=28, corner_radius=0, font=G.font(11, "bold"), fg_color=G.ACCENT,
-                          hover_color=G.ACCENT_HI, command=lambda f=f: _open(f)).pack(anchor="w", pady=2)
+            ctk.CTkFrame(box, height=6, fg_color="transparent").pack(); self._umbruch(box)
         if res.get("zwischenstand"):
             ctk.CTkButton(self.res, text="Laufordner öffnen", height=26, corner_radius=0, font=G.font(11), fg_color=G.BORDER,
                           hover_color=G.MUTED, text_color=G.INK, command=lambda: _open(Path(res["zwischenstand"]).parent)).pack(anchor="w", pady=2)

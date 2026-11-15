@@ -188,6 +188,16 @@ class Runner:
             self.state_path = Path(ctx.runs_dir) / f"{datetime.now():%Y%m%d_%H%M%S}_{Path(wf['_path']).stem}.state.json"
             self.log_path = None
 
+    @staticmethod
+    def _ziel_eindeutig(dest, src):
+        """Zielpfad im Laufordner: Originalname, bei Kollision «Name (2).ext», «Name (3).ext» … Liegt die Datei bereits
+        im Laufordner (Neustart ab Schritt), bleibt ihr Pfad."""
+        if src.parent.resolve() == dest.resolve(): return src
+        t, n = dest / src.name, 2
+        while t.exists():
+            t = dest / f"{src.stem} ({n}){src.suffix}"; n += 1
+        return t
+
     def _copy_inputs(self, dest):
         """Eingabedateien in den Laufordner kopieren: der Lauf bleibt nachvollziehbar, auch wenn das Original wandert."""
         import shutil
@@ -195,7 +205,7 @@ class Runner:
             if i["type"] != "files" or not self.state["input"].get(i["id"]): continue
             dest.mkdir(parents=True, exist_ok=True); new = []
             for f in self.state["input"][i["id"]]:
-                t = dest / Path(f).name
+                t = self._ziel_eindeutig(dest, Path(f))       # v244 (FUN-06): gleichnamige Dateien nie überschreiben
                 if Path(f).resolve() != t.resolve(): shutil.copy2(f, t)
                 new.append(str(t))
             self.ctx.freigaben.erlaube(new)

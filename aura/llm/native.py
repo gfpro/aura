@@ -1,4 +1,4 @@
-# aura/llm/native.py — Hugging-Face-Sprachmodelle auf der nativen GPU-Engine. Version 20261104v186 (v186: offene Fragen mit eigener Belegregel; v174: Apertus-Kontext 13312, Einstellung llm_context_apertus; v171: strenge Belegpflicht, Datum der Quelle zaehlt; v170: abgeschwaecht, verworfen; v169: Belegpflicht; v167: Tokengrenze wieder aus worker.py; v166: Anweisung je Stufe; v165: Apertus-Engine, Kontext hoechstens 8192; v164: Apertus-Chat-Vorlage und Erkennung, Engine folgt; v159: LFM3 (v158) wieder entfernt, Stand wie v146; v146: freigegebene Chat-Rolle aus skills.py im Systemtext; v130: 4-Bit-Gewichte, Einstellung llm_bits 4/8/16; v118: nur noch Qwen3.5, Qwen3-Engine entfernt; v110: Quellen nur mit Link werden genannt; v106: Speicher nach Engine-Aufbau ins Log; v104: System-Prompt ohne Satzgrenze – nur die Frage beantworten, keine Fuellsaetze; v88: Qwen3.5 ueber qwen35.py, Denkmodus aus; v86: gemm fp16; v85: KV-Cache fp16, Einstellung llm_kv16; v84: splitr im Log; v83: Split-K-Varianten im Log; v28: Kontextlaenge aus Einstellungen; v44: Kernel-Wahl ins Log; v70: 8-Bit-Gewichte, Einstellung llm_int8;
+# aura/llm/native.py — Hugging-Face-Sprachmodelle auf der nativen GPU-Engine. Version 20261113v229 (v229: Chat nutzt den Vorspann-Cache – Schnappschuss nach Systemtext+Rolle, Messzeile DIAG vorspann; v186: offene Fragen mit eigener Belegregel; v174: Apertus-Kontext 13312, Einstellung llm_context_apertus; v171: strenge Belegpflicht, Datum der Quelle zaehlt; v170: abgeschwaecht, verworfen; v169: Belegpflicht; v167: Tokengrenze wieder aus worker.py; v166: Anweisung je Stufe; v165: Apertus-Engine, Kontext hoechstens 8192; v164: Apertus-Chat-Vorlage und Erkennung, Engine folgt; v159: LFM3 (v158) wieder entfernt, Stand wie v146; v146: freigegebene Chat-Rolle aus skills.py im Systemtext; v130: 4-Bit-Gewichte, Einstellung llm_bits 4/8/16; v118: nur noch Qwen3.5, Qwen3-Engine entfernt; v110: Quellen nur mit Link werden genannt; v106: Speicher nach Engine-Aufbau ins Log; v104: System-Prompt ohne Satzgrenze – nur die Frage beantworten, keine Fuellsaetze; v88: Qwen3.5 ueber qwen35.py, Denkmodus aus; v86: gemm fp16; v85: KV-Cache fp16, Einstellung llm_kv16; v84: splitr im Log; v83: Split-K-Varianten im Log; v28: Kontextlaenge aus Einstellungen; v44: Kernel-Wahl ins Log; v70: 8-Bit-Gewichte, Einstellung llm_int8;
 #   v72: Schweizer Rechtschreibung (ß -> ss) und ohne Vorspann «Antwort:»)
 # Unterstuetzt: Qwen3.5 (Qwen3_5ForConditionalGeneration / Qwen3_5ForCausalLM, z.B. Qwen3.5-4B), Gewichte bf16 oder int8.
 import json, re, time
@@ -184,11 +184,20 @@ class NativeCausalLM(LLMBackend):
         hits = hits[:int(s.get("llm_top_k", 4))]
         self.load()
         ids, used = self.prompt_ids(question, hits, self.eng.maxT - max_new - 8); self.used = used
+        kopf_n = 0
+        try:                                                            # v229: Schnappschuss nach Systemtext+Rolle
+            from .qwen import common_prefix
+            sys_ = SYSTEM.replace(KNAPP, STUFEN.get((s or {}).get("antwort_stufe"), KNAPP))
+            kopf_n = common_prefix(self.tok.encode(self.chat_head(sys_ + _rolle())), ids)
+            if hasattr(self.eng, "snap_at") and (s or {}).get("vorspann_cache", True): self.eng.snap_at = kopf_n   # v237: Schalter
+        except Exception: kopf_n = 0
         try:
             t0 = time.perf_counter()
             logits = self.eng.prefill(ids, self.progress, cancelled)
             if logits is None: return
             t1 = time.perf_counter(); pos = len(ids); dec = StreamDecoder(self.tok); n = 0
+            from ..log import diag                                      # v229: Messung Vorspann-Cache
+            diag("vorspann", kopf=kopf_n, wieder=getattr(self.eng, "reused", 0), total=len(ids), einlesen_s=round(t1 - t0, 1))
             out = swiss_stream(on_token)                                # v72
             self.progress(f"Kontext gelesen ({len(ids)} Tokens, {t1 - t0:.0f} s) - schreibe Antwort ...")
             while n < max_new and pos < self.eng.maxT and not cancelled():

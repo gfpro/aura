@@ -4,6 +4,64 @@ Neueste Version zuerst. Versionsnummern entsprechen `VERSION` in `aura/__init__.
 
 ---
 
+## v246 – 15.11.2026 · IMS: Prozessschritte und Rollen, Dokumente öffnen (Basis: v245)
+
+**Prozessschritte statt Zeichnung**
+- Gezeichnete Prozesse kamen bisher nur als ungeordnete Wörter aus dem PDF an (Kastentexte ohne Zuordnung zu Schritt, Ergebnis, Rolle). Neu holt AURA je Dokument die strukturierten Daten der IMS-Reiter «Prozessschritte» und «Prozessrollen»: `processsteps.svc/documents/<id>` und `processroles.svc/documents/<id>`.
+- Vor dem PDF-Text steht ein Block «Prozessschritte:» mit einer Zeile je Schritt: Nummer, Entscheid/Schritt, Prozessfolge, Beschreibung, Vorgaben, Ergebnis, Referenzen sowie Durchführung (R), Verantwortung (A), Mitwirkung (C), Information (I); dazu «Rollen: Kürzel = Name (Gruppe)». Fragen wie «Wer verantwortet Schritt 4?» werden damit beantwortbar.
+- Liefert IMS keine Schritte oder schlägt die Abfrage fehl, bleibt es beim PDF-Text; das Einlesen bricht nicht ab.
+- Neue Kennung `|s1` am Ende der ext_id (`FORMAT`): Alle IMS-Dokumente werden beim nächsten Sync **einmal neu eingelesen**, alte Textstücke ersetzt; danach «Vektoren berechnen».
+
+**Dokumente öffnen**
+- Klick auf eine IMS-Quelle öffnet das PDF (vorher «Oeffnen fuer Quelle ims nicht unterstuetzt»): AURA holt es mit der Windows-Anmeldung und öffnet es im PDF-Programm, ohne Login-Fenster im Browser. Ablage nur des zuletzt geöffneten PDFs in `%TEMP%\aura_ims\` (wird beim nächsten Öffnen geleert). Host-Freigabe wie beim Einlesen (`herkunft.py`, «ims»).
+
+**Geänderte Dateien**
+- `aura\connectors\ims.py` (auf Basis v245, deren Änderungen bleiben), `aura\opener.py` (`_open_ims`, Basis v243). `aura\__init__.py` nicht im Patch – `VERSION = "20261115v246"` von Hand setzen.
+- Zwischenstände v246/v246b sind hier zusammengefasst; eingespielt wird nur `aura_v246c_ims.zip`.
+- Diagnose: `tools\ims_schritte_test.py` (Feldnamen und Anzahl der Schritte/Rollen eines Dokuments).
+
+**Bekannte Grenzen**
+- Wohin Ja/Nein-Zweige und Verweise (A, B, C) führen, liefert IMS nicht.
+- Format von `result`, `references`, `prerequisites` war im Test leer und ist daher nur angenommen (Text, Liste oder Objekt werden verarbeitet) – nach dem Sync unter «Kontext» prüfen.
+- Gescannte PDFs ohne Textschicht liefern weiterhin keinen Text (kein OCR).
+
+## v245 – 15.11.2026 (Review v23, Paket 1; Basis: v244 = Quellen zweispaltig, v240 = IMS)
+- FUN-01 engine/sharepoint.py: alle Sites abfragen, Treffer zusammenführen (Rang-Reissverschluss, Dubletten nach Path), fehlgeschlagene Sites anzeigen.
+- FUN-03 agent.py: Mail-Suche filtert vor dem Top-k auf outlook_mail.
+- FUN-05 engine/embedder.py, worker.py: GPU-Wiederherstellung max. ~110 s, sofort abbrechbar.
+- FUN-06 workflow/engine.py: gleichnamige Eingaben als «Name (2).ext».
+- SEC-04 engine/edge.py: Leerlauf 5–240 min (kein «nie»), Edge schliesst auch per atexit.
+- SEC-05 agent.py: Agent-Protokoll nur technisch, Rotation 2 MB / 30 Tage; voll nur mit agent_protokoll_voll.
+- IMS connectors/ims.py: Blättern ohne totalCount nicht mehr nach Seite 1 beendet (sonst Aufräumen trotz Teilliste);
+  Schutz gegen ignoriertes «Page» und Endlosschleife (max. 100 Seiten); ims_prozess nur Zahl; Host über herkunft.py («ims», GPO LiveOrigins_ims).
+- tests/test_v245.py: 12 Tests.
+
+## v244 – 15.11.2026 · IMS als Quelle, Quellen zweispaltig
+
+**IMS ar (neu, gespeicherte Quelle)**
+- Neue Quelle **«IMS (Prozesse)»** unter Wissen › Quellen: liest die Prozessdokumente des IMS ar (Prozessmodell armasuisse) als PDF ein – Text, Vektoren und Stichwortindex wie bei den übrigen Quellen; Suche nach Inhalt und Stichwort, nicht nach Nummer.
+- Zugriff direkt über die IMS-Schnittstelle `intranet.ims-ar.vbs.admin.ch` (`processes.svc`, `documents.svc`, `filer.svc`), **ohne Edge**. Anmeldung mit dem Windows-Konto (NTLM über SSPI/secur32, nur Standardbibliothek) – kein Passwort, kein Token gespeichert. Das Login-Fenster der IMS-Oberfläche entfällt damit.
+- Seitensteuerung wie die IMS-Oberfläche über Header (`Item-Count`, `Page`, `Language-Code`); ohne diese liefert der Server nur 50 Einträge.
+- Eingrenzung **vor** dem Herunterladen auf den Metadaten: nur PDF, Acta-Nova-Vorlagen und externe Links werden übersprungen, je Dokument-ID nur die neueste Fassung (die Liste enthält 2642 Einträge, aber nur 1235 verschiedene IDs).
+- Dokumenttypen (Standard): RL, PA, AA, CL, VA, EL, VS, tV, GP, je mit Anhang (‑A). **Bewusst ohne** Formulare und Vorlagen (FO, FO-A, VO) – sie verdrängen sonst Anweisungen aus den Treffern. Alle Typen: `"ims_typen": ["*"]`.
+- Jedes Textstück beginnt mit «IMS <ID> <Titel> (<Prozesspfad>)»; Quelle mit Link ins IMS, Typ, Version und Prozess in `meta`.
+- Neue Fassung = neues Objekt; alte Fassungen und verschwundene Dokumente werden beim vollständigen Abgleich entfernt (wie Confluence, mit Sicherung gegen Massenlöschung). Abgleich einmal pro Tag automatisch, sobald IMS-Daten vorhanden sind.
+- Sicherheit: fester Host, nur https, keine Weiterleitungen, Antwortgrössen begrenzt; PDF-Text über `folder_docs.read_text` mit den Grenzen aus `sicherheit.py`; PDF nur kurz als temporäre Datei.
+- Einstellungen: `ims_typen`, `ims_prozess` («1»), `ims_sprache` («de»), `ims_auto` (true), `ims_nur_pdf` (true).
+
+**Oberfläche**
+- Wissen › Quellen: Quellen und Live-Quellen **zweispaltig**, ganze Ansicht mit Scrollbalken – mit IMS passten nicht mehr alle Quellen auf den Schirm.
+
+**Geänderte Dateien**
+- Neu `aura\connectors\ims.py`; geändert `aura\connectors\__init__.py`, `aura\worker.py` (Aufräumen, täglicher Abgleich), `aura\gui.py`, `aura\__init__.py` (Version `20261115v244`).
+- Zwischenstände v240–v240d (IMS-Patches vom selben Abend) sind hier zusammengefasst; `ims.py` und `worker.py` tragen im Dateikopf noch «v240».
+- Diagnose (danach löschbar): `tools\ims_probe.py`, `ims_api_test.py`, `ims_sspi_test.py`, `ims_paging_test.py`, `ims_header_test.py`, `ims_typen.py`.
+
+**Bekannte Grenzen**
+- Erstes Einlesen dauert lange (hier 743 Dokumente nach Filter); Ansicht und echter Abgleich unter Windows noch nicht abschliessend bestätigt.
+- Annahme: Prozess 1 ist die Wurzel und umfasst alle Dokumente.
+- Die Volltextsuche des IMS (`Search-Text`) wird nicht genutzt; gesucht wird im lokalen Index.
+
 ## v229 – 12.11.2026 · Skills & Rollen erstellen, neuer Platz im Menü
 
 - **Skills & Rollen** liegt neu unter **Werkzeuge** (bisher Einstellungen).

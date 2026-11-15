@@ -1,4 +1,4 @@
-# aura/workflow/docx_fill.py — Word-Vorlagen (.docx) ausfuellen, ohne Zusatzpakete. Version 20261011v64e (v64e: Kästchen-Zustand auch bei «w14:val="0" />» mit Leerzeichen; v40: Optionen per Wortvergleich, leere Felder gemeldet)
+# aura/workflow/docx_fill.py — Word-Vorlagen (.docx) ausfuellen, ohne Zusatzpakete. Version 20261113v243 (v243: Datumsfeld mit Zusatztext wird gemeldet statt still gekürzt; v64e: Kästchen-Zustand auch bei «w14:val="0" />» mit Leerzeichen; v40: Optionen per Wortvergleich, leere Felder gemeldet)
 # Unterstuetzt: Inhaltssteuerelemente (Text, Rich-Text, Auswahlliste, Kombinationsfeld, Datum, Kontrollkaestchen)
 # und alte Formular-Textfelder (FORMTEXT, z.B. «[Text]»). Formatierung, Kopf-/Fusszeilen, Logos bleiben unveraendert.
 # Felder werden ueber ihre Beschriftung angesprochen (Text daneben), bei Mehrfachvorkommen mit «@2», «@3» ...
@@ -168,6 +168,8 @@ def fill(template, out_path, values, leer=None):
             if o is None:
                 if f["typ"] == "auswahl": warn.append(f"{k}: «{v}» ist keine erlaubte Auswahl"); continue
             else: v = o
+        if f["typ"] == "datum" and len(str(v).strip()) > 10:          # v243: Datumsfeld nimmt nur das Datum
+            warn.append(f"{k}: Datumsfeld – nur «{str(v).strip()[:10]}» übernommen, Rest «{str(v).strip()[10:].strip()}» gehört in ein eigenes Feld")
         todo.append((f, v))
     for f, v in sorted(todo, key=lambda t: -t[0]["start"]):          # von hinten, damit Positionen stimmen
         if f["sdt"]: x = x[:f["start"]] + _fill_sdt(x[f["start"]:f["ende"]], f["typ"], v) + x[f["ende"]:]

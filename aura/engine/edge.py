@@ -6,7 +6,7 @@ data\\edge_profil\\DevToolsActivePort. AURA verbindet NUR, wenn /json/version ex
 AURA-Profil); kein Rueckfall auf 9222, keine fremde Instanz. WebSockets nur zu ws://127.0.0.1:<dieser Port>.
 Navigation nur zu freigegebenen Origins (herkunft.py). Dialoge: nur «alert» bestaetigen, confirm/prompt/beforeunload
 ablehnen. Restrisiko: der Loopback-Port ist fuer jeden lokalen Prozess erreichbar (CDP hat keine Anmeldung) –
-darum schliesst AURA Edge nach Leerlauf (Einstellung «edge_leerlauf_min», Standard 60) und beim Beenden.
+darum schliesst AURA Edge nach Leerlauf (Einstellung «edge_leerlauf_min», Standard 60, 5–240) und beim Beenden (auch atexit).
 """
 import base64, json, os, re, socket, struct, subprocess, threading, time, urllib.request
 from pathlib import Path
@@ -121,20 +121,33 @@ def starten(start_url="about:blank", warten=20.0):
                 raise EdgeFehler("AURA-Edge antwortet nicht (DevToolsActivePort fehlt oder passt nicht) – abgebrochen")
             time.sleep(0.5)
         _waechter_starten()
+        if not getattr(starten, "_atexit", False):              # v244 (SEC-04): auch bei Fehlerende Port schliessen
+            import atexit; atexit.register(lambda: beenden(warten=3.0)); starten._atexit = True
     return http("/json/version").get("Browser", "?")
 
 
+LEERLAUF_MIN, LEERLAUF_MAX = 5, 240
+
+
+def leerlauf_min(v):
+    """v244 (SEC-04): Leerlauf begrenzt auf 5–240 min; «0 = nie» gibt es nicht mehr (offener CDP-Port ohne Anmeldung)."""
+    try: m = float(v)
+    except (TypeError, ValueError): return 60.0
+    if m <= 0: return float(LEERLAUF_MAX)
+    return float(min(LEERLAUF_MAX, max(LEERLAUF_MIN, m)))
+
+
 def _waechter_starten():
-    """Schliesst die AURA-Edge nach Leerlauf (Einstellung «edge_leerlauf_min», 0 = nie)."""
+    """Schliesst die AURA-Edge nach Leerlauf (Einstellung «edge_leerlauf_min», 5–240 min)."""
     if getattr(_waechter_starten, "t", None) and _waechter_starten.t.is_alive(): return
     def lauf():
         while True:
             time.sleep(60)
             try:
                 from ..config import load_settings
-                m = float(load_settings().get("edge_leerlauf_min", 60) or 0)
+                m = leerlauf_min(load_settings().get("edge_leerlauf_min", 60))
             except Exception: m = 60
-            if m > 0 and time.time() - _zuletzt[0] > m * 60 and laeuft():
+            if time.time() - _zuletzt[0] > m * 60 and laeuft():
                 beenden(); return
             if not laeuft(): return
     _waechter_starten.t = threading.Thread(target=lauf, daemon=True); _waechter_starten.t.start()

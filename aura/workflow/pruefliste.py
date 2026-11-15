@@ -292,7 +292,7 @@ def n_pruefliste(p, state, ctx):
                 ok, det = REGELN[pk["regel"]](doc, pk, ctx)
             else: ok, det = _frage(doc, pk, state, ctx, as_text(p.get("kontext", "")))
         except Exception as e:
-            if type(e).__name__ in ("Cancelled", "DeviceLost"): raise
+            if type(e).__name__ in ("Cancelled", "DeviceLost", "EmbeddingAbgebrochen"): raise
             ok, det = None, [f"Prüfung fehlgeschlagen: {type(e).__name__}: {e}"]
         res.append({"name": pk["name"], "art": pk.get("art", "regel"), "schwere": pk["schwere"], "ok": ok, "quelle": quelle(pk),
                     "details": det[:MAX_DETAILS + 1] + ([f"… und {len(det) - MAX_DETAILS - 1} weitere"] if len(det) > MAX_DETAILS + 1 else [])})

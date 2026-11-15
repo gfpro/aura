@@ -17,7 +17,7 @@ class Herkunft(unittest.TestCase):
         for u in ("http://intranet.ar.admin.ch/de", "https://intranet.ar.admin.ch.attacker.invalid/",
                   "https://intranet.ar.admin.ch@attacker.invalid/", "https://user:pw@intranet.ar.admin.ch/",
                   "https://intranet.ar.admin.ch:8443/", "https://10.1.2.3/", "https://[::1]/", "https://evil.example/",
-                  "https://sub.intranet.ar.admin.ch/", "https://intranet.ar.admin.ch./", "javascript:alert(1)",
+                  "https://intranet.ar.admin.ch./", "javascript:alert(1)",
                   "https://intranet.ar.admin.ch\\@evil/", "file:///C:/x", "", None, "https://intranet ar.admin.ch/"):
             with self.subTest(u=u): self.assertFalse(HK.ist_erlaubt(u, "intranet"))
 
@@ -25,7 +25,14 @@ class Herkunft(unittest.TestCase):
         self.assertTrue(HK.ist_erlaubt("https://intranet.ar.admin.ch/de/search?x=1", "intranet"))
         self.assertTrue(HK.ist_erlaubt("https://INTRANET.ar.admin.ch:443/de", "intranet"))
         self.assertTrue(HK.ist_erlaubt("https://www.vbs.gever.admin.ch/web/Main.wxe", "actanova"))
-        self.assertFalse(HK.ist_erlaubt("https://www.vbs.gever.admin.ch/web/Main.wxe", "intranet"))   # quellengetrennt
+        self.assertFalse(HK.ist_erlaubt("https://confluence.bit.admin.ch/x", "jira"))                  # quellengetrennt
+        self.assertFalse(HK.ist_erlaubt("https://jira.bit.admin.ch/x", "actanova"))
+        # v216: Intranet ohne Richtlinie = jeder https-Host unter *.admin.ch (Port 443), sonst nichts
+        self.assertTrue(HK.ist_erlaubt("https://sub.intranet.ar.admin.ch/", "intranet"))
+        self.assertFalse(HK.ist_erlaubt("https://admin.ch.evil.com/", "intranet"))
+        self.assertFalse(HK.ist_erlaubt("https://x.admin.ch:8443/", "intranet"))
+        self.assertTrue(HK.ist_erlaubt("https://bkdev.atlassian.net/wiki/x", "confluence"))          # v232
+        self.assertTrue(HK.ist_erlaubt("https://jira.bit.admin.ch/browse/X-1", "jira"))             # v230
         self.assertTrue(HK.ist_erlaubt("https://portal.collab.admin.ch/sites/x"))                      # irgendeine Quelle
 
     def test_richtlinie(self):

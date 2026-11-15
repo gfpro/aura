@@ -1,4 +1,4 @@
-# aura/workflow/nodes.py — Bausteine (Schritt-Typen). Version 20261031v146 (v146: Parameter «rolle» im Baustein llm – Text einer freigegebenen Rolle vor dem Systemtext; v137: Verneinungsliste ohne «nicht anwendbar/entfällt/verzichtet»; v136: Feldoption verneinung_pruefen – Beleg mit Verneinung im Zitat oder im Folgesatz wird verworfen; v135: Feldoption min_sicherheit/unsicher_wert – unsichere Auswahl wird ersetzt statt verwendet; v132: Ausfuehrlichkeit je Workflow (knapp/normal/ausfuehrlich) fuer freie Antworten und Felder mit «ausfuehrlich_ok»; v96: unsichere Auswahlfelder -> Hinweis im Pruefbericht; v41: leer_werte, v43: vorspann; rag liefert text_pin/text_suche)
+# aura/workflow/nodes.py — Bausteine (Schritt-Typen). Version 20261113v244 (v244: Baustein tabellen – Word-Tabellen zeilenweise lesen, ohne Modell; v243: Feldoption annahme_pruefen – Beleg, der nur eine Annahme oder Bedingung zitiert, gilt nicht als belegt; v146: Parameter «rolle» im Baustein llm – Text einer freigegebenen Rolle vor dem Systemtext; v137: Verneinungsliste ohne «nicht anwendbar/entfällt/verzichtet»; v136: Feldoption verneinung_pruefen – Beleg mit Verneinung im Zitat oder im Folgesatz wird verworfen; v135: Feldoption min_sicherheit/unsicher_wert – unsichere Auswahl wird ersetzt statt verwendet; v132: Ausfuehrlichkeit je Workflow (knapp/normal/ausfuehrlich) fuer freie Antworten und Felder mit «ausfuehrlich_ok»; v96: unsichere Auswahlfelder -> Hinweis im Pruefbericht; v41: leer_werte, v43: vorspann; rag liefert text_pin/text_suche)
 # v45: word_vorlage sucht nach dem Ausfuellen verbliebene Platzhalter (Parameter platzhalter) -> Warnungen/Pruefbericht.
 # v49: Option beleg_nach (Zitat nach dem Wert, neutral -> «keiner» ohne Modell), Standard aus.
 # v44: Feldoption vorschlag – Text geht NUR in den Pruefbericht (_vorschlaege), nie in das Ergebnis des Schritts.
@@ -103,6 +103,77 @@ def n_extract(p, state, ctx):
     if cut: ctx.progress(f"Achtung: Dokumenttext gekuerzt auf {limit} Zeichen")
     return {"text": text, "files": info, "truncated": cut, "chars": len(text)}
 
+# ----------------------------------------------------------------------------- Tabellen lesen (v244)
+# Allgemein: keine Fachbegriffe im Code –
+# welche Tabellen, Spalten und Suchwörter gelten, steht im Workflow.
+
+def _zellen_text(tc):
+    """Text einer Tabellenzelle; Absätze durch Zeilenumbruch getrennt."""
+    paras = []
+    for para in re.split(r"</w:p>", tc):
+        para = re.sub(r"<w:tab/>", "\t", para); para = re.sub(r"<w:br/>", "\n", para)
+        t = "".join(re.findall(r"<w:t(?:\s[^>]*)?>([^<]*)</w:t>", para))
+        if t.strip(): paras.append(_html.unescape(t).strip())
+    return "\n".join(paras)
+
+def _docx_tabellen(p):
+    """[[ [zelle, ...] je Zeile ] je Tabelle] – nur Tabellen der obersten Ebene (verschachtelte werden übersprungen)."""
+    xml = SI.docx_xml(p); out = []
+    for tbl in re.findall(r"<w:tbl>(.*?)</w:tbl>", xml, flags=re.S):
+        if "<w:tbl>" in tbl: continue
+        zeilen = []
+        for tr in re.findall(r"<w:tr[ >].*?</w:tr>", tbl, flags=re.S):
+            zeilen.append([_zellen_text(tc) for tc in re.findall(r"<w:tc>(.*?)</w:tc>", tr, flags=re.S)])
+        if zeilen: out.append(zeilen)
+    return out
+
+@node("tabellen", "Word-Tabellen zeilenweise lesen, ohne Sprachmodell. Parameter: files, gruppen {name: {id_beginnt, "
+                  "kopf_enthaelt, spalten {feld: Spaltennummer ab 0}}}, ignorieren [Platzhaltertexte], markieren {merkmal: [Wörter]}, max_zeilen")
+def n_tabellen(p, state, ctx):
+    files = p.get("files") or []
+    if isinstance(files, str): files = [files]
+    gruppen = p.get("gruppen") or {}
+    ign = [as_text(x).strip().lower() for x in (p.get("ignorieren") or []) if as_text(x).strip()]
+    mark = {k: [as_text(w).lower() for w in v] for k, v in (p.get("markieren") or {}).items()}
+    max_z = int(p.get("max_zeilen", 500))
+    res = {g: [] for g in gruppen}; fg = freigaben(ctx); gesehen = set(); warn = []
+    for f in files:
+        f = fg.lesen(as_text(f), "Datei")
+        if Path(f).suffix.lower() != ".docx": warn.append(f"{Path(f).name}: nur .docx hat lesbare Tabellen"); continue
+        ctx.progress(f"Lese Tabellen aus {Path(f).name} ...")
+        for tab in _docx_tabellen(f):
+            kopf = " ".join(tab[0]).lower()
+            for g, d in gruppen.items():
+                if d.get("kopf_enthaelt") and as_text(d["kopf_enthaelt"]).lower() not in kopf: continue
+                sp = d.get("spalten") or {"id": 0, "text": 1}; pre = as_text(d.get("id_beginnt", ""))
+                for z in tab[1:]:
+                    zelle = lambda i: z[int(i)] if int(i) < len(z) else ""
+                    row = {k: zelle(i).split("\n")[0].strip() if k == "id" else zelle(i) for k, i in sp.items()}
+                    rid = row.get("id", "")
+                    if pre and not (rid.startswith(pre) and rid[len(pre):len(pre) + 1].isdigit()): continue   # «ID-R-x» = Platzhalter
+                    inhalt = {k: v for k, v in row.items() if k != "id"}
+                    if not any(v.strip() for v in inhalt.values()): continue
+                    if ign and all(not v.strip() or any(v.strip().lower().startswith(x) for x in ign) for v in inhalt.values()):
+                        continue
+                    if (g, rid) in gesehen: warn.append(f"ID {rid} kommt mehrfach vor"); continue
+                    gesehen.add((g, rid))
+                    txt = " ".join(inhalt.values()).lower()
+                    for m, ws in mark.items():
+                        row[m] = ", ".join(w for w in ws if w in txt)
+                    res[g].append(row)
+                    if len(res[g]) >= max_z: warn.append(f"Gruppe {g}: mehr als {max_z} Zeilen – Rest weggelassen"); break
+    for w in warn: ctx.progress("Achtung: " + w)
+    for g in gruppen:
+        res["anzahl_" + g] = len(res[g])
+        if not res[g]: warn.append(f"Gruppe «{g}»: keine Zeilen gefunden")
+        res["liste_" + g] = "\n".join(f"{r.get('id', '?')}: " + " – ".join(r[k] for k in r if k != "id" and k not in mark) for r in res[g])
+    funde = [f"- {r.get('id', '?')}: " + "; ".join(f"{m}: {r[m]}" for m in mark if r.get(m)) for g in gruppen for r in res[g]
+             if any(r.get(m) for m in mark)]
+    res["markiert"] = "\n".join(funde) or "keine"
+    res["text"] = "\n".join(f"{g}: " + ", ".join(r.get("id", "?") for r in res[g]) for g in gruppen)
+    res["_warnungen"] = warn
+    return res
+
 # ----------------------------------------------------------------------------- Sprachmodell
 FIELD_RULES = ("\n\nAntworte als JSON-Objekt mit genau diesen Feldern (alle Werte sind Text):\n{spec}\n"
                "Innerhalb der Werte keine doppelten Anfuehrungszeichen verwenden (stattdessen «»). "
@@ -123,6 +194,17 @@ def _verneint(zitat, quellen):
     i = q.lower().find(z[:80])
     fenster = z if i < 0 else q[i:i + len(z) + 260]
     m = VERNEINT.search(fenster)
+    return m.group(0) if m else ""
+ANNAHME = re.compile(r"\(annahme\)|annahme:|\b(nach annahme|unter der annahme|angenommen\w*|vermutlich|voraussichtlich|mutmasslich|soweit\b[^.]{0,120}\b(nachgewiesen|belegt)|sofern\b[^.]{0,120}\b(nachgewiesen|belegt))", re.I)
+
+def _annahme(zitat, woerter=None):
+    """v243: Zitiert der Beleg nur eine Annahme oder Bedingung? Rueckgabe: Fundstelle oder ''. woerter = eigene Liste (Workflow)."""
+    z = re.sub(r"\s+", " ", zitat or "")
+    if woerter:
+        for w in woerter:
+            if w and w.lower() in z.lower(): return w
+        return ""
+    m = ANNAHME.search(z)
     return m.group(0) if m else ""
 LEER = "Keine Angabe in den Unterlagen."
 
@@ -259,6 +341,12 @@ def _llm(p, state, ctx):
                         res[n + "_belegt"] = False; res.setdefault(n + "_roh", v)
                         res[n] = f.get("ohne_beleg", f.get("wenn_leer") or "keine")
                         hinweise.append(f"{f.get('label', n)}: «{v[:80]}» – die Unterlagen verneinen das («{vn}») – auf «{res[n]}» gesetzt.")
+                        ok = True
+                    an = _annahme(res.get(n + "_beleg", ""), f.get("annahme_woerter")) if ok and f.get("annahme_pruefen") else ""
+                    if an:                                               # v243: Annahme ist kein Beleg
+                        res[n + "_belegt"] = False; res.setdefault(n + "_roh", v)
+                        res[n] = f.get("ohne_beleg", "unklar" if "unklar" in (f.get("auswahl") or []) else (f.get("wenn_leer") or LEER))
+                        hinweise.append(f"{f.get('label', n)}: Beleg ist nur eine Annahme/Bedingung («{an}») – auf «{res[n]}» gesetzt. Tatsache nachweisen.")
                         ok = True
                     if not ok:
                         res.setdefault(n + "_roh", v)

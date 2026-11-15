@@ -1,4 +1,4 @@
-# aura/workflow/feldplan_bau.py — Workflow-Schritte aus dem Feldplan bauen. Version 20261015v95 (v95: «Dokumente lesen» liest alle Datei-Eingaben, je mit Dokumentname; v64f: «keiner» = leer; Platzhalter in Begleitfeldern nur bei gewähltem Kästchen; v64e: Regeln dürfen bei Gruppen mehrere Kästchen ankreuzen; v64d: Regeln «Wenn … dann …» -> Schritt «regel», ohne Modell; v64c2: Begleitfelder nur abfragen, wenn ihr Kästchen gewählt ist)
+# aura/workflow/feldplan_bau.py — Workflow-Schritte aus dem Feldplan bauen. Version 20261113v240 (v240: Einträge mit Ausdruck aus dem bestehenden Workflow bleiben unverändert, ihre Schritte auch; v95: «Dokumente lesen» liest alle Datei-Eingaben, je mit Dokumentname; v64f: «keiner» = leer; Platzhalter in Begleitfeldern nur bei gewähltem Kästchen; v64e: Regeln dürfen bei Gruppen mehrere Kästchen ankreuzen; v64d: Regeln «Wenn … dann …» -> Schritt «regel», ohne Modell; v64c2: Begleitfelder nur abfragen, wenn ihr Kästchen gewählt ist)
 #
 # Nur Fakten (und noch offene Felder) gehen ans Sprachmodell; eine Kästchen-Gruppe ist EINE Auswahlfrage,
 # die Kästchen setzt AURA danach selbst (eq). Fest -> Wert direkt, Manuell -> Platzhalter, Leer -> nichts,
@@ -58,8 +58,10 @@ def planen(plan):
         if e["herkunft"] == "abgeleitet" and e.get("regeln"):
             pfad[e["id"]] = _slug("r " + e["titel"], used_r) + ".wert"; rspec.append(e)
     # 1) Gruppen und Kästchen zuerst (Begleitfelder brauchen deren Feldnamen)
+    for e in plan["eintraege"]:                                      # v240: aus dem Workflow übernommen -> Ausdruck behalten
+        if e.get("ausdruck") and not e.get("von_hand"): zuo.update(e["ausdruck"])
     for e in plan["eintraege"]:
-        if e.get("typ") != "kontrollkaestchen": continue
+        if e.get("typ") != "kontrollkaestchen" or (e.get("ausdruck") and not e.get("von_hand")): continue
         h, opts = e["herkunft"], _eindeutig(e["optionen"])
         if h in ("fakt", "offen"):
             if e["art"] == "gruppe" and e.get("mehrfach"):
@@ -96,7 +98,7 @@ def planen(plan):
             regeln.append({"titel": e["titel"], "nrs": e["nrs"], "regel": e.get("regel", ""), "wissen": e.get("wissen", "")})
     # 2) Einzelfelder
     for e in plan["eintraege"]:
-        if e.get("typ") == "kontrollkaestchen": continue
+        if e.get("typ") == "kontrollkaestchen" or (e.get("ausdruck") and not e.get("von_hand")): continue
         h, k = e["herkunft"], e["keys"][0]
         if h in ("fakt", "offen"):
             n = _slug(e["titel"], used); bed = grp_feld.get(e.get("zu")) if e.get("zu") else None
@@ -212,13 +214,13 @@ def aufteilen(felder, dok_zeichen=DOK_ZEICHEN, max_t=MAX_T):
     if akt: teile.append(akt)
     return teile, frei
 
-def schritte(plan, vorlage_rel, name, dok_var="dateien.text", dok_zeichen=DOK_ZEICHEN, max_t=MAX_T):
+def schritte(plan, vorlage_rel, name, dok_var="dateien.text", dok_zeichen=DOK_ZEICHEN, max_t=MAX_T, praefix="werte"):
     """-> (liste von Schritten, info). Schritte: werte, werte_2 … (llm) + word (word_vorlage)."""
     felder, zuo, regeln, pins, rspec, pfad = planen(plan); warn = []
     teile, frei = aufteilen(felder, dok_zeichen, max_t) if felder else ([], 0)
     S, wo = [], {}
     for i, t in enumerate(teile):
-        sid = "werte" if i == 0 else f"werte_{i + 1}"
+        sid = praefix if i == 0 else f"{praefix}_{i + 1}"
         for f in t: wo[f["name"]] = sid
         S.append({"id": sid, "type": "llm", "label": "Angaben aus den Unterlagen erfassen" + (f" ({i + 1}/{len(teile)})" if len(teile) > 1 else ""),
                   "system": "Du erfasst Angaben aus Unterlagen für ein Formular. Nur was in den Unterlagen steht; nichts erfinden. "
@@ -230,7 +232,7 @@ def schritte(plan, vorlage_rel, name, dok_var="dateien.text", dok_zeichen=DOK_ZE
     for e in rspec: S.append(regel_schritt(e, pfad, warn))
     def ersetze(v):
         if not isinstance(v, str): return v
-        return re.sub(r"@S\.([a-z0-9_]+)", lambda m: f"{wo.get(m.group(1), 'werte')}.{m.group(1)}", v)
+        return re.sub(r"@S\.([a-z0-9_]+)", lambda m: f"{wo.get(m.group(1), praefix)}.{m.group(1)}", v)
     mapping = {k: ersetze(v) for k, v in zuo.items()}
     for s in S:
         if s["type"] == "regel":
@@ -258,13 +260,18 @@ def anwenden(wf, plan, vorlage_rel):
         steps.insert(0, ex)
     if sum(1 for i in wf.get("inputs", []) if i.get("type") == "files") > 1: ex["alle_eingaben"] = True    # v95
     ex["max_chars"] = min(int(ex.get("max_chars", DOK_ZEICHEN) or DOK_ZEICHEN), DOK_ZEICHEN)
+    behalten = set()                                                 # v240: Schritte, auf die übernommene Ausdrücke zeigen
+    for e in plan["eintraege"]:
+        if e.get("ausdruck") and not e.get("von_hand"):
+            for v in e["ausdruck"].values(): behalten |= set(re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\.[A-Za-z_]", str(v)))
     alt = [i for i, s in enumerate(steps) if (s.get("type") == "word_vorlage" and s.get("vorlage") == vorlage_rel)
-           or (s.get("type") == "llm" and re.fullmatch(r"werte(_\d+)?", str(s.get("id", ""))))
-           or (s.get("type") == "regel" and str(s.get("id", "")).startswith("r_"))]
+           or (s.get("type") == "llm" and re.fullmatch(r"werte(_\d+)?", str(s.get("id", ""))) and s.get("id") not in behalten)
+           or (s.get("type") == "regel" and str(s.get("id", "")).startswith("r_") and s.get("id") not in behalten)]
     pos = alt[0] if alt else len(steps)
     for i in reversed(alt): del steps[i]
     pos = min(pos, len(steps))
-    neu, info = schritte(plan, vorlage_rel, wf.get("name", "Formular"), ex["id"] + ".text", ex["max_chars"])
+    praefix = "werte" if not any(s.get("id") == "werte" for s in steps) else "fp_werte"   # v240
+    neu, info = schritte(plan, vorlage_rel, wf.get("name", "Formular"), ex["id"] + ".text", ex["max_chars"], praefix=praefix)
     ids = {s.get("id") for s in steps}
     for s in neu:
         if s["id"] in ids: raise ValueError(f"Schritt-ID «{s['id']}» gibt es schon – bitte im Reiter «Schritte» umbenennen")

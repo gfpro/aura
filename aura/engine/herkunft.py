@@ -12,7 +12,9 @@ STANDARD = {
     "actanova": ("https://www.vbs.gever.admin.ch",),
     "intranet": ("https://intranet.ar.admin.ch",),
     "sharepoint": ("https://portal.collab.admin.ch",),
-    "confluence": ("https://confluence.bit.admin.ch",),
+    "confluence": ("https://confluence.bit.admin.ch", "https://bkdev.atlassian.net"),   # v232
+    "jira": ("https://jira.bit.admin.ch",),                 # v230
+    "ims": ("https://intranet.ims-ar.vbs.admin.ch",),       # v245: IMS-Connector (fester Host, GPO kann sperren/ändern)
 }
 _HOST = re.compile(r"^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$")
 _IP = re.compile(r"^[0-9.]+$|^\[.*\]$|:")

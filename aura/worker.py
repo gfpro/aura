@@ -1,4 +1,4 @@
-# aura/worker.py — Version 20261112v228 (v228: Kapitel in der Quellenliste, Abschnitte nicht mehr abgeschnitten; v227: Zusammenfassung per Code, Optimierungen in festen Feldern, Lesen im Hintergrund; v226: ganzes Dokument per Map-Reduce mit fester Gliederung; v168: Teiltreffer seltener Woerter als Quellen statt Rueckfrage; v129: job_chat_neu)
+# aura/worker.py — Version 20261115v240 (v240: IMS-Quelle aufräumen + täglicher Abgleich; v239: Quellen kürzen erkennt Kürzel (GPK), nutzt die erweiterte Frage; v237: Quellen kürzen, DIAG opt, job_vorbereiten; v228:v228: Kapitel in der Quellenliste, Abschnitte nicht mehr abgeschnitten; v227: Zusammenfassung per Code, Optimierungen in festen Feldern, Lesen im Hintergrund; v226: ganzes Dokument per Map-Reduce mit fester Gliederung; v168: Teiltreffer seltener Woerter als Quellen statt Rueckfrage; v129: job_chat_neu)
 # aura/worker.py — EIN Hintergrund-Thread fuer alles Schwere (Outlook, GPU, Suche).
 # DirectX 11 und Outlook-COM vertragen keinen parallelen Zugriff aus mehreren Threads.
 # Die Oberflaeche schickt Auftraege (jobs) und liest Ereignisse (events).
@@ -141,7 +141,8 @@ class Worker(threading.Thread):
 
     def _embedder(self):
         s = load_settings()
-        if self.embedder is None: self.embedder = Embedder(MODELS / s["embed_model"])
+        if self.embedder is None:
+            self.embedder = Embedder(MODELS / s["embed_model"]); self.embedder.abbruch = self.cancel   # v244 (FUN-05)
         return self.embedder
 
     # ---- Auftraege
@@ -193,13 +194,13 @@ class Worker(threading.Thread):
         ask = 0
         if cid == "outlook_mail" and getattr(ctx, "complete", False) and not stop():
             removed, ask = self._mail_cleanup(ctx.seen, confirm)
-        if cid == "confluence" and getattr(ctx, "complete", False) and not stop():   # v78: alte Versionen/verschwundene Seiten
-            rows = self.conn.execute("SELECT id, ext_id FROM items WHERE source = 'confluence'").fetchall()
+        if cid in ("confluence", "jira", "ims") and getattr(ctx, "complete", False) and not stop():   # v78/v230: alte Staende/verschwundene
+            rows = self.conn.execute("SELECT id, ext_id FROM items WHERE source = ?", (cid,)).fetchall()
             gone = [i for i, e in rows if e not in ctx.seen]
             cur = {e.split("|")[0] for e in ctx.seen}
             weg = [i for i, e in rows if e not in ctx.seen and e.split("|")[0] not in cur]   # wirklich verschwunden
             if len(weg) > max(20, len(rows) * 0.3):
-                self.progress(f"Confluence: {len(weg)} Seiten nicht mehr gesehen - nicht geloescht (zu viele)")
+                self.progress(f"{con.label}: {len(weg)} Objekte nicht mehr gesehen - nicht geloescht (zu viele)")
                 gone = [i for i in gone if i not in set(weg)]                   # alte Versionen trotzdem ersetzen
             if gone: self._delete(gone); removed = len(gone)
         if cid == "onenote" and getattr(ctx, "complete", False) and not stop():      # v87
@@ -212,6 +213,7 @@ class Worker(threading.Thread):
                 gone = [i for i in gone if i not in set(weg)]
             if gone: self._delete(gone); removed = len(gone)
         if cid == "confluence" and not stop(): db.flag(self.conn, "confluence_tag", time.strftime("%Y-%m-%d"))
+        if cid == "ims" and not stop(): db.flag(self.conn, "ims_tag", time.strftime("%Y-%m-%d"))          # v240
         self.conn.commit()
         if n or upd or removed:                                      # v23: nur bei Aenderungen neu aufbauen
             db.rebuild_fts(self.conn); self.retriever.invalidate()
@@ -409,6 +411,8 @@ class Worker(threading.Thread):
                 and (self.auto_runs - 1) % every == 0: cids.append("onenote")      # v87
         if (s.get("confluence_links") and s.get("confluence_auto", True)            # v78: Confluence einmal pro Tag
                 and db.flag(self.conn, "confluence_tag") != time.strftime("%Y-%m-%d")): cids.append("confluence")
+        if (s.get("ims_auto", True) and self.conn.execute("SELECT 1 FROM items WHERE source='ims' LIMIT 1").fetchone()
+                and db.flag(self.conn, "ims_tag") != time.strftime("%Y-%m-%d")): cids.append("ims")   # v240: IMS einmal pro Tag
         new = 0
         for cid in cids:
             try: new += self.job_sync(cid, auto=True) or 0
@@ -916,6 +920,14 @@ class Worker(threading.Thread):
         hw = self._confluence_hinweis(question, int(s.get("confluence_hinweis_tage", 14)))[0]   # v121: nur Anzeige
         if backend_id == "extractive":                                  # Liste ohne Modell: Anzahl = Regler «Max. Quellen»
             hits = hits[:max(1, int(s.get("llm_top_k", 4)))]
+        else:                                                           # v237: Kontrollcenter – Quellen kürzen, Messzeile
+            n_k = int(be.settings.get("llm_top_k", 4)); n_vor = sum(len(h.get("text") or "") for h in hits[:n_k])
+            if s.get("quellen_kuerzen", False):
+                hits = [self._kuerzen(h, question, int(s.get("kuerzen_zeichen", 700))) for h in hits]
+            if s.get("diag_opt", True):
+                n_nach = sum(len(h.get("text") or "") for h in hits[:n_k])
+                log.get().info(f"DIAG opt kuerzen={int(bool(s.get('quellen_kuerzen', False)))} nachbarn={int(s.get('nachbarn_top', 1))} "
+                               f"vorspann={int(bool(s.get('vorspann_cache', True)))} quellen={min(len(hits), n_k)} zeichen={n_vor}->{n_nach}")
         try:
             be.generate(q_llm, hits, lambda t: self.emit("token", t), self.cancel.is_set)
             if hw: self.emit("token", "\n\n" + hw)
@@ -930,6 +942,40 @@ class Worker(threading.Thread):
         log.get().info(f"Antwort: {mode}, {len(hits)} Quellen, Modell {backend_id}, "
                        + ", ".join(f"{k} {v:.1f}" for k, v in tm.items() if isinstance(v, (int, float))))
         self.progress(f"Fertig ({mode}, {len(hits)} Quellen{', Folgefrage' if prev else ''})")
+
+    STOPP = {"sind", "eine", "einen", "einer", "dass", "oder", "auch", "noch", "wurde", "werden", "haben", "letzten", "letzte",
+             "neueste", "informationen", "infos", "aktuell", "welche", "welcher", "bitte", "gibt", "über", "ueber", "dazu"}
+    SATZ = re.compile(r"(?<=[.!?;])\s+|\n+")
+
+    @staticmethod
+    def _kuerzen(h, frage, budget):
+        """v237: Nur die zur Frage passenden Sätze einer Quelle (ohne Sprachmodell). Erster Satz (Betreff/Absender) zählt
+        mehr, Sätze mit Zahlen auch (bei Frist-Fragen stark). Reihenfolge bleibt; Anhänge bleiben ganz."""
+        t = h.get("text") or ""
+        if len(t) <= budget or h.get("source") == "anhang": return h
+        woerter = {x.lower() for x in re.findall(r"[\wÄÖÜäöü]+", frage)              # v239: Kürzel wie GPK, BöB zählen
+                   if (len(x) >= 4 or (len(x) >= 2 and sum(c.isupper() for c in x) >= 2)) and x.lower() not in Worker.STOPP}
+        saetze = [x.strip() for x in Worker.SATZ.split(t) if x.strip()]
+        if len(saetze) <= 2: return h
+        frist = bool(DEADLINE.search(frage))
+        def wert(i, x):
+            xl = x.lower(); p = sum(1 for a in woerter if a in xl)
+            if re.search(r"\d", x): p += 2.5 if frist else 0.5
+            return p + (3 if i == 0 else 0)
+        keep, n = set(), 0
+        for i in sorted(range(len(saetze)), key=lambda i: -wert(i, saetze[i])):
+            if keep and n + len(saetze[i]) > budget: continue
+            keep.add(i); n += len(saetze[i])
+            if n >= budget: break
+        h = dict(h); h["text"] = " … ".join(saetze[i] for i in sorted(keep)); return h
+
+    def job_vorbereiten(self, backend_id):
+        """v237: Termine von heute im Voraus vorbereiten (Kontrollcenter › Vorbereitung). Weicht jeder Frage aus."""
+        from . import agent
+        try:
+            n, fertig = agent.vorbereiten(self, backend_id, int(load_settings().get("vorbereitung_max", 3)))
+            self.progress(f"Vorbereitung: {n} Termin(e) vorbereitet" + ("" if fertig else " – unterbrochen, geht später weiter"))
+        finally: self._llm_state()
 
     def _rueckfrage(self, asked, backend_id, cand, ref, prev, t0):
         """v110: Seltenes Wort trifft Objekte ausserhalb der Quellen, aber nicht alle Woerter passen -> nachfragen statt raten."""

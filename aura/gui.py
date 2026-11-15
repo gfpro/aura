@@ -1,4 +1,4 @@
-# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261112v229 (v229: Skills & Rollen unter Werkzeuge; v227: kein Flackern beim Schreiben; v166: Antwortlaenge als Schieberegler)
+# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261115v244 (v244: Quellen zweispaltig mit Scrollbalken; v238: Darstellung aus Einstellungen entfernt; v237: Kontrollcenter, Vorbereitung im Voraus; v235: Schalter «Sprachmodell beim Start laden»; v234: Startkacheln als eigene Tasks – ✎ bearbeiten, ＋ neu, Schalter je Task, Klick fügt nur ein; v229: Skills & Rollen unter Werkzeuge; v227: kein Flackern beim Schreiben; v166: Antwortlaenge als Schieberegler)
 # v129: Senden-Knopf orange «⏳» + Hinweis, solange Vektoren berechnet werden (Frage bleibt im Eingabefeld).
 #       «＋ Neuer Chat» und «🕘 Verlauf» über dem Chat; Chats werden 30 Tage gespeichert (chatlog.py, data\chats.db;
 #       Einstellungen chats_behalten, chats_tage). «⌂» startet ebenfalls einen neuen Chat (setzt den Bezug im Worker zurück).
@@ -79,6 +79,12 @@ TILES = [("▦", "Termine diese Woche", "Kalender aus Outlook", SUGGESTIONS[0]),
          ("✉", "Mails von heute", "Posteingang, lokal durchsucht", SUGGESTIONS[1]),
          ("⌕", "Thema suchen", "Mails, Dokumente, Verlauf", SUGGESTIONS[2]),
          ("▶", "Workflow starten", "Abläufe und Ergebnisse", None)]
+# v234: Tasks (Kacheln) in settings.json «kacheln»; Schalter gelten nur für die nächste Frage, danach zurück.
+KACHEL_SCHALTER = [("agent", "Agent"), ("intranet", "Intranet"), ("actanova", "Acta Nova"), ("sharepoint", "SharePoint")]
+
+def kacheln_standard():
+    return [{"sym": s, "titel": t, "sub": u, "frage": q or "", "art": "workflows" if q is None else "frage", "schalter": []}
+            for s, t, u, q in TILES]
 
 def visible(t):
     """Qwen3-Denkteil <think>…</think> nicht anzeigen (auch leer, wie bei /no_think)."""
@@ -269,6 +275,7 @@ class App:
         self.fvars = {}; self.flist = []; self.confirm_open = False; self.decline_until = 0.0
         self.next_auto = time.time() + 120; root.after(30000, self.autotick)
         root.after(1500, self._erg_badge)                              # v54
+        root.after(5000, self._autoload)                               # v235
         if self.s.get("startseite") == "widgets": root.after(300, self.open_widgets)   # v81
         root.bind("<Configure>", self._on_resize, add="+"); root.after(400, self._rb_apply)   # v68
 
@@ -373,13 +380,14 @@ class App:
         self._switch(b, "Info-Leiste rechts", self.rb_var, self.toggle_rb, 3)
         self.start_var = tk.BooleanVar(value=self.s.get("startseite") == "widgets")          # v82
         self._switch(b, "Beim Start Widgets zeigen", self.start_var, self.set_start, 4)
-        self.sb_mode = ctk.CTkSegmentedButton(b, values=list(MODI), height=26, font=font(11), command=self.set_mode,  # v69
-                                              selected_color=ACCENT, selected_hover_color=ACCENT_HI, unselected_color=SIDE,
-                                              unselected_hover_color=BORDER, fg_color=SIDE, text_color=INK)
-        self.sb_mode.set(next((k for k, v in MODI.items() if v == self.s.get("darstellung", "system")), "System"))
-        self.sb_mode.grid(row=7, column=0, sticky="ew", pady=(10, 4))
-        hilfe.tip(self.sb_mode, "Darstellung: Hell, Dunkel oder wie Windows (System). Wird gespeichert.")
+        # v238: Darstellung Hell/Dunkel nur noch oben (☀/☾) – hier entfernt
+        self.autoload_var = tk.BooleanVar(value=bool(self.s.get("llm_autoload", False)))     # v235
+        hilfe.tip(self._switch(b, "Sprachmodell beim Start laden", self.autoload_var, self.toggle_autoload, 6),
+                  "Lädt das gewählte Sprachmodell kurz nach dem Start (ca. 1 Minute, belegt rund 13 GB Arbeitsspeicher). "
+                  "Listen-Fragen (Termine, Mails) gehen auch ohne.")
         hilfe.tip(self._item(b, "Log öffnen", self.open_log, 8), hilfe.TEXTE["*"]["#version"])
+        hilfe.tip(self._item(b, "Kontrollcenter", self.open_kontrollcenter, 9),                         # v237
+                  "Alle Einstellungen an einem Ort; Optimierungen ein-/ausschalten und im Log vergleichen.")
 
         self._grp_open(self.s.get("menu_offen", "Chat") or None, save=False)
 
@@ -642,6 +650,92 @@ class App:
     def toggle_modus(self):
         self.set_mode("Hell" if self._dunkel() else "Dunkel"); self._modus_symbol()
 
+    # ------------------------------------------------------------------ v237: Kontrollcenter
+    # (Schlüssel, Bereich, Bezeichnung, Typ, Standard, erweitert, Hilfe, Bereich min/max)
+    KC = [("llm_autoload", "Sprachmodell", "Beim Start laden", "bool", False, False, "Lädt das Modell 5 s nach dem Start (ca. 1 Min., ~13 GB RAM).", None),
+          ("llm_max_new", "Sprachmodell", "Antwort höchstens … Tokens", "int", 250, True, "Obergrenze der Antwortlänge (die Stufe Normal/Ausführlich hebt sie an).", (100, 1500)),
+          ("quellen_kuerzen", "Antworten", "Quellen kürzen (schneller)", "bool", False, True, "Nur die zur Frage passenden Sätze je Quelle gehen ans Modell. Spart Einlesezeit; Details können fehlen – mit Testfragen prüfen.", None),
+          ("kuerzen_zeichen", "Antworten", "Quellen kürzen: Zeichen je Quelle", "int", 700, True, "Je Quelle höchstens so viele Zeichen (wirkt nur mit «Quellen kürzen»).", (300, 3000)),
+          ("nachbarn_top", "Antworten", "Nachbarstücke beim besten Treffer", "int", 1, True, "0 = aus (schneller), 1 = Stück davor und danach mitlesen. Frist-Fragen holen Nachbarn immer.", (0, 2)),
+          ("vorspann_cache", "Antworten", "Vorspann-Cache", "bool", True, True, "Systemtext und Rolle werden ab der 2. Frage nicht neu eingelesen (~5 s).", None),
+          ("wissen_chat", "Antworten", "Wissen im Chat", "bool", False, False, "Wissenssammlungen zusätzlich durchsuchen.", None),
+          ("graph_suche", "Antworten", "Zusammenhänge im Chat", "bool", True, False, "Mail → Termin-Abfolgen aus dem Graphen ergänzen.", None),
+          ("vorbereitung", "Vorbereitung", "Termine im Voraus vorbereiten", "bool", False, False, "Bereitet die Termine des Tages vor (Agent-Notiz). Danach antwortet «Bereite mich auf den nächsten Termin vor» sofort. AURA muss offen sein.", None),
+          ("vorbereitung_zeit", "Vorbereitung", "Ab Uhrzeit", "zeit", "07:30", True, "Frühester Start (HH:MM). Läuft nur, wenn AURA nichts anderes tut.", None),
+          ("vorbereitung_max", "Vorbereitung", "Anzahl Termine", "int", 3, True, "Höchstens so viele Termine von heute (ca. 1–2 Min. je Termin).", (1, 6)),
+          ("autosync", "Abgleich", "Auto-Abgleich", "bool", True, False, "Neue Mails/Termine regelmässig einlesen.", None),
+          ("autosync_min", "Abgleich", "Alle … Minuten", "int", 15, True, "Abstand des Auto-Abgleichs.", (5, 120)),
+          ("diag_opt", "Diagnose", "Optimierungen ins Log", "bool", True, True, "Je Antwort eine Zeile «DIAG opt …» (aktive Schalter, Zeichen vorher→nachher).", None)]
+    KC_SYNC = {"autosync": ("auto_var", "toggle_auto"), "wissen_chat": ("wissen_var", "toggle_wissen"),
+               "graph_suche": ("graph_var", "toggle_graph"), "llm_autoload": ("autoload_var", "toggle_autoload")}
+
+    def open_kontrollcenter(self):
+        body = self.view("kontrollcenter", "Kontrollcenter"); body.grid_columnconfigure(0, weight=1); body.grid_rowconfigure(0, weight=1)
+        sf = ctk.CTkScrollableFrame(body, fg_color="transparent"); sf.grid(row=0, column=0, sticky="nsew", padx=20, pady=8)
+        sf.grid_columnconfigure(1, weight=1)
+        s = load_settings(); erw = bool(s.get("kc_erweitert", False)); r = 0
+        ev = tk.BooleanVar(value=erw)
+        def erw_set():
+            x = load_settings(); x["kc_erweitert"] = bool(ev.get()); save_settings(x); self.open_kontrollcenter()
+        ctk.CTkSwitch(sf, text="Erweiterte Einstellungen anzeigen", variable=ev, command=erw_set, font=font(12, "bold"),
+                      text_color=INK, progress_color=ACCENT).grid(row=r, column=0, columnspan=2, sticky="w", pady=(4, 2)); r += 1
+        ctk.CTkLabel(sf, text="Änderungen gelten ab der nächsten Frage. Zum Vergleichen: gleiche Fragen stellen und im Log die Zeilen "
+                              "«DIAG opt» und «Antwort: … prefill …» ansehen.", font=font(10), text_color=MUTED, anchor="w",
+                     justify="left", wraplength=640).grid(row=r, column=0, columnspan=2, sticky="w", pady=(0, 6)); r += 1
+        bereich = None
+        for key, ber, lab, typ, std, nur_erw, hilfe_t, mm in self.KC:
+            if nur_erw and not erw: continue
+            if ber != bereich:
+                bereich = ber
+                ctk.CTkLabel(sf, text=ber.upper(), font=font(10, "bold"), text_color=MUTED, anchor="w").grid(
+                    row=r, column=0, columnspan=2, sticky="w", pady=(14, 2)); r += 1
+            wert = s.get(key, std)
+            if typ == "bool":
+                v = tk.BooleanVar(value=bool(wert))
+                w = ctk.CTkSwitch(sf, text=lab + ("  ·  erweitert" if nur_erw else ""), variable=v, font=font(12), text_color=INK,
+                                  progress_color=ACCENT, command=lambda k=key, v=v: self._kc_setzen(k, bool(v.get())))
+                w.grid(row=r, column=0, columnspan=2, sticky="w", pady=3)
+            else:
+                ctk.CTkLabel(sf, text=lab, font=font(12), text_color=INK, anchor="w").grid(row=r, column=0, sticky="w", pady=3, padx=(4, 12))
+                e = ctk.CTkEntry(sf, width=80, height=26, font=font(12)); e.insert(0, str(wert)); e.grid(row=r, column=1, sticky="w")
+                def ok(_e=None, k=key, e=e, typ=typ, mm=mm, std=std):
+                    t = e.get().strip()
+                    try:
+                        if typ == "int": x = max(mm[0], min(mm[1], int(t)))
+                        else: time.strptime(t, "%H:%M"); x = t
+                    except Exception: x = load_settings().get(k, std)
+                    e.delete(0, "end"); e.insert(0, str(x)); self._kc_setzen(k, x)
+                e.bind("<Return>", ok); e.bind("<FocusOut>", ok); w = e
+            hilfe.tip(w, hilfe_t); r += 1
+
+    def _kc_setzen(self, key, wert):
+        if key in self.KC_SYNC and hasattr(self, self.KC_SYNC[key][0]):         # Schalter in der Seitenleiste mitführen
+            var, fn = self.KC_SYNC[key]; self.s = load_settings(); getattr(self, var).set(wert); getattr(self, fn)()
+        else:
+            self.s = load_settings(); self.s[key] = wert; save_settings(self.s)
+        self.status.configure(text=f"Kontrollcenter: «{key}» = {wert}")
+
+    def _vorbereitung_tick(self):
+        """v237: Termine von heute im Voraus vorbereiten – einmal pro Tag ab vorbereitung_zeit, nur im Leerlauf."""
+        s = load_settings()
+        if not s.get("vorbereitung") or s.get("llm") == "extractive" or time.strftime("%H:%M") < s.get("vorbereitung_zeit", "07:30"): return
+        from . import agent
+        if agent.vb_heute_fertig() or self.busy or self.cur or not self.w.jobs.empty(): return
+        if time.time() - getattr(self, "_vb_letzt", 0) < 600: return     # höchstens alle 10 Min. ein Versuch
+        self._vb_letzt = time.time(); self.w.submit("vorbereiten", s["llm"])
+
+    def toggle_autoload(self):                                           # v235
+        self.s = load_settings(); self.s["llm_autoload"] = bool(self.autoload_var.get()); save_settings(self.s)
+        self.status.configure(text="Sprachmodell wird ab dem nächsten Start automatisch geladen." if self.s["llm_autoload"]
+                              else "Sprachmodell wird beim Start nicht mehr geladen.")
+
+    def _autoload(self):
+        """v235: 5 s nach dem Start laden (Fenster ist dann sichtbar), nur wenn nichts anderes läuft."""
+        s = load_settings()
+        if not s.get("llm_autoload") or s.get("llm") == "extractive" or self.llm_ready: return
+        if self.busy or not self.w.jobs.empty(): self.root.after(5000, self._autoload); return
+        self.toggle_llm()
+
     def toggle_rb(self):
         self.s = load_settings(); self.s["rechte_leiste"] = bool(self.rb_var.get()); save_settings(self.s)
         self._rb_apply()
@@ -761,15 +855,20 @@ class App:
         """v47: Vollansicht wie Wissen/Workflows (bleibt im Hintergrund offen)."""
         if "quellen" in self.views and self.views["quellen"].winfo_exists(): self.show_view("quellen"); return
         body = self.view("quellen", "Quellen")
-        w = self.win = ctk.CTkFrame(body, fg_color="transparent"); w.grid(row=0, column=0, sticky="nw", padx=24, pady=12)
-        w.grid_columnconfigure(0, weight=1, minsize=520)
+        # v244: scrollbar + zwei Spalten, damit alle Quellen auf den Schirm passen
+        body.grid_rowconfigure(0, weight=1); body.grid_columnconfigure(0, weight=1)
+        sf = ctk.CTkScrollableFrame(body, fg_color="transparent", scrollbar_button_color=BORDER,
+                                    scrollbar_button_hover_color=MUTED)
+        sf.grid(row=0, column=0, sticky="nsew", padx=(24, 8), pady=12)
+        w = self.win = ctk.CTkFrame(sf, fg_color="transparent"); w.pack(anchor="nw", fill="x")
+        w.grid_columnconfigure((0, 1), weight=1, minsize=480, uniform="q")
         ctk.CTkLabel(w, text="Sync holt nur neue Objekte. Danach unten links «Vektoren berechnen».",
                      font=font(11), text_color=MUTED, anchor="w", justify="left", wraplength=500).grid(
-            row=0, column=0, sticky="w", padx=4, pady=(0, 10))
+            row=0, column=0, columnspan=2, sticky="w", padx=4, pady=(0, 10))
         self.rows, self.src_btns = {}, []
         for i, c in enumerate(CONNECTORS):
             card = ctk.CTkFrame(w, fg_color=CARD, corner_radius=0)
-            card.grid(row=1 + i, column=0, sticky="ew", pady=3)
+            card.grid(row=1 + i // 2, column=i % 2, sticky="nsew", pady=3, padx=(0, 6) if i % 2 == 0 else (0, 0))
             card.grid_columnconfigure(1, weight=1)
             dot = ctk.CTkLabel(card, text="●", text_color=OFF, font=font(11), width=12)
             dot.grid(row=0, column=0, rowspan=2, padx=(12, 6))
@@ -797,9 +896,9 @@ class App:
                               fg_color=ACCENT, hover_color=ACCENT_HI, command=lambda c=c: self.sync(c)); b.pack(side="left")
             self.src_btns.append(b); self.rows[c.id] = (dot, info)
         # Live-Quellen: werden bei der Frage abgefragt (Schalter im Chat), hier nur einmalig einrichten
-        n0 = 2 + len(CONNECTORS)
+        n0 = 2 + (len(CONNECTORS) + 1) // 2
         ctk.CTkLabel(w, text="Live-Quellen (Suche bei der Frage, nichts wird gespeichert)", font=font(11, "bold"),
-                     text_color=MUTED, anchor="w").grid(row=n0, column=0, sticky="w", padx=4, pady=(18, 4))
+                     text_color=MUTED, anchor="w").grid(row=n0, column=0, columnspan=2, sticky="w", padx=4, pady=(18, 4))
         from .engine import ordnungssystem as _os, intranet as _in
         npos = len(_os.positionen())
         live = [("Acta Nova", f"{self.s.get('actanova_url') or 'Standard: GEVER VBS'} · Ordnungssystem: "
@@ -809,13 +908,14 @@ class App:
                  self.open_live_sp, True)]
         for k, (name, txt, cmd, ok) in enumerate(live):
             card = ctk.CTkFrame(w, fg_color=CARD, corner_radius=0)
-            card.grid(row=n0 + 1 + k, column=0, sticky="ew", pady=3); card.grid_columnconfigure(1, weight=1)
+            card.grid(row=n0 + 1 + k // 2, column=k % 2, sticky="nsew", pady=3, padx=(0, 6) if k % 2 == 0 else (0, 0))
+            card.grid_columnconfigure(1, weight=1)
             ctk.CTkLabel(card, text="●", text_color=OK if ok else OFF, font=font(11), width=12).grid(row=0, column=0, rowspan=2, padx=(12, 6))
             ctk.CTkLabel(card, text=name, font=font(12, "bold"), text_color=INK, anchor="w", height=18).grid(row=0, column=1, sticky="w", pady=(7, 0))
-            ctk.CTkLabel(card, text=txt[:90], font=font(10), text_color=MUTED, anchor="w", height=16).grid(row=1, column=1, sticky="w", pady=(0, 7))
+            ctk.CTkLabel(card, text=txt[:70], font=font(10), text_color=MUTED, anchor="w", height=16).grid(row=1, column=1, sticky="w", pady=(0, 7))
             ctk.CTkButton(card, text="Einrichten", width=76, height=24, corner_radius=0, font=font(11), fg_color=BORDER,
                           hover_color=MUTED, text_color=INK, command=cmd).grid(row=0, column=2, rowspan=2, padx=(12, 10))
-        rz = ctk.CTkFrame(w, fg_color="transparent"); rz.grid(row=n0 + 5, column=0, sticky="ew", pady=(24, 0))   # v60
+        rz = ctk.CTkFrame(w, fg_color="transparent"); rz.grid(row=n0 + 5, column=0, columnspan=2, sticky="ew", pady=(24, 0))   # v60
         ctk.CTkButton(rz, text="Alles zurücksetzen …", height=28, corner_radius=0, font=font(11), fg_color="transparent",
                       border_width=1, border_color=ERR, hover_color=BORDER, text_color=ERR, command=self.reset_all).pack(side="left")
         ctk.CTkLabel(rz, text="  Löscht alle eingelesenen Daten und beendet alle Synchronisationen.", font=font(10),
@@ -951,9 +1051,126 @@ class App:
         ctk.CTkLabel(f, text="Woran arbeitest du heute?", font=hfont(28), text_color=INK).pack()
         ctk.CTkLabel(f, text="AURA durchsucht deine Mails, Termine, deinen Verlauf und Dokumente – lokal auf diesem Rechner.",
                      font=font(13), text_color=MUTED).pack(pady=(6, 22))
-        grid = ctk.CTkFrame(f, fg_color="transparent"); grid.pack()       # v68: Kacheln 2 × 2
-        for i, t in enumerate(TILES): self._tile(grid, *t).grid(row=i // 2, column=i % 2, padx=6, pady=6, sticky="nsew")
+        grid = ctk.CTkFrame(f, fg_color="transparent"); grid.pack()       # v68: Kacheln 2 × 2; v234: eigene Tasks
+        ks = self._kacheln()
+        for i, k in enumerate(ks): self._tile(grid, k, i).grid(row=i // 2, column=i % 2, padx=6, pady=6, sticky="nsew")
+        neu = ctk.CTkButton(grid, text="＋ Neuer Task", height=30, corner_radius=0, font=font(11), fg_color="transparent",
+                            hover_color=BORDER, text_color=MUTED, border_width=1, border_color=BORDER,
+                            command=lambda: self._kachel_bearbeiten(None))
+        neu.grid(row=(len(ks) + 1) // 2, column=0, columnspan=2, pady=(8, 0))
+        hilfe.tip(neu, "Eigenen Task anlegen: Frage und Schalter (Agent, Intranet, Acta Nova, SharePoint) vorbereiten.")
         self.welcome = f
+
+    # ---- v234: Tasks (Kacheln)
+    def _kacheln(self):
+        ks = load_settings().get("kacheln")
+        return ks if isinstance(ks, list) and ks else kacheln_standard()
+
+    def _kacheln_speichern(self, ks):
+        self.s = load_settings(); self.s["kacheln"] = ks; save_settings(self.s)
+        if self.welcome is not None:
+            try: self.welcome.destroy()
+            except Exception: pass
+            self.welcome = None; self._welcome()
+
+    def _kachel_bearbeiten(self, idx):
+        """Fenster: Symbol, Titel, Untertitel, Frage, Schalter. idx None = neuer Task."""
+        ks = self._kacheln(); k = dict(ks[idx]) if idx is not None else {"sym": "★", "titel": "", "sub": "", "frage": "",
+                                                                         "art": "frage", "schalter": []}
+        wf = k.get("art") == "workflows"
+        d = ctk.CTkToplevel(self.root); d.title("Task bearbeiten" if idx is not None else "Neuer Task")
+        d.configure(fg_color=SIDE); d.resizable(False, False); d.transient(self.root)
+        d.after(100, lambda: (d.grab_set(), d.lift(), d.focus_force()))
+        w = ctk.CTkFrame(d, fg_color="transparent"); w.pack(padx=20, pady=16, fill="both")
+        w.grid_columnconfigure(1, weight=1)
+        def feld(r, label, wert, breite=360):
+            ctk.CTkLabel(w, text=label, font=font(11, "bold"), text_color=INK, anchor="w").grid(row=r, column=0, sticky="w", pady=4, padx=(0, 10))
+            e = ctk.CTkEntry(w, width=breite, height=28, font=font(12)); e.insert(0, wert or ""); e.grid(row=r, column=1, sticky="w", pady=4)
+            return e
+        e_sym = feld(0, "Symbol", k.get("sym"), 60)
+        e_tit = feld(1, "Titel", k.get("titel"))
+        e_sub = feld(2, "Untertitel", k.get("sub"))
+        tb, vars_ = None, {}
+        if wf:
+            ctk.CTkLabel(w, text="Dieser Task öffnet die Workflows.", font=font(11), text_color=MUTED, anchor="w").grid(
+                row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        else:
+            ctk.CTkLabel(w, text="Frage", font=font(11, "bold"), text_color=INK, anchor="nw").grid(row=3, column=0, sticky="nw", pady=4)
+            tb = ctk.CTkTextbox(w, width=360, height=90, font=font(12), border_width=1, wrap="word")
+            tb.insert("1.0", k.get("frage") or ""); tb.grid(row=3, column=1, sticky="w", pady=4)
+            ctk.CTkLabel(w, text="Tipp: «XY» als Platzhalter wird beim Klick markiert und lässt sich direkt überschreiben.",
+                         font=font(10), text_color=MUTED, anchor="w").grid(row=4, column=1, sticky="w")
+            ctk.CTkLabel(w, text="Einschalten", font=font(11, "bold"), text_color=INK, anchor="nw").grid(row=5, column=0, sticky="nw", pady=(10, 0))
+            sb = ctk.CTkFrame(w, fg_color="transparent"); sb.grid(row=5, column=1, sticky="w", pady=(10, 0))
+            for i, (key, lab) in enumerate(KACHEL_SCHALTER):
+                v = tk.BooleanVar(value=key in (k.get("schalter") or [])); vars_[key] = v
+                ctk.CTkCheckBox(sb, text=lab, variable=v, font=font(11), checkbox_width=18, checkbox_height=18, fg_color=ACCENT,
+                                hover_color=ACCENT_HI).grid(row=i // 2, column=i % 2, sticky="w", padx=(0, 18), pady=2)
+            ctk.CTkLabel(w, text="Gilt nur für diese Frage; danach stehen die Schalter wieder wie vorher. Acta Nova öffnet Edge zur Anmeldung.",
+                         font=font(10), text_color=MUTED, anchor="w", wraplength=360, justify="left").grid(row=6, column=1, sticky="w", pady=(4, 0))
+        bar = ctk.CTkFrame(w, fg_color="transparent"); bar.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(16, 0))
+        def speichern():
+            n = {"sym": (e_sym.get().strip() or "★")[:2], "titel": e_tit.get().strip(), "sub": e_sub.get().strip(),
+                 "art": k.get("art", "frage"), "frage": tb.get("1.0", "end").strip() if tb else "",
+                 "schalter": [key for key, v in vars_.items() if v.get()]}
+            if not n["titel"]: messagebox.showinfo(APP_NAME, "Bitte einen Titel eingeben.", parent=d); return
+            if not wf and not n["frage"]: messagebox.showinfo(APP_NAME, "Bitte eine Frage eingeben.", parent=d); return
+            neu = list(ks)
+            if idx is None: neu.append(n)
+            else: neu[idx] = n
+            d.destroy(); self._kacheln_speichern(neu)
+        def loeschen():
+            if not messagebox.askyesno(APP_NAME, f"Task «{k.get('titel')}» löschen?", parent=d): return
+            neu = [x for i, x in enumerate(ks) if i != idx]
+            d.destroy(); self._kacheln_speichern(neu or kacheln_standard())
+        def standard():
+            if not messagebox.askyesno(APP_NAME, "Alle Tasks durch die vier Standard-Kacheln ersetzen?", parent=d): return
+            d.destroy(); self._kacheln_speichern(kacheln_standard())
+        ctk.CTkButton(bar, text="Speichern", width=90, height=30, corner_radius=0, font=font(12, "bold"), fg_color=ACCENT,
+                      hover_color=ACCENT_HI, command=speichern).pack(side="right")
+        ctk.CTkButton(bar, text="Abbrechen", width=90, height=30, corner_radius=0, font=font(12), fg_color=CARD,
+                      hover_color=BORDER, text_color=INK, command=d.destroy).pack(side="right", padx=(0, 8))
+        if idx is not None:
+            ctk.CTkButton(bar, text="Löschen", width=70, height=30, corner_radius=0, font=font(11), fg_color="transparent",
+                          border_width=1, border_color=ERR, hover_color=BORDER, text_color=ERR, command=loeschen).pack(side="left")
+        ctk.CTkButton(bar, text="Standard", width=70, height=30, corner_radius=0, font=font(11), fg_color="transparent",
+                      hover_color=BORDER, text_color=MUTED, command=standard).pack(side="left", padx=(8, 0))
+        e_tit.focus_set()
+
+    def _schalter_an(self, key):
+        return bool(load_settings().get(key, False))
+
+    def _schalter_setzen(self, key, on):
+        """Setzt einen Chat-Schalter ohne Rückfragen; Acta Nova EIN läuft über toggle_acta (Edge + PIN)."""
+        if self._schalter_an(key) == on: return True
+        if key == "actanova" and on: self.toggle_acta(); return True
+        if key == "intranet" and on and not (load_settings().get("intranet_url") or "").strip():
+            messagebox.showinfo(APP_NAME, "Intranet ist noch nicht eingerichtet (Wissen › Quellen › Intranet) – bleibt aus.",
+                                parent=self.root); return False
+        self.s = load_settings(); self.s[key] = on; save_settings(self.s)
+        {"agent": self._agent_farbe, "intranet": self._intra_farbe, "actanova": self._acta_farbe, "sharepoint": self._sp_farbe}[key]()
+        return True
+
+    def _kachel_zurueck(self):
+        """Schalter auf den Stand vor dem Task zurück (nach der Antwort, beim neuen Chat oder beim nächsten Task)."""
+        vorher, self._k_vorher, self._k_gesendet = getattr(self, "_k_vorher", None), None, False
+        for key, on in (vorher or {}).items(): self._schalter_setzen(key, on)
+
+    def _kachel_klick(self, k):
+        if self.cur: self.status.configure(text="Bitte warten, bis die Antwort fertig ist."); return
+        if k.get("art") == "workflows": self.open_workflows(); return
+        self._kachel_zurueck()
+        wunsch = [s for s in (k.get("schalter") or []) if s in dict(KACHEL_SCHALTER)]
+        vorher = {key: self._schalter_an(key) for key, _ in KACHEL_SCHALTER}
+        an = []
+        for key, lab in KACHEL_SCHALTER:                                 # Acta Nova zuletzt: öffnet ein Hinweisfenster
+            if key != "actanova" and self._schalter_setzen(key, key in wunsch) and key in wunsch: an.append(lab)
+        if "actanova" in wunsch: self._schalter_setzen("actanova", True); an.append("Acta Nova")
+        elif vorher["actanova"]: self._schalter_setzen("actanova", False)
+        self._k_vorher = vorher; self._k_gesendet = False
+        self._fill(k.get("frage") or "")
+        self.status.configure(text=f"Task «{k.get('titel')}»: " + (", ".join(an) + " ein" if an else "ohne Live-Quellen/Agent")
+                              + " – gilt für diese Frage. Enter = senden.")
 
     def open_widgets(self):
         """v81: Ansicht «Workflow-Ergebnisse» – angeheftete Workflows als Widgets in voller Breite."""
@@ -979,6 +1196,7 @@ class App:
         """v79: zurück zur Startseite (Kacheln + Ablaufband); der Chatverlauf wird geleert."""
         if self.cur: self.status.configure(text="Bitte warten, bis die Antwort fertig ist."); return
         self.close_panel(anim=False); self.show_chat()
+        if getattr(self, "_k_vorher", None) is not None: self._kachel_zurueck()      # v234: nicht gesendeter Task
         for c in self.chat.winfo_children(): c.destroy()
         self.msgs = []; self.welcome = None; self._welcome()
         self.w.submit("chat_neu")                                        # v97/v129: neuer Chat = ohne Anhang, ohne Bezug
@@ -1000,21 +1218,30 @@ class App:
             return img
         except Exception: return None
 
-    def _tile(self, parent, sym, title, sub, q):
-        """v68: Kachel der Startseite; Klick auf jeden Teil löst aus."""
+    def _tile(self, parent, k, idx):
+        """v68: Kachel der Startseite; Klick auf jeden Teil löst aus. v234: ✎ bearbeiten, Schalter als Kürzel."""
         c = ctk.CTkFrame(parent, fg_color=BUBBLE, corner_radius=0, border_width=1, border_color=BORDER, width=300, height=74)
         c.grid_propagate(False); c.grid_columnconfigure(1, weight=1)
-        ic = ctk.CTkLabel(c, text=sym, width=38, height=38, corner_radius=0, fg_color=CARD, text_color=ACCENT, font=font(16, "bold"))
+        ic = ctk.CTkLabel(c, text=k.get("sym") or "★", width=38, height=38, corner_radius=0, fg_color=CARD, text_color=ACCENT,
+                          font=font(16, "bold"))
         ic.grid(row=0, column=0, rowspan=2, padx=(14, 10), pady=16)
-        t1 = ctk.CTkLabel(c, text=title, font=font(13, "bold"), text_color=INK, anchor="w", height=18, cursor="hand2")
+        t1 = ctk.CTkLabel(c, text=(k.get("titel") or "")[:32], font=font(13, "bold"), text_color=INK, anchor="w", height=18, cursor="hand2")
         t1.grid(row=0, column=1, sticky="sw", pady=(16, 0))
-        t2 = ctk.CTkLabel(c, text=sub, font=font(11), text_color=MUTED, anchor="w", height=16)
+        sch = [lab for key, lab in KACHEL_SCHALTER if key in (k.get("schalter") or [])]
+        sub = (k.get("sub") or "") + (("  ·  " if k.get("sub") else "") + " + ".join(sch) if sch else "")
+        t2 = ctk.CTkLabel(c, text=sub[:48], font=font(11), text_color=MUTED, anchor="w", height=16)
         t2.grid(row=1, column=1, sticky="nw", pady=(0, 16))
-        go = (lambda e=None: self.open_workflows()) if q is None else (lambda e=None, q=q: self._fill(q))
+        pen = ctk.CTkLabel(c, text="✎", width=24, height=24, font=font(13), text_color=MUTED, cursor="hand2")
+        pen.grid(row=0, column=2, rowspan=2, sticky="ne", padx=(0, 6), pady=6)
+        pen.bind("<Button-1>", lambda e, i=idx: self._kachel_bearbeiten(i))
+        pen.bind("<Enter>", lambda e: pen.configure(text_color=ACCENT)); pen.bind("<Leave>", lambda e: pen.configure(text_color=MUTED))
+        hilfe.tip(pen, "Task bearbeiten")
+        go = lambda e=None, k=k: self._kachel_klick(k)
         for w in (c, ic, t1, t2):
             w.bind("<Button-1>", go)
             w.bind("<Enter>", lambda e: c.configure(border_color=ACCENT)); w.bind("<Leave>", lambda e: c.configure(border_color=BORDER))
-        hilfe.tip(c, "Öffnet die Workflows mit ihren Ergebnissen." if q is None else hilfe.TEXTE["*"]["#beispiel"])
+        hilfe.tip(c, "Öffnet die Workflows mit ihren Ergebnissen." if k.get("art") == "workflows" else
+                  "Fügt die Frage ein (noch nicht gesendet) und setzt die Schalter dieses Tasks für diese eine Frage.")
         return c
 
     def _welcome_erg(self):
@@ -1024,10 +1251,10 @@ class App:
         if d is not None and d.alive(): d.draw()
 
     def _fill(self, s):
-        """v46: ohne «XY» sofort fragen; mit «XY» nur einsetzen und XY markieren (Tippen ersetzt es)."""
+        """v234: nur einsetzen, nie sofort senden; «XY» wird markiert (Tippen ersetzt es)."""
         self.entry.delete("1.0", "end"); self.entry.insert("1.0", s); self.entry.focus_set()
         i = s.find("XY")
-        if i < 0: self.ask(); return
+        if i < 0 or "\n" in s[:i]: return
         t = getattr(self.entry, "_textbox", self.entry)
         try:
             t.tag_remove("sel", "1.0", "end"); t.tag_add("sel", f"1.{i}", f"1.{i + 2}"); t.mark_set("insert", f"1.{i + 2}")
@@ -1665,6 +1892,7 @@ class App:
         if re.search(r"\bXY\b", q):                                    # v46: Platzhalter aus der Startfrage
             self.status.configure(text="Bitte «XY» durch ein Thema ersetzen."); return
         self.entry.delete("1.0", "end")
+        if getattr(self, "_k_vorher", None) is not None: self._k_gesendet = True     # v234: nach dieser Antwort zurücksetzen
         self.w.submit("ask", q, self.s["llm"] if any(m[0] == self.s["llm"] for m in self.models) else "extractive",
                       self.follow)                                       # v67: True = Bezug, False = neues Thema
         self.toggle_follow(False)
@@ -1923,6 +2151,8 @@ class App:
     def autotick(self):
         try: self._zeitplan_tick()
         except Exception: log.get().exception("Zeitplan")
+        try: self._vorbereitung_tick()                                   # v237
+        except Exception: log.get().exception("Vorbereitung")
         try:
             if self.s.get("autosync", True) and time.time() >= self.next_auto:
                 if not self.busy and self.w.jobs.empty() and not self.cur:
@@ -2035,7 +2265,7 @@ class App:
                     if d[1] is not None and d[2]: self._pb_value(d[1] / d[2])     # v109
                 elif kind == "busy":
                     self.busy = d[0]
-                    auto = len(d) > 1 and d[1] == "autosync"             # v23: Fragen bleiben waehrend Auto-Abgleich moeglich
+                    auto = len(d) > 1 and d[1] in ("autosync", "vorbereiten")   # v237: Vorbereitung weicht Fragen aus             # v23: Fragen bleiben waehrend Auto-Abgleich moeglich
                     for b in self.buttons + self.src_btns:
                         if auto and b is self.b_ask: continue
                         try: b.configure(state="disabled" if d[0] else "normal")
@@ -2067,6 +2297,7 @@ class App:
                     self.sources(self.cur, d[0], vis, d[1] if len(d) > 1 else None)
                     self.last_ans = self.cur; self.cur = None; self._scroll()       # v110
                     self._chat_save(self.cur_q, vis, d[0], d[1] if len(d) > 1 else None)   # v129
+                    if getattr(self, "_k_gesendet", False): self._kachel_zurueck()    # v234
                 elif kind == "llm_state": self._llm_view(d[0], d[1])
                 elif kind == "anon": self._anon("on_scan", d[0])        # v113
                 elif kind == "code": self._code("on_code", d[0])        # v142
@@ -2093,6 +2324,7 @@ class App:
                     self.wfwin.on_done({"status": "fehler", "error": d[0]})
                     self.bubble(f"Fehler: {d[0]}", "err")
                 elif kind == "error":
+                    if getattr(self, "_k_gesendet", False): self._kachel_zurueck()    # v234
                     self._pb_error(); self.prog.configure(text=f"Fehler: {d[0]}"[:200])          # v109: rot
                     self.bubble(f"Fehler: {d[0]}\n(Details: Einstellungen › «Log öffnen»)", "err"); self.status.configure(text=f"Fehler: {d[0]}")
         except queue.Empty:

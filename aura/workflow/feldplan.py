@@ -1,4 +1,4 @@
-# aura/workflow/feldplan.py — Feldplan einer Word-Vorlage: woher kommt jeder Wert? Version 20261011v64a2
+# aura/workflow/feldplan.py — Feldplan einer Word-Vorlage: woher kommt jeder Wert? Version 20261113v240 (v240: lesbare Titel aus der Tabellenzeile; Herkunft aus bestehendem Workflow übernommen; v64a2)
 #
 # Grundlage für «Workflow beschreiben» mit Vorlage: zuerst die Vorlage verstehen, dann erst das Wissen.
 # Ohne Sprachmodell (Sekunden): Abschnitte aus Überschriften, Kontrollkästchen-Gruppen aus Tabellen/Abschnitten,
@@ -81,6 +81,21 @@ def _abschnitte(x, spans, styles_xml):
         if "<w:pageBreakBefore" in p and len(t) <= 80 and not _inner(tbls, a):     # z.B. «Anhang 1: Erfassungstabelle»
             out.append((a, "", t))
     return out
+
+_BRUCH = re.compile(r"^[(/)]|^[a-zäöü].{20,}|\)\S|\.\s*$")
+
+def _titel(f, kaestchen=""):
+    """v240: Anzeigetitel. Der Schlüssel (key) bleibt unverändert – darüber füllt der Workflow die Vorlage.
+    Bruchstücke («finanziell, Anzahl), …», «(im Sinne …)Begründung») -> Abschnittstitel; Begleitfeld -> «… zu «Kästchen»»."""
+    lab = re.sub(r"(\s*\(\d\))+$", "", _label(f)).strip()
+    bruch = bool(_BRUCH.search(_label(f))) or len(lab) > 60
+    k = re.sub(r"(\s*\(\d\))+$", "", re.sub(r"^[☐☒\s]+", "", kaestchen or "")).strip()
+    k = k if len(k) <= 45 else k[:45].rsplit(" ", 1)[0] + " …"
+    if k: return (f"Text zu «{k}»" if bruch else f"{lab} zu «{k}»")
+    if bruch:
+        t = re.sub(r"^[\d.]+\s*", "", f.get("abschnitt") or "").strip()
+        if t and t.lower() != "kopfteil": return t if len(t) <= 60 else t[:60].rsplit(" ", 1)[0] + " …"
+    return lab[:60]
 
 def _row_text(x, span):
     return re.sub(r"\s+", " ", _plain(x[span[0]:span[1]]).replace("﻿", "")).strip()
@@ -168,7 +183,7 @@ def erstellen(fields, vorlage=""):
         if f["nr"] in begleit:
             grund = (f"gehört zu Kästchen Nr. {begleit[f['nr']]}" + (f"; {grund}" if grund else ""))
         eintraege.append({"id": f"f{f['nr']}", "art": "feld", "nrs": [f["nr"]], "keys": [f["key"]], "abschnitt": f["abschnitt"],
-                          "titel": _label(f), "typ": f["typ"], "optionen": f["optionen"],
+                          "titel": _titel(f, _label(by_nr[begleit[f["nr"]]]) if f["nr"] in begleit else ""), "typ": f["typ"], "optionen": f["optionen"],
                           "zu": begleit.get(f["nr"]), "herkunft": her, "grund": grund, "kontext": f["kontext"]})
     eintraege.sort(key=lambda e: e["nrs"][0])
     return {"version": VERSION, "vorlage": vorlage, "erstellt": datetime.now().isoformat(timespec="seconds"),
@@ -189,7 +204,58 @@ def analysieren(vorlage, rel=""):
     with zipfile.ZipFile(vorlage) as z:
         x = z.read("word/document.xml").decode("utf-8")
         st = z.read("word/styles.xml").decode("utf-8") if "word/styles.xml" in z.namelist() else ""
-    return erstellen(struktur(x, st), rel or Path(vorlage).name)
+    plan = erstellen(struktur(x, st), rel or Path(vorlage).name)
+    try: aus_workflow(plan, _workflow_zu(vorlage), rel)          # v240
+    except Exception: pass
+    return plan
+
+# ----------------------------------------------------------------------------- v240: bestehenden Workflow übernehmen
+def _workflow_zu(vorlage):
+    """workflow.json des Pakets, in dem die Vorlage liegt (Vorlage im Paket oder in dessen Unterordner)."""
+    for d in list(Path(vorlage).resolve().parents)[:3]:
+        if (d / "workflow.json").exists(): return json.loads((d / "workflow.json").read_text(encoding="utf-8"))
+    return None
+
+def _herkunft_ausdruck(v, typen):
+    """Zuordnung aus dem Workflow -> (herkunft, feld, text). typen: Schritt-ID -> Schritt-Typ."""
+    if isinstance(v, bool): return "fest", "wert", "angekreuzt" if v else "leer"
+    v = str(v)
+    if "{{" not in v:
+        if not v.strip(): return "leer", "wert", ""
+        if re.fullmatch(r"\[[^\]]{2,30}\]", v.strip()): return "manuell", "platzhalter", v.strip()
+        return "fest", "wert", v
+    ids = set(re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\.[A-Za-z_]", v)) & set(typen)
+    if any(typen[i] in ("regel", "set") for i in ids): return "abgeleitet", "regel", v
+    if any(typen[i] == "llm" for i in ids): return "fakt", "quelle", v
+    return "fest", "wert", v                                         # z.B. {{now}}: ohne Schritt, immer gleich berechnet
+
+def aus_workflow(plan, wf, rel=""):
+    """Herkunft aus dem Schritt «word_vorlage» eines bestehenden Workflows übernehmen. Von Hand gesetzte Einträge bleiben.
+    Ausdrücke bleiben erhalten (e["ausdruck"]: key -> Ausdruck), damit «Workflow aus Feldplan bauen» nichts zerstört."""
+    if not wf: return 0
+    typen = {s.get("id"): s.get("type") for s in wf.get("steps", [])}
+    ws = [s for s in wf.get("steps", []) if s.get("type") == "word_vorlage"]
+    w = next((s for s in ws if rel and Path(str(s.get("vorlage", ""))).name == Path(rel).name), ws[0] if len(ws) == 1 else None)
+    if not w: return 0
+    zuo = w.get("felder") or {}; n = 0
+    rang = {"abgeleitet": 3, "fakt": 2, "manuell": 1, "fest": 0, "leer": -1}
+    for e in plan["eintraege"]:
+        if e.get("von_hand"): continue
+        da = {k: zuo[k] for k in e["keys"] if k in zuo}
+        if not da: continue
+        her = [_herkunft_ausdruck(v, typen) for v in da.values()]
+        h, feld, txt = max(her, key=lambda t: rang[t[0]])
+        e["herkunft"], e["ausdruck"], e["aus_workflow"] = h, da, True
+        kurz = re.sub(r"\s+", " ", txt)
+        e[feld] = kurz if len(kurz) <= 160 else kurz[:157] + "…"
+        e["grund"] = f"aus Workflow ({len(da)}/{len(e['keys'])} Felder zugeordnet)" + (f"; {e['grund']}" if e.get("grund") and not e["grund"].startswith("aus Workflow") else "")
+        n += 1
+    if n:                                                             # Rest: im Workflow nicht zugeordnet = bleibt leer
+        for e in plan["eintraege"]:
+            if not e.get("aus_workflow") and not e.get("von_hand") and e["herkunft"] == "offen":
+                e["herkunft"], e["grund"] = "leer", "im Workflow nicht zugeordnet – bleibt leer" + (f"; {e['grund']}" if e.get("grund") else "")
+    plan["aus_workflow"] = n
+    return n
 
 def laden(vorlage):
     p = pfad(vorlage)

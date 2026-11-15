@@ -13,7 +13,7 @@ from ..text import clean
 
 PAGE = 50
 BLOCK = {"p", "div", "br", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6", "table", "pre", "blockquote"}
-STANDARD_HOSTS = ("confluence.bit.admin.ch",)
+STANDARD_HOSTS = ("confluence.bit.admin.ch", "bkdev.atlassian.net")    # v232: + Atlassian Cloud bkdev
 MAX_ANTWORT = 32 * 2**20                                    # 32 MB je Antwort
 TIMEOUT = 60
 _HOST = re.compile(r"^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$")
@@ -51,13 +51,50 @@ def parse_link(url, hosts=None):
     """-> (basis, cql, beschreibung) oder ValueError."""
     _, host = pruefe_url(url, hosts)
     u = urllib.parse.urlsplit(url.strip())
-    base = f"https://{host}"
+    base = f"https://{host}" + ("/wiki" if cloud(host) else "")
     q = urllib.parse.parse_qs(u.query)
     m = re.search(r"/pages/(\d+)", u.path) or (re.search(r"(\d+)", q["pageId"][0]) if "pageId" in q else None)
     if m: return base, f"(id={m.group(1)} or ancestor={m.group(1)}) and type=page", f"Seite {m.group(1)} + Unterseiten"
     m = re.search(r"/(?:spaces|display)/([A-Za-z0-9_~-]+)", u.path) or (re.fullmatch(r"[A-Za-z0-9_~-]+", q["key"][0]) if "key" in q else None)
     if m: return base, f'space="{m.group(1) if m.re.groups else m.group(0)}" and type=page', f"Bereich {m.group(1) if m.re.groups else m.group(0)}"
     raise ValueError("Link enthält weder /pages/<Nummer> noch /spaces/<KÜRZEL>")
+
+def cloud(host):
+    """v232: Atlassian Cloud (*.atlassian.net): Pfade unter /wiki, Zugriff NUR ueber die Edge-Anmeldung, nie mit Token."""
+    return host.endswith(".atlassian.net")
+
+_TABS = {}
+def _edge_get(url):
+    """v232: Cloud-Seiten per fetch() im Edge-Tab desselben Origins (Anmeldung macht der Mensch einmal im AURA-Edge)."""
+    from ..engine import edge
+    from ..engine.herkunft import origin
+    o = origin(url); start = f"https://{o[1]}/wiki/"
+    if not edge.laeuft(): edge.starten(); import time; time.sleep(1.5)
+    t = _TABS.get(o)
+    try:
+        if not t or origin(t.js("location.href") or "") != o: raise ValueError
+    except Exception:
+        t = next((edge.Tab(x) for x in edge.tabs() if _gleich(x.get("url", ""), o)), None) or edge.tab_neu(start)
+        import time
+        for _ in range(60):
+            time.sleep(0.5)
+            try:
+                if t.js("document.readyState") == "complete" and _gleich(t.js("location.href") or "", o): break
+            except Exception: pass
+        _TABS[o] = t
+    t.origin_pruefen("confluence")
+    st, body = t.js("fetch(%s,{credentials:'same-origin',headers:{Accept:'application/json'}})"
+                    ".then(r=>r.text().then(x=>[r.status,x]))" % json.dumps(url), timeout=60)
+    if st in (401, 403) or (st == 200 and not body.lstrip().startswith("{")):
+        edge.fenster(t, "normal"); raise RuntimeError(f"nicht angemeldet – bitte im Edge-Fenster von AURA bei {o[1]} anmelden")
+    if st != 200: raise RuntimeError(f"HTTP {st}")
+    if len(body) > MAX_ANTWORT: raise RuntimeError("Antwort zu gross")
+    return json.loads(body)
+
+def _gleich(url, o):
+    from ..engine.herkunft import origin
+    try: return origin(url) == o
+    except Exception: return False
 
 def ersteller(r):
     """v206: Erstellt von/am aus dem Feld history einer Seite."""
@@ -94,7 +131,8 @@ def _opener():
     return urllib.request.build_opener(_NurGleicherHost(), urllib.request.HTTPSHandler(context=ssl.create_default_context()))
 
 def _get(url, tok, hosts=None, opener=None):
-    pruefe_url(url, hosts)                                   # Token nur an freigegebene Hosts
+    _, host = pruefe_url(url, hosts)                         # Token nur an freigegebene Hosts
+    if cloud(host): return _edge_get(url)                    # v232: Cloud nie mit Token
     h = {"Accept": "application/json"}
     if tok: h["Authorization"] = "Bearer " + tok
     try:
