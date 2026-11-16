@@ -25,6 +25,13 @@ OE = re.compile(r"\(([A-Za-z0-9]+)@")
 EINGRENZUNG = re.compile(r"^\s*(?:nur|eher|in)?\s*(\d{1,4}(?:\.\d+)?)\b", re.I)
 
 
+def _acta_id(g):
+    """v258: «acta:<Aktenzeichen>|<Titel>». Beim Öffnen sucht AURA nach beidem, damit genau dieses Dossier kommt und
+    nicht das erste Unterdossier mit gleichem Anfang. Ältere gespeicherte Chats ohne «|» funktionieren weiter."""
+    az = osys.aus_aktenzeichen(g["label"])[1] or g["ast"] or g["label"]
+    titel = " ".join(str(g["label"]).replace(f"({az})", " ").split()) if az != g["label"] else ""
+    return "acta:" + az + ("|" + titel if titel and "|" not in titel else "")
+
 def ist_eingrenzung(frage, w):
     """Folgeantwort auf die Rueckfrage, z. B. «nur 044» -> letzte Rangliste filtern (ohne neue Suche)."""
     return bool(getattr(w, "acta_cache", None)) and bool(EINGRENZUNG.match(frage)) and len(frage.split()) <= 4
@@ -233,7 +240,7 @@ def antworten(w, asked, backend_id, prev, ref, t0):
         dos = None
     try:
         if dos is not None: raise StopIteration
-        actanova._log(f"chat '{begriff}' start")                                   # v222: Wegmarken fuer Haenger
+        actanova._log(f"chat {actanova._k(begriff)} start")                                   # v222: Wegmarken fuer Haenger
         if not actanova.SPERRE.acquire(timeout=30):
             actanova._log("Sperre seit 30 s belegt (alter Lauf/Wachhalten haengt) – wird freigegeben")
             try: actanova.SPERRE.release()
@@ -251,13 +258,13 @@ def antworten(w, asked, backend_id, prev, ref, t0):
                 dok = actanova._suchen(tab, "dokument", "tab_inhalt", "inhalt", begriff, prot, export=True)
                 break
             except Exception as x:
-                actanova._log(f"chat '{begriff}' FEHLER Versuch {versuch}: {type(x).__name__}: {str(x)[:200]}")
+                actanova._log(f"chat {actanova._k(begriff)} FEHLER Versuch {versuch}: {type(x).__name__}: {str(x)[:200]}")
                 if versuch == 2 or w.cancel.is_set(): raise
                 w.progress("Acta Nova: zweiter Versuch …")
                 try: tab.navigieren(actanova.start_url(), "actanova")
                 except Exception: pass
                 time.sleep(3)
-        actanova._log(f"chat '{begriff}' -> dossiers {dos.get('anzahl')}, dokumente {dok.get('anzahl')}; {'; '.join(prot)}")
+        actanova._log(f"chat {actanova._k(begriff)} -> dossiers {dos.get('anzahl')}, dokumente {dok.get('anzahl')}; {'; '.join(prot)}")
         actanova.SPERRE.release()
     except StopIteration:
         pass
@@ -315,7 +322,7 @@ def antworten(w, asked, backend_id, prev, ref, t0):
     w.emit("token", kopf + "\n\n" + liste + ablage + _rueckfrage(gruppen, voll))
     # v228: Text (nur Metadaten) mitgeben, damit die Zusammenfassung über alle Quellen die Ablageorte kennt
     quellen = [{"title": g["label"], "source": "actanova", "ts": "",
-                "item_id": "acta:" + (osys.aus_aktenzeichen(g["label"])[1] or g["ast"] or g["label"]), "chunk_id": None,
+                "item_id": _acta_id(g), "chunk_id": None,                              # v258: mit Titel
                 "location": osys.pfad(g["pos"]) if g["pos"] else "",
                 "text": (f"Ablageort in Acta Nova, Rang {i} von {len(gruppen)} (nach Regeln gewichtet): {g['label']}. "
                          f"Ordnungssystem: {osys.pfad(g['pos']) if g['pos'] else '-'}. Enthaltene Dokumente: "

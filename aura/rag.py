@@ -92,11 +92,15 @@ class Retriever:
             if re.search(qrx, q): return re.compile(crx, re.I)
         return None
 
-    def bm25(self, conn, query, n=50, items=None):
+    def bm25(self, conn, query, n=50, items=None, quelle=None):
         terms = self.terms(query) or re.findall(r"\w+", query.lower())   # v110: ohne Stoppwoerter/Zahlen
         if not terms: return []
         phr = ['"%s %s"' % (a, b) for a, b in re.findall(r"(\w+)-(\w+)", query.lower())]   # v120: KI-X = «KI X»
         q = " OR ".join(phr + ['"%s"' % t for t in terms])
+        if quelle:                                                      # v252 (F14): Filter in SQL statt langer ID-Liste
+            return [r[0] for r in conn.execute(
+                "SELECT f.rowid FROM chunks_fts f JOIN chunks c ON c.id = f.rowid JOIN items i ON i.id = c.item_id "
+                "WHERE chunks_fts MATCH ? AND i.source = ? ORDER BY bm25(chunks_fts) LIMIT ?", (q, quelle, n))]
         if items is None:
             return [r[0] for r in conn.execute(
                 "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY bm25(chunks_fts) LIMIT ?", (q, n))]
@@ -105,11 +109,14 @@ class Retriever:
             f"SELECT f.rowid FROM chunks_fts f JOIN chunks c ON c.id = f.rowid WHERE chunks_fts MATCH ? "
             f"AND c.item_id IN ({inl}) ORDER BY bm25(chunks_fts) LIMIT ?", (q, n))]
 
-    def vector(self, conn, qvec, n=50, items=None):
+    def vector(self, conn, qvec, n=50, items=None, quelle=None):
         if self.mat is None: self._load(conn)
         if not self.ids or qvec is None: return []
         H, mv = self.H, memoryview(self.mat); t0 = time.perf_counter()
-        if items is None: idx = range(len(self.ids))
+        if quelle:                                                      # v252 (F14)
+            idx = [self.pos[c] for (c,) in conn.execute("SELECT c.id FROM chunks c JOIN items i ON i.id = c.item_id "
+                                                        "WHERE i.source = ?", (quelle,)) if c in self.pos]
+        elif items is None: idx = range(len(self.ids))
         else:
             inl = ",".join(str(int(i)) for i in items)
             idx = [self.pos[c] for (c,) in conn.execute(f"SELECT id FROM chunks WHERE item_id IN ({inl})") if c in self.pos]
@@ -302,13 +309,13 @@ class Retriever:
         return {"who": who, "intent": it or None, "items": items, "boost": boost or None, "vorne": list(dict.fromkeys(vorne))[:4]}
 
     def search(self, conn, query, qvec=None, k=6, mode="hybrid", per_item=1, items=None, prefer=None,
-               recency=0.0, half_days=180, quote_weight=1.0, boost=None, boost_weight=0.5):
+               recency=0.0, half_days=180, quote_weight=1.0, boost=None, boost_weight=0.5, quelle=None):
         """mode: bm25 | vector | hybrid. items = nur in diesen Objekten suchen (z.B. Absender-Filter).
         Liefert Treffer-Dicts, pro Objekt hoechstens per_item Stuecke."""
         lists = []                                                      # v102: (Rangliste, Gewicht)
-        if mode in ("bm25", "hybrid"): lists.append((self.bm25(conn, query, items=items), 1.0))
-        if mode in ("vector", "hybrid"): lists.append((self.vector(conn, qvec, items=items), 1.0))
-        if boost and items is None:                                     # v101: Bonus = zusaetzliche Rangliste
+        if mode in ("bm25", "hybrid"): lists.append((self.bm25(conn, query, items=items, quelle=quelle), 1.0))
+        if mode in ("vector", "hybrid"): lists.append((self.vector(conn, qvec, items=items, quelle=quelle), 1.0))
+        if boost and items is None and not quelle:                                     # v101: Bonus = zusaetzliche Rangliste
             bw = float(boost_weight)                                    # v102: halbes Gewicht (Bonus, nicht Hauptbeleg)
             if mode in ("bm25", "hybrid"): lists.append((self.bm25(conn, query, items=boost), bw))
             if mode in ("vector", "hybrid"): lists.append((self.vector(conn, qvec, items=boost), bw))

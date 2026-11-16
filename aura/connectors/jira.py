@@ -88,6 +88,12 @@ def _angemeldet(t):
     if not ist_erlaubt(t.js("location.href") or "", "jira"): return False
     return t.js("fetch('/rest/api/2/myself',{credentials:'same-origin'}).then(r=>r.status)", timeout=20) == 200
 
+def _login_host_ok(t):
+    """v263 (M4): «FED-LOGIN» nur auf einer HTTPS-Seite unter *.admin.ch lesen und klicken (wie Confluence seit v254)."""
+    from urllib.parse import urlsplit
+    u = urlsplit(t.js("location.href") or "")
+    return u.scheme == "https" and bool(u.hostname) and (u.hostname == "admin.ch" or u.hostname.endswith(".admin.ch"))
+
 def _tab(settings=None):
     from ..engine import edge
     if not edge.laeuft(): edge.starten(); time.sleep(1.5)
@@ -104,7 +110,7 @@ def _tab(settings=None):
         try:
             if t.js("document.readyState") != "complete": continue
             if _angemeldet(t): return t
-            if not geklickt and "FED-LOGIN" in (t.js("document.body ? document.body.innerText : ''") or "").upper():
+            if not geklickt and _login_host_ok(t) and "FED-LOGIN" in (t.js("document.body ? document.body.innerText : ''") or "").upper():
                 geklickt = bool(t.js(_FED))
         except Exception: pass
     edge.fenster(t, "normal")

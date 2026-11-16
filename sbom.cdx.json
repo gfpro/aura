@@ -2,12 +2,12 @@
  "bomFormat": "CycloneDX",
  "specVersion": "1.5",
  "serialNumber": "urn:uuid:83f33b18-12b7-4ecc-8100-669bca56a225",
- "version": 1,
+ "version": 2,
  "metadata": {
   "component": {
    "type": "application",
    "name": "AURA",
-   "version": "20261108v212"
+   "version": "20261116v265"
   },
   "properties": [
    {

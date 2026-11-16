@@ -83,6 +83,8 @@ def zip_pruefen(z, max_eintraege=ZIP_MAX_EINTRAEGE, max_datei=ZIP_MAX_DATEI, max
     dateien, gesamt = [], 0
     for i in infos:
         n = i.filename
+        roh = getattr(i, "orig_filename", n)                                # v250: unter Windows wandelt zipfile «\» still in «/» um
+        if "\\" in roh: raise SicherheitsFehler(f"{was} enthält «\\» im Namen: {roh!r}")
         if i.flag_bits & 0x1: raise SicherheitsFehler(f"Verschlüsselter {was} wird nicht unterstützt: {n!r}")
         typ = stat.S_IFMT((i.external_attr >> 16) & 0xFFFF)                 # 0 = nicht angegeben (Windows-ZIPs)
         if typ == stat.S_IFLNK: raise SicherheitsFehler(f"Symbolischer Link im ZIP: {n!r}")

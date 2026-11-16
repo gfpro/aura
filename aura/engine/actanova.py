@@ -2,7 +2,7 @@
 Modi: datei (Dokumentname), inhalt (Volltext), dossier (Dossiertitel), thema (dossier + inhalt).
 Leitplanken: keine Dokumente oeffnen/laden, max. 1 Suche je 3 s, jede Suche in logs\\actanova.log.
 """
-import json, threading, time
+import json, os, threading, time
 from pathlib import Path
 from datetime import datetime
 from . import edge
@@ -84,6 +84,47 @@ def _klick_text(tab, text, nur_top=False):
     return _js(tab, f"const e = AN.text({json.dumps(text)}, {str(nur_top).lower()}); if (!e) return false; e.click(); return true;")
 
 
+JS_MAX = r"""(n) => {
+  const norm = s => (s || '').replace(/\s+/g, ' ').trim();
+  for (const d of AN.docs()) for (const c of d.querySelectorAll('td, th, label, span, div')) {
+    if (c.children.length > 3 || !norm(c.innerText).startsWith('Maximale Anzahl')) continue;
+    const row = c.closest('tr, [class*=Row], [class*=row]'); if (!row) continue;
+    const e = row.querySelector('input[type=text], input[type=number], input:not([type])'); if (!e || !AN.sichtbar(e)) continue;
+    e.focus(); e.value = String(n);
+    e.dispatchEvent(new Event('input', {bubbles: true})); e.dispatchEvent(new Event('change', {bubbles: true}));
+    return e.value || '?'; } return ''; }"""
+
+
+JS_REITER_SA = r"""const norm = s => (s || '').replace(/\s+/g, ' ').trim();
+  for (const d of AN.docs()) for (const e of d.querySelectorAll('[id$="_Tab_Command"]'))
+    if (norm(e.innerText) === 'Suchabfrage' && AN.sichtbar(e)) { e.click(); return 'id ' + e.id.split('_').slice(-4).join('_'); }
+  const t = AN.text('Suchabfrage'); if (!t) return '';
+  const a = t.closest('a,[id$="_Tab_Command"],[role=tab]') || t; a.click(); return 'Text ' + a.tagName + ' ' + (a.id || '').slice(-40);"""
+
+
+def _max_treffer(tab, n):
+    """v259: Reiter «Suchabfrage» öffnen und «Maximale Anzahl der Suchergebnisse» setzen (Standard von Acta Nova: 200).
+    Muss VOR dem Klick auf «Suchen» geschehen. Gelingt es nicht, sucht AURA mit dem Standard weiter."""
+    try:
+        wie = _js(tab, JS_REITER_SA)                                  # v261: Reiter über seinen Befehls-Link, nicht über den Text
+        if not wie: _log("max_treffer: Reiter «Suchabfrage» nicht gefunden"); return False
+        _log(f"max_treffer: Reiter geklickt ({wie})")
+        if not _warten(tab, "[...AN.docs()].some(d => /Maximale Anzahl/.test(d.body ? d.body.innerText : ''))", 15):
+            _log("max_treffer: Feld nicht sichtbar"); return False
+        wert = _js(tab, f"return ({JS_MAX})({int(n)});"); ok = bool(wert)
+        _log(f"max_treffer {n}: {'ok, Feld=' + str(wert) if ok else 'Feld fehlt'}")   # v260: gelesener Wert
+        return ok
+    except Exception as e:
+        _log(f"max_treffer: {type(e).__name__}"); return False
+
+
+def _max_einstellung():
+    try:
+        from ..config import load_settings
+        return max(200, min(5000, int(load_settings().get("actanova_max_treffer", 1000))))
+    except Exception: return 1000
+
+
 def _setzen(tab, suffix, wert):
     return _js(tab, f"""const e = AN.el({json.dumps(suffix)}); if (!e) return false;
       e.focus(); e.value = {json.dumps(wert)};
@@ -99,8 +140,25 @@ def _status_leeren(tab, suffix):
       e.selectedIndex = i; e.dispatchEvent(new Event('change', {{bubbles: true}})); return 'geleert';""")
 
 
+LOG_MAX = 512 * 1024                     # v263: Rotation (eine ältere Datei .1)
+
+
+def _k(text):
+    """v263 (M6): Suchbegriffe und Aktenzeichen nicht im Log – nur Länge. Mit Einstellung
+    «actanova_log_begriffe» = true (zur Fehlersuche) im Klartext."""
+    try:
+        from ..config import load_settings
+        if load_settings().get("actanova_log_begriffe"): return f"'{text}'"
+    except Exception: pass
+    return f"[{len(text or '')} Z.]"
+
+
 def _log(zeile):
     LOGDATEI.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if LOGDATEI.exists() and LOGDATEI.stat().st_size > LOG_MAX:
+            os.replace(LOGDATEI, LOGDATEI.with_name(LOGDATEI.name + ".1"))
+    except OSError: pass
     with open(LOGDATEI, "a", encoding="utf-8") as f:
         f.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} {zeile}\n")
 
@@ -195,10 +253,14 @@ def verbinden():
     return tab
 
 
-JS_DIALOG_OK = r"""for (const d of AN.docs()) for (const b of d.querySelectorAll('button, a, input[type=button], span'))
-    if (/^(OK|Ok)$/.test((b.innerText || b.value || '').trim()) && AN.sichtbar(b)
-        && /Brotkr|maximale Anzahl|Information/.test((b.closest('[role=dialog], [class*=Dialog], [class*=dialog], [class*=Modal], [class*=modal]') || d.body).innerText || '')) {
-      b.click(); return true; } return false;"""
+JS_DIALOG_OK = r"""// v263 (H5): nur in einem gefundenen Dialog, der den Brotkrümel- bzw. Trefferzahl-Hinweis enthält
+  for (const d of AN.docs()) for (const b of d.querySelectorAll('button, a, input[type=button], span')) {
+    if (!/^(OK|Ok)$/.test((b.innerText || b.value || '').trim()) || !AN.sichtbar(b)) continue;
+    const dlg = b.closest('[role=dialog], [role=alertdialog], [class*=Dialog], [class*=dialog], [class*=Modal], [class*=modal]');
+    if (!dlg || dlg === d.body) continue;
+    const t = dlg.innerText || ''; if (t.length > 600) continue;
+    if (/Brotkr|maximale Anzahl der Eintr/.test(t)) { b.click(); return true; } }
+  return false;"""
 
 JS_KRUEMEL = r"""const nav = document.querySelector('[aria-label*="Brotkr"], [id*=BreadCrumb], [class*=readCrumb], [class*=readcrumb]');
   const a = nav ? [...nav.querySelectorAll('a')].filter(x => AN.sichtbar(x)) : [];
@@ -333,7 +395,7 @@ def _suchen(tab, art, feld_tab, feld, begriff, protokoll, export=False):
         return _suchen_einmal(tab, art, feld_tab, feld, begriff, protokoll, export)
     except ActaNovaFehler as e:
         if "Trefferseite" not in str(e) and "Suchfeld" not in str(e) and "Suchen" not in str(e): raise
-        _log(f"wiederhole '{begriff}' ({art}) nach: {str(e)[:80]}"); protokoll.append("Neuladen + Wiederholung")
+        _log(f"wiederhole {_k(begriff)} ({art}) nach: {str(e)[:80]}"); protokoll.append("Neuladen + Wiederholung")
         tab.navigieren(start_url(), "actanova"); _warten(tab, "document.readyState === 'complete'", 30); time.sleep(1.5)
         return _suchen_einmal(tab, art, feld_tab, feld, begriff, protokoll, export)
 
@@ -359,11 +421,12 @@ def _suchen_einmal(tab, art, feld_tab, feld, begriff, protokoll, export=False):
     # vorher evtl. vorhandene Trefferzeilen markieren, damit wir neue erkennen
     _js(tab, "AN.docs().forEach(d => d.querySelectorAll('tr.bocListDataRow').forEach(tr => tr.setAttribute('data-aura-alt', '1'))); return true;")
     zeiten["ausfuellen"] = time.perf_counter() - t0 - zeiten["maske"]
+    _max_treffer(tab, _max_einstellung())                  # v259: mehr als 200 Treffer (Reiter «Suchabfrage»)
     _log(f"  {art}: suche"); 
     if not _klick_id(tab, "SearchButton"):
         raise ActaNovaFehler("Knopf 'Suchen' fehlt")
     t1 = time.perf_counter()
-    ok = _warten(tab, "AN.el('BackButton') || /Suchergebnisse|keine (Such)?ergebnisse/i.test(AN.docs().map(d => d.body ? d.body.innerText : '').join(' '))", 90, 1.0)
+    ok = _warten(tab, "AN.el('BackButton') || /Suchergebnisse \\(Anzahl|keine (Such)?ergebnisse/i.test(AN.docs().map(d => d.body ? d.body.innerText : '').join(' '))", 90, 1.0)
     if not ok:
         raise ActaNovaFehler(f"Keine Trefferseite nach 90 s – Seite: {tab.zustand()[:120]}")
     zeiten["suche"] = time.perf_counter() - t1
@@ -377,7 +440,7 @@ def _suchen_einmal(tab, art, feld_tab, feld, begriff, protokoll, export=False):
         else:
             protokoll.append("Export fehlgeschlagen -> nur Seite 1")
     zeiten["export"] = time.perf_counter() - t2
-    _diag(f"{art} '{begriff}' " + " ".join(f"{k}={v:.1f}s" for k, v in zeiten.items()) + f" treffer={erg.get('anzahl')}")
+    _diag(f"{art} {_k(begriff)} " + " ".join(f"{k}={v:.1f}s" for k, v in zeiten.items()) + f" treffer={erg.get('anzahl')}")
     return erg
 
 
@@ -406,9 +469,9 @@ def suche(modus, begriff, tab=None):
         else:
             raise ValueError("modus: datei | inhalt | dossier | thema")
         n = {k: len(v["treffer"]) for k, v in erg.items() if isinstance(v, dict)}
-        _log(f"{modus} '{begriff}' -> {n} in {time.time() - t0:.1f}s")
+        _log(f"{modus} {_k(begriff)} -> {n} in {time.time() - t0:.1f}s")
     except Exception as e:
-        _log(f"{modus} '{begriff}' FEHLER {type(e).__name__}: {e}")
+        _log(f"{modus} {_k(begriff)} FEHLER {type(e).__name__}")
         raise
     finally:
         _letzte[0] = time.time()
@@ -483,12 +546,18 @@ def _xlsx_zeilen(pfad):
 
 def exportieren(tab, timeout=60.0):
     """Klickt 'Excel-Export' der aktuellen Trefferliste, liest die Datei, loescht sie sofort.
-    Rueckgabe: Liste von dicts (Spaltenname -> Wert) oder None."""
+    Rueckgabe: Liste von dicts (Spaltenname -> Wert) oder None.
+    v264: Downloadziel über «Browser.setDownloadBehavior» (browserweit). «Page.setDownloadBehavior» wirkte in Edge
+    nicht: Die Datei landete im normalen Download-Ordner, AURA fand sie nicht («Export fehlgeschlagen»)."""
     ordner = Path(tempfile.mkdtemp(prefix="aura_acta_"))
+    browser = False
     try:
-        tab.ws.cdp("Page.setDownloadBehavior", behavior="allow", downloadPath=str(ordner))
+        try:
+            tab.ws.cdp("Browser.setDownloadBehavior", behavior="allow", downloadPath=str(ordner)); browser = True
+        except Exception:
+            tab.ws.cdp("Page.setDownloadBehavior", behavior="allow", downloadPath=str(ordner))
         if not _klick_id(tab, "ExcelExportButton"):
-            return None
+            _log("export: Knopf fehlt"); return None
         ende = time.time() + timeout
         datei = None
         while time.time() < ende:
@@ -498,17 +567,18 @@ def exportieren(tab, timeout=60.0):
                 datei = fertig[0]
                 break
         if not datei:
-            return None
+            _log(f"export: keine Datei nach {timeout:.0f} s ({'Browser' if browser else 'Page'})"); return None
         zeilen = _xlsx_zeilen(datei)
         kopf_i = next((i for i, z in enumerate(zeilen[:10]) if "Name" in z or "Titel" in z), None)
         if kopf_i is None:
-            return None
+            _log("export: Kopfzeile nicht erkannt"); return None
         kopf = zeilen[kopf_i]
-        return [{k: v for k, v in zip(kopf, z) if k and v} for z in zeilen[kopf_i + 1:] if any(z)]
+        erg = [{k: v for k, v in zip(kopf, z) if k and v} for z in zeilen[kopf_i + 1:] if any(z)]
+        _log(f"export: {len(erg)} Zeilen"); return erg
     finally:
         shutil.rmtree(ordner, ignore_errors=True)
         try:
-            tab.ws.cdp("Page.setDownloadBehavior", behavior="default")
+            tab.ws.cdp("Browser.setDownloadBehavior" if browser else "Page.setDownloadBehavior", behavior="default")
         except Exception:
             pass
 
@@ -522,8 +592,33 @@ JS_FELD_NACH_LABEL = r"""(label) => {
   } return null; }"""
 
 
-def oeffnen(aktenzeichen):
-    """Sucht das Dossier/Subdossier mit diesem Aktenzeichen und oeffnet es im (sichtbar gemachten) Edge-Fenster."""
+JS_AZ_OBEN = r"""(titelSuffix, wert) => {
+  // v262: Es gibt zwei Felder «Aktenzeichen»: oben (das Dossier selbst) und unter «Enthalten in» (sucht IN diesem
+  // Dossier). Kandidaten: sichtbare Textfelder, deren Beschriftung mit «Aktenzeichen» beginnt (label[for], Zeile, Vorgänger).
+  // Genommen wird das erste, das nicht im Block «Enthalten in» steht. Rückgabe: {ok, id, liste} für das Log.
+  const norm = s => (s || '').replace(/\s+/g, ' ').trim(); const liste = []; let wahl = null;
+  const beschr = e => {
+    const l = e.id && e.ownerDocument.querySelector('label[for="' + e.id + '"]'); if (l) return norm(l.innerText);
+    let p = e; for (let i = 0; i < 4 && p; i++) { p = p.parentElement; if (!p) break;
+      let v = p.previousElementSibling; if (v && norm(v.innerText)) return norm(v.innerText).slice(0, 40); }
+    return ''; };
+  const imBlockEnthalten = e => { let p = e; for (let i = 0; i < 12 && p; i++) { p = p.parentElement;
+      if (p && /ParentFile|Parent|Contained|Enthalten/i.test(p.id || '')) return true; } return /Parent|Contained/i.test(e.id || ''); };
+  for (const d of AN.docs()) for (const e of d.querySelectorAll('input[type=text], input:not([type])')) {
+    if (!AN.sichtbar(e)) continue; const b = beschr(e); const kurz = (e.id || '').split('_').slice(-4).join('_');
+    liste.push(kurz + '=' + b);
+    if (!wahl && /^Aktenzeichen/.test(b) && !imBlockEnthalten(e)) wahl = e;
+  }
+  if (!wahl) return {ok: false, liste: liste.slice(0, 30)};
+  wahl.focus(); wahl.value = wert; wahl.dispatchEvent(new Event('input', {bubbles: true})); wahl.dispatchEvent(new Event('change', {bubbles: true}));
+  return {ok: true, id: (wahl.id || '').split('_').slice(-4).join('_')}; }"""
+
+
+def oeffnen(aktenzeichen, titel=None):
+    """Sucht das Dossier/Subdossier mit diesem Aktenzeichen und oeffnet es im (sichtbar gemachten) Edge-Fenster.
+    v258: zusätzlich mit Titel (sonst kamen alle Unterdossiers mit gleichem Anfang, und das erste wurde geöffnet).
+    Findet die Suche mit Titel nichts, wird nur mit Aktenzeichen gesucht. Geöffnet wird die Zeile mit genau diesem
+    Aktenzeichen, sonst die erste."""
     tab = verbinden()
     try:
         prot = []
@@ -532,18 +627,29 @@ def oeffnen(aktenzeichen):
         _klick_id(tab, "ResetSearchButton"); _warten(tab, f"AN.el({json.dumps(f['tab_basis'])})", 20)
         _reiter(tab, f["tab_basis"], f["status"])
         _status_leeren(tab, f["status"]); _warten(tab, "true", 10)
-        ok = _js(tab, f"""const e = ({JS_FELD_NACH_LABEL})('Aktenzeichen'); if (!e) return false;
-            e.focus(); e.value = {json.dumps(aktenzeichen)};
-            e.dispatchEvent(new Event('input', {{bubbles: true}})); e.dispatchEvent(new Event('change', {{bubbles: true}}));
-            return true;""")
-        if not ok:
-            raise ActaNovaFehler("Feld «Aktenzeichen» in der Dossier-Suche nicht gefunden")
-        _klick_id(tab, "SearchButton")
-        if not _warten(tab, "AN.docs().some(d => d.querySelector('tr.bocListDataRow'))", 60, 0.5):
-            raise ActaNovaFehler(f"Kein Dossier mit Aktenzeichen {aktenzeichen}")
-        _js(tab, """for (const d of AN.docs()) { const c = d.querySelector('tr.bocListDataRow td[role=rowheader] a, tr.bocListDataRow a');
-                    if (c) { c.click(); return true; } } return false;""")
-        _log(f"oeffnen {aktenzeichen}")
+        r = _js(tab, f"return ({JS_AZ_OBEN})({json.dumps(f['titel'])}, {json.dumps(aktenzeichen)});") or {}
+        if not r.get("ok"):
+            _log(f"oeffnen: Feld Aktenzeichen fehlt; Felder: {r.get('liste')}")      # v262: Diagnose
+            raise ActaNovaFehler("Oberes Feld «Aktenzeichen» in der Dossier-Suche nicht gefunden")
+        _log(f"oeffnen: Aktenzeichen in {r.get('id')}")
+        mit_titel = bool(titel) and _setzen(tab, f["titel"], titel)       # v259: Titelfeld über seine ID
+        treffer = "AN.docs().some(d => d.querySelector('tr.bocListDataRow'))"
+        fertig = treffer + " || /keine (Such)?ergebnisse/i.test(AN.docs().map(d => d.body ? d.body.innerText : '').join(' '))"
+        def suchen():                                                        # v259: bei «keine Suchergebnisse» nicht 60 s warten
+            _js(tab, "AN.docs().forEach(d => d.querySelectorAll('tr.bocListDataRow').forEach(tr => tr.remove())); return true;")
+            _klick_id(tab, "SearchButton"); _warten(tab, fertig, 60, 0.5)
+            return bool(_js(tab, "return " + treffer + ";"))
+        if not suchen():
+            if not mit_titel: raise ActaNovaFehler(f"Kein Dossier mit Aktenzeichen {aktenzeichen}")
+            _setzen(tab, f["titel"], "")                                       # v258: Titel weg, nur Aktenzeichen
+            if not suchen(): raise ActaNovaFehler(f"Kein Dossier mit Aktenzeichen {aktenzeichen}")
+        genau = json.dumps(_re.escape(aktenzeichen) + r"(?![/\d])")              # v258: genau dieses, kein Unterdossier
+        _js(tab, f"""const genau = new RegExp({genau});
+            const zeilen = []; for (const d of AN.docs()) zeilen.push(...d.querySelectorAll('tr.bocListDataRow'));
+            const z = zeilen.find(r => genau.test(r.innerText || '')) || zeilen[0]; if (!z) return false;
+            const c = z.querySelector('td[role=rowheader] a') || z.querySelector('a'); if (!c) return false;
+            c.click(); return true;""")
+        _log(f"oeffnen {_k(aktenzeichen)}" + (" mit Titel" if mit_titel else ""))
     finally:
         edge.fenster(tab, "normal")
         try: tab.ws.cdp("Page.bringToFront")
@@ -552,7 +658,7 @@ def oeffnen(aktenzeichen):
 
 # ---------------------------------------------------------------- Sitzung offen halten (nur wenn eingeschaltet)
 SPERRE = threading.Lock()
-_wach = {"t": None}
+_wach = {"t": None, "echt": None, "selbst": None}
 
 
 def wach_halten_starten(minuten=10):
@@ -568,13 +674,19 @@ def wach_halten_starten(minuten=10):
                 continue
             if not SPERRE.acquire(blocking=False):
                 continue
-            _log("wach halten: start")
             try:
+                jetzt, zul = time.time(), edge._zuletzt[0]
+                if zul != _wach["selbst"]: _wach["echt"] = zul        # echte Nutzung seit dem letzten Wachhalten
+                max_h = max(1, min(12, int(s.get("actanova_wach_max_h", 4))))
+                if jetzt - (_wach["echt"] or jetzt) > max_h * 3600:   # v263 (M3): Höchstdauer ohne echte Nutzung
+                    continue
+                _log("wach halten: start")
                 if edge.laeuft():
                     t = edge.tab_finden("actanova")
                     if t:
                         t.dialog_schliessen(); t.navigieren(start_url(), "actanova"); t.schliessen()
                         _log("wach halten: Startseite neu geladen")
+                _wach["selbst"] = edge._zuletzt[0]                    # v263 (M3): eigene Nutzung erkennen
             except Exception:
                 pass
             finally:

@@ -76,10 +76,9 @@ def kalender(w, begriff, tage=14):
 
 def mail(w, begriff):
     if not begriff: return []
-    ids = [r[0] for r in w.conn.execute("SELECT id FROM items WHERE source='outlook_mail'")]   # v244 (FUN-03): VOR Top-k filtern
-    if not ids: return []
+    if not w.conn.execute("SELECT 1 FROM items WHERE source='outlook_mail' LIMIT 1").fetchone(): return []
     qvec = w._embedder().query(begriff)
-    hits = w.retriever.search(w.conn, begriff, qvec, k=4, mode="hybrid", items=ids)
+    hits = w.retriever.search(w.conn, begriff, qvec, k=4, mode="hybrid", quelle="outlook_mail")   # v252 (F14): Filter VOR dem Top-k, in SQL
     return [h for h in hits if h.get("source") == "outlook_mail"][:4]
 
 

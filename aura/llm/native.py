@@ -101,16 +101,18 @@ class NativeCausalLM(LLMBackend):
 
     def chat_head(self, system, vorspann=""):
         """v164: Anfang bis in die Benutzernachricht (je Modell eigene Vorlage)."""
-        v = vorspann.strip() + "\n\n" if vorspann and vorspann.strip() else ""
-        s = system.strip() if system else ""
+        e = self.tok.entschaerfen                                      # v247 (H3): Inhalt setzt keine Steuerzeichen
+        v = e(vorspann.strip()) + "\n\n" if vorspann and vorspann.strip() else ""
+        s = e(system.strip()) if system else ""
         if self.apertus:
             return f"<s><|system_start|>{s}<|system_end|>{APERTUS_DEV}<|user_start|>{v}"
         return (f"<|im_start|>system\n{s}<|im_end|>\n" if s else "") + "<|im_start|>user\n" + v
 
     def chat_tail(self, user=""):
         """v164: Rest der Benutzernachricht bis zum Beginn der Antwort."""
-        if self.apertus: return f"{user.strip()}<|user_end|><|assistant_start|>"
-        return f"{user.strip()}<|im_end|>\n<|im_start|>assistant\n{self.chat_suffix()}"
+        user = self.tok.entschaerfen(user.strip())                     # v247 (H3)
+        if self.apertus: return f"{user}<|user_end|><|assistant_start|>"
+        return f"{user}<|im_end|>\n<|im_start|>assistant\n{self.chat_suffix()}"
 
     def kv16(self):
         from ..config import load_settings

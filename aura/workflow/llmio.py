@@ -69,6 +69,8 @@ def chat_ids(P, system, user, think_off, vorspann=""):
         h = P.encode(P.be.chat_head(system, vorspann)); P.head = len(h)
         return h + P.encode(P.be.chat_tail(user))
     think_off = think_off or bool(getattr(P.be, "chat_suffix", lambda: "")())   # v89: Qwen3.5 verlangt leeren Denkblock
+    e = getattr(getattr(P, "tok", None), "entschaerfen", None) or (lambda t: t)   # v247 (H3)
+    system, user, vorspann = e(system or ""), e(user or ""), e(vorspann or "")
     head = f"<|im_start|>system\n{system.strip()}<|im_end|>\n" if system else ""
     head += "<|im_start|>user\n" + (vorspann.strip() + "\n\n" if vorspann and vorspann.strip() else "")
     tail = f"{user.strip()}<|im_end|>\n<|im_start|>assistant\n" + ("<think>\n\n</think>\n\n" if think_off else "")

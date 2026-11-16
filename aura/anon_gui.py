@@ -88,7 +88,9 @@ class AnonWindow:
         il = ctk.CTkLabel(info, text=txt, font=font(12), text_color=INK, justify="left", anchor="w", wraplength=760)
         il.grid(row=0, column=0, sticky="ew", padx=14, pady=(10, 4))
         info.bind("<Configure>", lambda e, l=il: l.configure(wraplength=max(300, e.width - 40)), add="+")   # v114
-        self._btn(info, bt, self.wizard, main=not n_begr).grid(row=1, column=0, sticky="w", padx=14, pady=(0, 10))
+        kn = ctk.CTkFrame(info, fg_color="transparent"); kn.grid(row=1, column=0, sticky="w", padx=14, pady=(0, 10))
+        self._btn(kn, bt, self.wizard, main=not n_begr).pack(side="left")
+        if n_begr: self._btn(kn, "Begriffsliste löschen …", self._loeschen).pack(side="left", padx=8)   # v257
         row = ctk.CTkFrame(f, fg_color="transparent"); row.grid(row=r, column=0, sticky="ew"); r += 1
         self.b_datei = self._btn(row, "📄  Datei wählen und prüfen …", self.pick_file, main=True); self.b_datei.pack(side="left")
         ctk.CTkLabel(row, text="PDF, Word, Text, Markdown, E-Mail (.eml)", font=font(11), text_color=MUTED).pack(side="left", padx=12)
@@ -310,6 +312,16 @@ class AnonWindow:
         self.wz = {k[0]: anon.gruppen(rows, k[0]) for k in anon.KATEGORIEN}
         self.wz_eigene = [r for r in rows if r["Kategorie"] not in anon.KAT]
         self.wz_page = 0; self._wz_show()
+
+    def _loeschen(self):
+        """v257: ganze Begriffsliste löschen, mit Rückfrage."""
+        n = len(anon.lade_begriffe())
+        if not messagebox.askyesno("Begriffsliste löschen", f"Die Begriffsliste mit {n} Einträgen endgültig löschen?\n\n"
+                                   "Es bleibt keine Kopie. Danach erkennt AURA nur noch Muster (AHV, IBAN, Mail, Telefon …) "
+                                   "und – mit Sprachmodell – Namen.", parent=self.app.root): return
+        try: anon.loesche_begriffe()
+        except Exception as e: messagebox.showerror("Begriffsliste", f"Nicht gelöscht: {e}", parent=self.app.root); return
+        self.screen_start(); self.status.configure(text="Begriffsliste gelöscht.")
 
     def _wz_take(self):
         if getattr(self, "wz_box", None) is not None and self.wz_page < len(anon.KATEGORIEN):

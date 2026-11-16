@@ -31,6 +31,14 @@ from .nodes import NODES
 from .llmio import Cancelled
 from ..log import diag
 from ..sicherheit import Freigaben, SicherheitsFehler
+from .. import sicherheit as SI
+
+def _eigene_datei(pfad, out_dir):
+    """v247 (H2): Datei im Laufordner – oder ein Markdown-Bericht im AURA-Ordner (Baustein themen_bericht, z.B. recap\\)."""
+    from ..config import ROOT
+    return SI.liegt_in(pfad, out_dir) or (str(pfad).lower().endswith(".md") and SI.liegt_in(pfad, ROOT))
+
+ERZEUGER = ("file_out", "word_vorlage", "themen_bericht")                  # v247 (H2): Bausteine, die Dateien im Laufordner erzeugen
 
 INPUT_TYPES = ("files", "text")
 
@@ -370,7 +378,9 @@ class Runner:
                         "keine Dateien erhalten – liest der Schritt die richtige Eingabe? (Workflow → Übersicht)" if not n else
                         f"aus {n} Datei(en) kein Text lesbar – gescanntes PDF ohne Textschicht?"))
                 self.state[sid] = out
-                if isinstance(out, dict) and isinstance(out.get("path"), str): ctx.freigaben.erlaube([out["path"]])   # v208: eigene Ergebnisse
+                if typ in ERZEUGER and isinstance(out, dict) and isinstance(out.get("path"), str) \
+                        and _eigene_datei(out["path"], ctx.out_dir):       # v247 (H2): nur selbst erzeugte Dateien
+                    ctx.freigaben.erlaube([out["path"]])
                 dt = time.perf_counter() - t0
                 self.log.append({"id": sid, "type": typ, "seconds": round(dt, 1), "out": _short(out)})
                 self.on_step(i, len(steps), sid, f"fertig {dt:.0f} s")
@@ -382,7 +392,8 @@ class Runner:
             status, err = "fehler", str(e); self.log.append({"error": str(e), "trace": traceback.format_exc()[-2000:]})
         pr = self._pruefen() if status == "ok" else []
         total = time.perf_counter() - t_all
-        files = [v["path"] for v in self.state.values() if isinstance(v, dict) and isinstance(v.get("path"), str)]
+        files = [v["path"] for v in self.state.values() if isinstance(v, dict) and isinstance(v.get("path"), str)
+                 and _eigene_datei(v["path"], ctx.out_dir)]          # v247 (H2): nur Dateien des Laufs anbieten/öffnen
         if status == "ok" and self._bericht_noetig(pr):
             try: files.append(self._bericht(pr, files))
             except Exception as e: ctx.progress(f"Prüfbericht nicht geschrieben: {e}")

@@ -18,7 +18,7 @@ def read_text(p):
         xml = re.sub(r"</w:p>", "\n\n", xml)
         return re.sub(r"<[^>]+>", "", xml)
     if s == ".pdf":
-        from pypdf import PdfReader                    # optional: pypdf-Ordner in vendor\ ablegen
+        from ..workflow.nodes import pdf_reader; PdfReader = pdf_reader()   # v247 (F1)
         SI.pruefe_dokument(p); r = PdfReader(str(p))
         if len(r.pages) > SI.DOC_MAX_SEITEN: raise SI.SicherheitsFehler(f"{p.name}: {len(r.pages)} Seiten – Grenze {SI.DOC_MAX_SEITEN}")
         out, t0 = [], time.monotonic()
@@ -36,7 +36,7 @@ def doc_meta(p):
             m = re.search(r"<dc:creator[^>]*>([^<]*)<", SI.docx_xml(p, "docProps/core.xml", 2**20))
             autor = m.group(1).strip() if m else ""
         elif p.suffix.lower() == ".pdf":
-            from pypdf import PdfReader
+            from ..workflow.nodes import pdf_reader; PdfReader = pdf_reader()
             autor = str((PdfReader(str(p)).metadata or {}).get("/Author") or "").strip()
     except Exception: pass
     return {"autor": autor, "dateityp": p.suffix.lower().lstrip("."),
@@ -53,14 +53,21 @@ class FolderDocs(Connector):
         root = Path(ctx.settings.get("docs_folder") or "")
         if not root.is_dir(): ctx.progress("Kein Dokumentordner gewaehlt"); return
         files = [p for p in root.rglob("*") if p.suffix.lower() in EXT]
+        seen = set()                                     # v248 (O4): gesehene Dateien -> Worker entfernt alte Fassungen/Gelöschtes
         for k, p in enumerate(files):
-            if ctx.cancelled(): return
-            ext = f"{p}|{int(p.stat().st_mtime)}"        # geaenderte Datei = neue Version
-            if ext in ctx.known: continue
+            if ctx.cancelled(): return                   # unvollständig -> kein Aufräumen
+            try: ext = f"{p}|{int(p.stat().st_mtime)}"   # geaenderte Datei = neue Version
+            except OSError: continue                     # zwischen Auflisten und Lesen verschwunden
+            if ext in ctx.known: seen.add(ext); continue
             ctx.progress(f"Dokumente: {k}/{len(files)}", k, len(files))
             try: text = clean(read_text(p))
-            except Exception as e: ctx.progress(f"{p.name} uebersprungen: {e}"); continue
+            except Exception as e:
+                ctx.progress(f"{p.name} uebersprungen: {e}")
+                seen.update(x for x in ctx.known if x.startswith(f"{p}|"))   # nicht lesbar -> bisherige Fassung behalten
+                continue
+            seen.add(ext)
             ts = datetime.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
             dm = doc_meta(p)                                  # v206
             yield {"ext_id": ext, "title": p.name, "author": dm["autor"], "ts": ts, "body": text, "text": text.replace("\f", "\n\n"),
                    "prefix": f"{p.stem}: ", "meta": {"path": str(p), **dm}}
+        ctx.seen = seen; ctx.complete = bool(seen)

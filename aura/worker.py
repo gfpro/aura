@@ -194,7 +194,7 @@ class Worker(threading.Thread):
         ask = 0
         if cid == "outlook_mail" and getattr(ctx, "complete", False) and not stop():
             removed, ask = self._mail_cleanup(ctx.seen, confirm)
-        if cid in ("confluence", "jira", "ims") and getattr(ctx, "complete", False) and not stop():   # v78/v230: alte Staende/verschwundene
+        if cid in ("confluence", "jira", "ims", "folder_docs") and getattr(ctx, "complete", False) and not stop():   # v78/v230/v248: alte Staende/verschwundene
             rows = self.conn.execute("SELECT id, ext_id FROM items WHERE source = ?", (cid,)).fetchall()
             gone = [i for i, e in rows if e not in ctx.seen]
             cur = {e.split("|")[0] for e in ctx.seen}
@@ -212,8 +212,9 @@ class Worker(threading.Thread):
                 self.progress(f"OneNote: {len(weg)} Seiten nicht mehr gesehen - nicht geloescht (zu viele)")
                 gone = [i for i in gone if i not in set(weg)]
             if gone: self._delete(gone); removed = len(gone)
-        if cid == "confluence" and not stop(): db.flag(self.conn, "confluence_tag", time.strftime("%Y-%m-%d"))
-        if cid == "ims" and not stop(): db.flag(self.conn, "ims_tag", time.strftime("%Y-%m-%d"))          # v240
+        erreicht = bool(getattr(ctx, "seen", None))                  # v247 (F3): Tagesmarke nur, wenn die Quelle geantwortet hat
+        if cid == "confluence" and not stop() and erreicht: db.flag(self.conn, "confluence_tag", time.strftime("%Y-%m-%d"))
+        if cid == "ims" and not stop() and erreicht: db.flag(self.conn, "ims_tag", time.strftime("%Y-%m-%d"))          # v240
         self.conn.commit()
         if n or upd or removed:                                      # v23: nur bei Aenderungen neu aufbauen
             db.rebuild_fts(self.conn); self.retriever.invalidate()

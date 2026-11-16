@@ -21,6 +21,7 @@ MAX_JSON = 64 * 2**20
 SEITE = 500                       # Einträge je Abfrage (Header Item-Count)
 TIMEOUT = 90
 MAX_SEITEN = 100                  # v245: Schutz gegen Endlosschleife (max. 50'000 Einträge)
+OHNE_SCHRITTE = "|ohne_schritte"   # v252 (F12): Kennung für Dokumente, deren Prozessschritte noch nicht abrufbar waren
 STANDARD_TYPEN = ("RL", "RL-A", "PA", "PA-A", "AA", "AA-A", "CL", "CL-A", "VA", "VA-A", "EL", "EL-A",
                   "VS", "VS-A", "TV", "TV-A", "GP", "GP-A")   # v240d: ohne FO/FO-A/VO (Formulare/Vorlagen), LI wird ohnehin übersprungen
 
@@ -170,11 +171,18 @@ def _txt(v):
 
 
 def _schritte_text(cl, did):
-    """v246: Prozessschritte und Rollen strukturiert (statt der Zeichnung im PDF). Fehler -> leer."""
-    zeilen = []
+    """v246: Prozessschritte und Rollen strukturiert (statt der Zeichnung im PDF).
+    v252 (F12): -> (Text, ok). ok=False, wenn eine Abfrage scheiterte (Netz, Zeitüberschreitung, Serverfehler) – das Dokument
+    wird dann beim nächsten Abgleich erneut versucht. «HTTP 404/204» heisst: dieses Dokument hat keine Schritte (ok)."""
+    zeilen, ok = [], True
+    def _fehler(e):
+        return not any(c in str(e) for c in ("HTTP 404", "HTTP 204"))
     try:
         st = (cl.json(f"{API_SCHRITTE}{int(did)}", {"Item-Count": "9999", "Page": "0"}).get("processSteps") or [])
-        for s in sorted(st, key=lambda s: s.get("number") or 0):
+        def _nr(s):                                                   # v252: gemischte Typen (Zahl/Text) nicht mehr als Fehler
+            try: return float(s.get("number") or 0)
+            except (TypeError, ValueError): return 0.0
+        for s in sorted(st, key=_nr):
             art = " (Entscheid)" if "decision" in str(s.get("shapeType") or "").lower() else ""
             teile = [f"Schritt {s.get('number', '?')}{art}: {_txt(s.get('processSequence'))}"]
             for lab, feld in (("Beschreibung", "description"), ("Vorgaben", "prerequisites"), ("Ergebnis", "result"),
@@ -185,14 +193,14 @@ def _schritte_text(cl, did):
                 w = _txt(s.get("text" + k)) or _txt(s.get("roles" + k))
                 if w: teile.append(f"{lab}: {w}")
             zeilen.append(" · ".join(teile))
-    except Exception: pass
+    except Exception as e: ok = ok and not _fehler(e)
     try:
         ro = (cl.json(f"{API_ROLLEN}{int(did)}", {"Item-Count": "9999", "Page": "0"}).get("processRoles") or [])
         r = [f"{_txt(x.get('id'))} = {_txt(x.get('name'))}" + (f" ({_txt(x.get('processGroup'))})" if x.get("processGroup") else "")
              for x in ro if x.get("name")]
         if r: zeilen.append("Rollen: " + "; ".join(r))
-    except Exception: pass
-    return ("Prozessschritte:\n" + "\n".join(zeilen)) if zeilen else ""
+    except Exception as e: ok = ok and not _fehler(e)
+    return (("Prozessschritte:\n" + "\n".join(zeilen)) if zeilen else ""), ok
 
 
 def _pdf_text(daten):
@@ -217,7 +225,9 @@ class Ims(Connector):
     def sync(self, ctx):
         s = ctx.settings
         cl = _Client(str(s.get("ims_sprache") or "de")[:2])
-        seen, errors = set(), False
+        seen, errors, offen = set(), False, 0
+        def behalten(did):                                            # v252 (F5): bisherige Fassungen dieses Dokuments nicht aufräumen
+            seen.update(x for x in ctx.known if x.startswith(f"{did}|"))
         try:
             try:
                 ctx.progress("IMS: Prozesse laden")
@@ -244,16 +254,20 @@ class Ims(Connector):
                 if did is None: continue
                 ext = f"{did}|v{d.get('version', '')}|{str(d.get('publishDate') or '')[:10]}|{FORMAT}"; seen.add(ext)
                 if ext in ctx.known: continue
+                ohne = ext + OHNE_SCHRITTE                                    # v252 (F12): gespeichert, aber Schritte fehlen noch
                 ctx.progress(f"IMS: {k}/{len(docs)}", k, len(docs))
                 try:
+                    schritte, s_ok = _schritte_text(cl, did)                 # v246
+                    if not s_ok and ohne in ctx.known:                       # weiterhin nicht abrufbar -> Bestand behalten, später erneut
+                        seen.add(ohne); offen += 1; continue
                     typ, daten = cl.get(f"{API_PDF}{int(did)}", max_bytes=SI.DOC_MAX_BYTES)
                     if "pdf" not in typ or daten[:4] != b"%PDF": raise RuntimeError("kein PDF")
                     text = clean(_pdf_text(daten))
-                    schritte = _schritte_text(cl, did)                       # v246
                     if schritte: text = (schritte + "\n\n" + text).strip()
                 except Exception as e:
-                    errors = True; ctx.progress(f"IMS {did} übersprungen: {e}"); continue
+                    offen += 1; behalten(did); ctx.progress(f"IMS {did} übersprungen: {e}"); continue
                 if not text.strip(): continue
+                if not s_ok: seen.add(ohne); ext = ohne; offen += 1           # ohne Schritte speichern, beim nächsten Abgleich ergänzen
                 pid = str(d.get("processId") or "")
                 pfad = pfade.get(pid, "")
                 titel = d.get("title") or str(did)
@@ -268,4 +282,5 @@ class Ims(Connector):
                                 "prozess_id": pid, "pfad": pfad, "dateityp": "pdf"}}
         finally:
             cl.schliessen()
-        ctx.seen = seen; ctx.complete = not errors and bool(seen)
+        if offen: ctx.progress(f"IMS: {offen} Dokument(e) unvollständig – wird beim nächsten Abgleich erneut versucht")
+        ctx.seen = seen; ctx.complete = not errors and bool(seen)       # v252 (F5): Einzelfehler blockieren das Aufräumen nicht mehr

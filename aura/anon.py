@@ -90,6 +90,12 @@ def lade_begriffe():
         rows = [{k: (r.get(k) or "").strip() for k in SPALTEN} for r in csv.DictReader(f, delimiter=";")]
     return [r for r in rows if r["Begriff"]]
 
+def loesche_begriffe():
+    """v257: Begriffsliste ganz löschen (Datei und allfällige Zwischendatei). Keine Sicherungskopie: Die Liste enthält
+    die geschützten Namen selbst – gelöscht heisst gelöscht."""
+    for p in (BEGRIFFE, BEGRIFFE.with_suffix(".tmp")):
+        if p.exists(): p.unlink()
+
 def speichere_begriffe(rows):
     ORDNER.mkdir(parents=True, exist_ok=True)
     tmp = BEGRIFFE.with_suffix(".tmp")
@@ -167,7 +173,7 @@ def importiere(path):
     Sonst je Zeile ein Begriff (lines) fuer die aktuelle Seite."""
     p = Path(path); ext = p.suffix.lower()
     if ext == ".xlsx": table = _xlsx(p)
-    elif ext in (".csv", ".tsv", ".txt"):
+    elif ext in (".csv", ".tsv", ".txt", ".md"):                        # v256: .md auch über _lesen (vorher UTF-8 mit «�»)
         txt = _lesen(p); first = txt.split("\n", 1)[0]
         d = "\t" if "\t" in first else (";" if ";" in first else ("," if "," in first and ext != ".txt" else None))
         table = [r for r in csv.reader(txt.splitlines(), delimiter=d)] if d else [[l] for l in txt.splitlines()]
@@ -198,6 +204,8 @@ def importiere(path):
         cell = lambda r, i: r[i] if i < len(r) else ""
         return [], [f"{cell(r, iv)} {cell(r, inn)}".strip() for r in table[1:] if cell(r, inn)]
     if ivo is not None: return [], [r[ivo] for r in table[1:] if ivo < len(r) and r[ivo]]
+    if inn is not None and inn == 0 and all(len(r) == 1 for r in table[:20]):   # v256: eine Spalte mit Kopf «Name»
+        return [], [r[0] for r in table[1:] if r and r[0]]
     return [], [r[0] for r in table if r and r[0]]
 
 def _ln(tag): return tag.rsplit("}", 1)[-1]                         # Element-Name ohne Namensraum

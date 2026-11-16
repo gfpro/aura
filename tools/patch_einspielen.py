@@ -1,5 +1,11 @@
-# tools/patch_einspielen.py — Patch einspielen. Version 20261108v208 (vorher v53)
-# Aufruf (AURA vorher schliessen):  cd /d C:\aura   und   py tools\patch_einspielen.py  [Datei.zip] [--ohne-signatur]
+# tools/patch_einspielen.py — Patch einspielen. Version 20261116v249 (vorher v208)
+# Aufruf (AURA vorher schliessen):  cd /d C:\aura   und   py tools\patch_einspielen.py  [Datei.zip] [Schalter]
+# Schalter:  --ohne-signatur   nur ohne hinterlegten Schlüssel wirksam: Herkunft wird NICHT geprüft (Entwicklung)
+#            --aelter          bewusst eine ältere Version einspielen (sonst abgelehnt)
+#            --vorlagen        vorhandene Dateien in workflows\ und wissen\ überschreiben (sonst bleiben deine erhalten)
+# v249 (H4): Versionsprüfung – ein Paket mit älterer Version als die installierte wird abgelehnt (auch wenn gültig
+#   signiert); bei signierten Paketen muss die Version im Manifest zur Version im Paket passen. models\ ist gesperrt.
+#   Vorhandene Dateien in workflows\ und wissen\ werden nur mit --vorlagen ersetzt.
 # Ohne Angabe: neuestes AURA_patch_*.zip in C:\aura. Ablauf (v208: alles wird geprüft, BEVOR eine Datei verändert wird):
 #   1. ZIP prüfen: Pfade (kein «..», kein Laufwerk/UNC, kein «\\», kein «:»/ADS, keine Gerätenamen), Doppelte (auch nur
 #      Gross-/Kleinschreibung), Grössen, ZIP-Bomben, Links. Geschützt: data\, logs\, _sicherung\, .git\.
@@ -21,7 +27,32 @@ from aura.sicherheit import (SicherheitsFehler, zip_pruefen, zip_lesen, zip_sha2
                              pruefe_relpfad, pruefe_eindeutig, schluessel)
 
 MANIFEST, SIGNATUR, ENTFERNEN = "_manifest.json", "_manifest.sig", "_entfernen.txt"
-GESCHUETZT = ("data/", "logs/", "_sicherung/", ".git/")
+GESCHUETZT = ("data/", "logs/", "_sicherung/", ".git/", "models/")       # v249: models\ kommt nie über einen Patch
+EIGENE = ("workflows/", "wissen/")                                    # v249: vorhandene Dateien nur mit --vorlagen ersetzen
+INIT = "aura/__init__.py"
+
+def version_aus(text):
+    """'VERSION = "20261116v248"' -> ('20261116v248', (248, 20261116)); unlesbar -> (None, None)."""
+    import re
+    m = re.search(r'VERSION\s*=\s*["\'](\d{8})v(\d+)["\']', text or "")
+    return (f"{m.group(1)}v{m.group(2)}", (int(m.group(2)), int(m.group(1)))) if m else (None, None)
+
+def version_pruefen(z, payload, root, manifest, aelter, out):
+    """v249: Zielversion (aus dem Paket) gegen die installierte Version. Wirft SicherheitsFehler."""
+    ist_txt, ist = version_aus((root / INIT).read_text(encoding="utf-8", errors="replace") if (root / INIT).is_file() else "")
+    init = next((i for i in payload if schluessel(i.filename) == INIT), None)
+    ziel_txt, ziel = version_aus(zip_lesen(z, init, 2**20).decode("utf-8", "replace")) if init else (None, None)
+    if manifest is not None:                                           # signiert: Manifest ist verbindlich
+        m_txt, m = version_aus(f'VERSION = "{manifest.get("aura_version", "")}"')
+        if m is None: raise SicherheitsFehler("Manifest ohne gültige Versionsangabe (aura_version)")
+        if ziel is not None and ziel != m: raise SicherheitsFehler(f"Version im Manifest ({m_txt}) passt nicht zur Version im Paket ({ziel_txt})")
+        ziel_txt, ziel = m_txt, m
+    if ziel is None: out("Hinweis: Paket enthält keine Versionsangabe (aura\\__init__.py) – Versionsprüfung nicht möglich."); return
+    out(f"Version: installiert {ist_txt or 'unbekannt'} -> Paket {ziel_txt}")
+    if ist is not None and ziel < ist:
+        if not aelter: raise SicherheitsFehler(f"Paket ist älter ({ziel_txt}) als die installierte Version ({ist_txt}). "
+                                               "Bewusst zurückgehen nur mit --aelter.")
+        out("WARNUNG: ältere Version wird eingespielt (--aelter).")
 
 def vertrauensanker():
     """Öffentliche Update-Schlüssel aus der Windows-Richtlinie (nur Administratoren können HKLM\\...\\Policies schreiben)."""
@@ -59,7 +90,7 @@ def _bak_dir(root, stem):
     b = root / "_sicherung" / f"vor_{stem}"
     return b if not b.exists() else root / "_sicherung" / f"vor_{stem}_{datetime.now():%Y%m%d_%H%M%S}"
 
-def einspielen(zp, root=ROOT, keys=None, ohne_signatur=False, out=print):
+def einspielen(zp, root=ROOT, keys=None, ohne_signatur=False, out=print, aelter=False, vorlagen=False):
     """-> 0 ok, 1 Fehler. Verändert bei jedem Prüffehler KEINE Datei."""
     root = Path(root).resolve(); zp = Path(zp)
     keys = vertrauensanker() if keys is None else keys
@@ -68,16 +99,21 @@ def einspielen(zp, root=ROOT, keys=None, ohne_signatur=False, out=print):
             # ---------- Phase 1: vollständige Prüfung, noch keine Änderung
             infos = zip_pruefen(z, was="Patch-Eintrag")
             payload = [i for i in infos if i.filename not in (MANIFEST, SIGNATUR)]
-            if keys: signatur_pruefen(z, payload, keys); out("Signatur: gültig")
+            manifest = None
+            if keys: manifest = signatur_pruefen(z, payload, keys); out("Signatur: gültig")
             elif ohne_signatur: out("WARNUNG: Herkunft NICHT geprüft (--ohne-signatur). Nur Pakete aus sicherer Quelle einspielen!")
             else: raise SicherheitsFehler("Kein Update-Schlüssel hinterlegt (Richtlinie HKLM\\SOFTWARE\\Policies\\AURA\\UpdateSchluessel) – "
                                           "Abbruch. Nur mit ausdrücklichem --ohne-signatur ohne Herkunftsprüfung.")
+            version_pruefen(z, payload, root, manifest, aelter, out)
             schreiben = [i for i in payload if i.filename != ENTFERNEN]
-            ziele = []
+            ziele, behalten = [], []
             for i in schreiben:
                 if schluessel(i.filename).startswith(GESCHUETZT): raise SicherheitsFehler(f"Patch darf diesen Bereich nicht ändern: {i.filename}")
                 t = ziel_in(root, i.filename, "Patch-Eintrag")
                 if t.is_dir(): raise SicherheitsFehler(f"Ziel ist ein Ordner: {i.filename}")
+                if schluessel(i.filename).startswith(EIGENE) and t.exists() and not vorlagen \
+                        and datei_sha256(t) != zip_sha256(z, i):
+                    behalten.append(i.filename); continue                 # v249: eigene Workflows/Wissensdateien bleiben
                 ziele.append((i, t))
             weg = []
             if ENTFERNEN in {i.filename for i in payload}:
@@ -86,10 +122,11 @@ def einspielen(zp, root=ROOT, keys=None, ohne_signatur=False, out=print):
                 pruefe_eindeutig(zeilen, "Zeile in _entfernen.txt")
                 for n in zeilen:
                     pruefe_relpfad(n, "Zeile in _entfernen.txt")
-                    if schluessel(n).startswith(GESCHUETZT): raise SicherheitsFehler(f"_entfernen.txt darf diesen Bereich nicht ändern: {n}")
+                    if schluessel(n).startswith(GESCHUETZT + EIGENE): raise SicherheitsFehler(f"_entfernen.txt darf diesen Bereich nicht ändern: {n}")
                     weg.append((n, ziel_in(root, n, "Zeile in _entfernen.txt")))
             # ---------- Phase 2: Sicherung, Schreiben, Entfernen – bei Fehler vollständig zurückrollen
             bak = _bak_dir(root, zp.stem); out(f"Patch: {zp.name}\nSicherung: {bak}")
+            for n in behalten: out(f"  behalten  {n}  (deine Fassung weicht ab; ersetzen mit --vorlagen)")
             gesichert, neu, verschoben = [], [], []
             try:
                 for i, t in ziele:
@@ -134,9 +171,13 @@ def einspielen(zp, root=ROOT, keys=None, ohne_signatur=False, out=print):
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    ohne = "--ohne-signatur" in argv; argv = [a for a in argv if a != "--ohne-signatur"]
+    schalter = {"--ohne-signatur", "--aelter", "--vorlagen"}
+    unbekannt = [a for a in argv if a.startswith("--") and a not in schalter]
+    if unbekannt: print("Unbekannter Schalter:", ", ".join(unbekannt)); return 1
+    ohne, aelter, vorlagen = (x in argv for x in ("--ohne-signatur", "--aelter", "--vorlagen"))
+    argv = [a for a in argv if a not in schalter]
     zips = [Path(argv[0])] if argv else sorted(ROOT.glob("AURA_patch_*.zip"), key=lambda p: p.stat().st_mtime)
     if not zips or not zips[-1].is_file(): print("Kein AURA_patch_*.zip in", ROOT); return 1
-    return einspielen(zips[-1], ROOT, ohne_signatur=ohne)
+    return einspielen(zips[-1], ROOT, ohne_signatur=ohne, aelter=aelter, vorlagen=vorlagen)
 
 if __name__ == "__main__": sys.exit(main())

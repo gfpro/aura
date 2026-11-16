@@ -1,6 +1,8 @@
 # aura/connectors/confluence.py — v78: Confluence (Data Center) per REST-API, nur lesen, nur Standardbibliothek.
 # settings["confluence_links"] = Liste von Links. /pages/<id>/... = Seite + alle Unterseiten, /spaces/<KEY>/... = ganzer Bereich.
-# Standard: anonym (alles, was im Bundesnetz ohnehin sichtbar ist). Optional Token (v208: DPAPI-verschlüsselt, data\confluence_token.dpapi).
+# v254: Ohne Token liest AURA über die AURA-Edge mit DEINER Anmeldung (Smartcard/eIAM wie Jira) – damit auch Seiten mit
+#   eingeschränktem Zugriff. Mit Token (DPAPI, data\confluence_token.dpapi) wie bisher direkt. Nur öffentliche Seiten
+#   (frühere Standardeinstellung): Einstellung «confluence_anonym» = true.
 # ext_id = "<seitenId>|v<Version>" -> neue Version = neues Objekt; ctx.seen -> Worker loescht alte Versionen/verschwundene Seiten.
 # v208 Sicherheit: nur https, nur freigegebene Hosts (Richtlinie HKLM\SOFTWARE\Policies\AURA «ConfluenceHosts», sonst
 #      confluence.bit.admin.ch), keine Ports/Zugangsdaten im Link, Redirects nur auf denselben Host, Antwortgrösse begrenzt.
@@ -12,6 +14,7 @@ from ..config import DATA
 from ..text import clean
 
 PAGE = 50
+MAX_START = 50000              # v247 (F13): Obergrenze beim Blättern
 BLOCK = {"p", "div", "br", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6", "table", "pre", "blockquote"}
 STANDARD_HOSTS = ("confluence.bit.admin.ch", "bkdev.atlassian.net")    # v232: + Atlassian Cloud bkdev
 MAX_ANTWORT = 32 * 2**20                                    # 32 MB je Antwort
@@ -64,11 +67,43 @@ def cloud(host):
     return host.endswith(".atlassian.net")
 
 _TABS = {}
+_FED = ("(()=>{const e=[...document.querySelectorAll('a,button,[role=button],li,div')]"
+        ".filter(x=>x.children.length<4&&/^\\s*FED-LOGIN\\s*$/i.test(x.innerText||''));"
+        "if(!e.length)return false;(e[0].closest('a,button,[role=button]')||e[0]).click();return true})()")
+ANMELDEN_S = 60
+
+def _angemeldet_dc(t, o):
+    """v254: Data Center – angemeldet, wenn /rest/api/user/current einen bekannten Benutzer liefert (nicht «anonymous»)."""
+    if not _gleich(t.js("location.href") or "", o): return False
+    r = t.js("fetch('/rest/api/user/current',{credentials:'same-origin',headers:{Accept:'application/json'}})"
+             ".then(r=>r.status==200?r.json().then(j=>j.type||(j.username?'known':'anonymous')):'x'+r.status)", timeout=20)
+    return isinstance(r, str) and r not in ("anonymous",) and not r.startswith("x")
+
+def _anmelden_dc(t, o):
+    """v254: wie Jira (v231): Login-Seite öffnen; auf der eIAM-Auswahl einmal «FED-LOGIN» klicken (nur auf *.admin.ch,
+    nichts wird gelesen), die Smartcard meldet dann an. Erfolg = bekannter Benutzer, nicht «Seite geladen»."""
+    import time
+    from ..engine import edge
+    t.navigieren(f"https://{o[1]}/login.action", "confluence")
+    ende, geklickt = time.time() + ANMELDEN_S, False
+    while time.time() < ende:
+        time.sleep(1)
+        try:
+            if t.js("document.readyState") != "complete": continue
+            if _angemeldet_dc(t, o): return
+            host = (urllib.parse.urlsplit(t.js("location.href") or "").hostname or "").lower()
+            if not geklickt and host.endswith(".admin.ch") and "FED-LOGIN" in (t.js("document.body ? document.body.innerText : ''") or "").upper():
+                geklickt = bool(t.js(_FED))
+        except Exception: pass
+    edge.fenster(t, "normal")
+    raise RuntimeError(f"Confluence: Anmeldung nicht abgeschlossen – bitte im Edge-Fenster von AURA bei {o[1]} anmelden "
+                       "(«FED-LOGIN») und erneut abgleichen")
+
 def _edge_get(url):
-    """v232: Cloud-Seiten per fetch() im Edge-Tab desselben Origins (Anmeldung macht der Mensch einmal im AURA-Edge)."""
+    """v232: Seiten per fetch() im Edge-Tab desselben Origins mit der Anmeldung des Menschen. v254: auch Data Center."""
     from ..engine import edge
     from ..engine.herkunft import origin
-    o = origin(url); start = f"https://{o[1]}/wiki/"
+    o = origin(url); dc = not cloud(o[1]); start = f"https://{o[1]}/" + ("" if dc else "wiki/")
     if not edge.laeuft(): edge.starten(); import time; time.sleep(1.5)
     t = _TABS.get(o)
     try:
@@ -82,6 +117,10 @@ def _edge_get(url):
                 if t.js("document.readyState") == "complete" and _gleich(t.js("location.href") or "", o): break
             except Exception: pass
         _TABS[o] = t
+    if dc:                                                      # v254: vor dem ersten Lesen anmelden (sonst nur anonym sichtbar)
+        try: ok = _angemeldet_dc(t, o)
+        except Exception: ok = False
+        if not ok: _anmelden_dc(t, o)
     t.origin_pruefen("confluence")
     st, body = t.js("fetch(%s,{credentials:'same-origin',headers:{Accept:'application/json'}})"
                     ".then(r=>r.text().then(x=>[r.status,x]))" % json.dumps(url), timeout=60)
@@ -115,6 +154,12 @@ def html_text(h):
     p = _Text(); p.feed(h or ""); t = unescape("".join(p.out))
     return re.sub(r"\n\s*\n+", "\n\n", re.sub(r"[ \t]+", " ", t)).strip()
 
+def _anonym():
+    try:
+        from ..config import load_settings
+        return bool(load_settings().get("confluence_anonym", False))
+    except Exception: return False
+
 def _token(melden=lambda m: None):
     from ..geheim import laden
     return laden(DATA / "confluence_token.dpapi", DATA / "confluence_token.txt", melden)
@@ -133,6 +178,7 @@ def _opener():
 def _get(url, tok, hosts=None, opener=None):
     _, host = pruefe_url(url, hosts)                         # Token nur an freigegebene Hosts
     if cloud(host): return _edge_get(url)                    # v232: Cloud nie mit Token
+    if not tok and not _anonym(): return _edge_get(url)      # v254: ohne Token mit eigener Anmeldung über die AURA-Edge
     h = {"Accept": "application/json"}
     if tok: h["Authorization"] = "Bearer " + tok
     try:
@@ -154,7 +200,7 @@ class Confluence(Connector):
         for link in links:
             try: base, cql, desc = parse_link(link)
             except ValueError as e: errors = True; ctx.progress(f"Confluence: {urllib.parse.urlsplit(link.strip())._replace(query='', fragment='').geturl()[:60]} – {e}"); continue
-            start, total = 0, None
+            start, total, seiten_ids = 0, None, set()
             while True:
                 if ctx.cancelled(): return                            # unvollstaendig -> kein Aufraeumen
                 url = (f"{base}/rest/api/content/search?cql={urllib.parse.quote(cql)}&limit={PAGE}&start={start}"
@@ -162,6 +208,10 @@ class Confluence(Connector):
                 try: d = _get(url, tok)
                 except Exception as e: errors = True; ctx.progress(f"Confluence {desc}: {e}"); break
                 res = d.get("results") or []
+                neu_ids = {str(r.get("id")) for r in res} - seiten_ids   # v247 (F13): Server ignoriert «start» -> nie endlos
+                if res and not neu_ids or start >= MAX_START:
+                    errors = True; ctx.progress(f"Confluence {desc}: Blättern abgebrochen (gleiche Seite erneut oder > {MAX_START} Seiten)"); break
+                seiten_ids |= neu_ids
                 total = d.get("totalSize", total)
                 ctx.progress(f"Confluence {desc}: {start}/{total or '?'}", start, total or None)
                 for r in res:
@@ -169,7 +219,9 @@ class Confluence(Connector):
                     if ext in ctx.known: continue
                     try:
                         body = _get(f"{base}/rest/api/content/{r['id']}?expand=body.storage", tok)["body"]["storage"]["value"]
-                    except Exception as e: errors = True; ctx.progress(f"Seite {r['title']} übersprungen: {e}"); continue
+                    except Exception as e:                            # v252 (F5): Einzelfehler -> bisherige Fassung behalten, Aufräumen läuft trotzdem
+                        seen.update(x for x in ctx.known if x.startswith(f"{r['id']}|"))
+                        ctx.progress(f"Seite {r['title']} übersprungen: {e}"); continue
                     pfad = " › ".join([a.get("title", "") for a in r.get("ancestors") or []] + [r["title"]])
                     text = clean(html_text(body))
                     webui = str(r.get("_links", {}).get("webui") or "")

@@ -53,8 +53,10 @@ def _tidy(t):
     t = re.sub(r"^.*\.{6,}\s*\d+\s*$", "", t, flags=re.M)                  # Inhaltsverzeichnis-Zeilen
     return re.sub(rf"(\w)-\n(?!(?:{_KEEP})\b)([a-zäöü])", r"\1\2", t)        # Trennstriche am Zeilenende
 
-def _pdf(p, max_chars=None):
-    # pypdf als unveraendertes Wheel (Zip) laden: kein Entpacken noetig, nichts kann beim Kopieren verloren gehen
+def pdf_reader():
+    """pypdf als unveraendertes Wheel (Zip) laden: kein Entpacken noetig, nichts kann beim Kopieren verloren gehen.
+    v247 (F1): eine Ladefunktion für alle Stellen (Workflow, Mail-Anhang, Dokumentordner, IMS) – vorher fand der
+    Dokumentordner/IMS-Abgleich pypdf nur, wenn zufällig vorher ein anderes PDF gelesen worden war."""
     import sys
     from ..config import ROOT
     for w in sorted((ROOT / "vendor" / "wheels").glob("*.whl"), reverse=True):
@@ -62,6 +64,10 @@ def _pdf(p, max_chars=None):
     try: from pypdf import PdfReader
     except Exception as e:
         raise RuntimeError(f"pypdf laesst sich nicht laden ({type(e).__name__}: {e}) - vendor\\wheels pruefen")
+    return PdfReader
+
+def _pdf(p, max_chars=None):
+    PdfReader = pdf_reader()
     SI.pruefe_dokument(p)                                                     # v208: Grösse, Seiten, Zeit, max_chars
     r = PdfReader(str(p)); n = len(r.pages)
     if n > SI.DOC_MAX_SEITEN: raise RuntimeError(f"{Path(p).name}: {n} Seiten – Grenze {SI.DOC_MAX_SEITEN}")
@@ -80,7 +86,10 @@ def read_file(p, max_chars=None):
     p = Path(p); ext = p.suffix.lower()
     if ext in (".txt", ".md", ".csv", ".json", ".xml", ".html", ".htm", ".eml"):
         SI.pruefe_dokument(p)
-        with open(p, encoding="utf-8", errors="replace") as fh: t = fh.read(max_chars + 1) if max_chars else fh.read()
+        raw = Path(p).read_bytes()                                    # v256: UTF-8, sonst Windows-1252 (statt «�» für Umlaute)
+        try: t = raw.decode("utf-8-sig")
+        except UnicodeDecodeError: t = raw.decode("cp1252", errors="replace")
+        if max_chars: t = t[:max_chars + 1]
         return re.sub(r"<[^>]+>", " ", t) if ext in (".html", ".htm") else t
     if ext == ".docx": return _docx(p)
     if ext == ".pdf": return _pdf(p, max_chars)
@@ -418,12 +427,17 @@ def n_template(p, state, ctx):
     is_html = truthy(p.get("html", True))
     return {"text": render(src, state, escape=html_escape if is_html else as_text)}
 
+DATEI_FORMATE = ("txt", "md", "html", "doc", "json", "csv")           # v247 (H1): wie schema.py, hier durchgesetzt
+
 @node("file_out", "Datei schreiben. Parameter: content, name (ohne Endung), format (doc|html|md|txt|json), open")
 def n_file_out(p, state, ctx):
     fmt = str(p.get("format", "txt")).lower().lstrip(".")
+    if fmt not in DATEI_FORMATE:                                       # v247 (H1): keine frei wählbare Endung (.cmd, .hta, «../»)
+        raise SI.SicherheitsFehler(f"Datei schreiben: Format «{fmt[:20]}» ist nicht erlaubt (erlaubt: {', '.join(DATEI_FORMATE)})")
     name = re.sub(r'[\\/:*?"<>|]+', "_", as_text(p.get("name") or "ergebnis")).strip()[:80] or "ergebnis"
     out = ctx.out_dir; out.mkdir(parents=True, exist_ok=True)
     path = out / f"{datetime.now():%Y%m%d_%H%M}_{name}.{fmt}"
+    if not SI.liegt_in(path, out): raise SI.SicherheitsFehler("Datei schreiben: Ziel liegt ausserhalb des Laufordners")
     c = p.get("content")
     if fmt == "json" and not isinstance(c, str): c = json.dumps(c, ensure_ascii=False, indent=2)
     path.write_text(as_text(c), encoding="utf-8")

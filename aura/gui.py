@@ -1,4 +1,4 @@
-# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261115v244 (v244: Quellen zweispaltig mit Scrollbalken; v238: Darstellung aus Einstellungen entfernt; v237: Kontrollcenter, Vorbereitung im Voraus; v235: Schalter «Sprachmodell beim Start laden»; v234: Startkacheln als eigene Tasks – ✎ bearbeiten, ＋ neu, Schalter je Task, Klick fügt nur ein; v229: Skills & Rollen unter Werkzeuge; v227: kein Flackern beim Schreiben; v166: Antwortlaenge als Schieberegler)
+# aura/gui.py — moderne Oberflaeche mit CustomTkinter (mitgeliefert in vendor\, reines Python). Version 20261116v258 (v258: Acta Nova mit Titel öffnen; v257: Agent und «Als Präsentation» in Zeile 2; v256: Blasenhöhe in Pixeln, Quellen als Label; v255: gespeicherte Chats mit genauer Blasenhöhe, ohne Stocken; v254: Verlauf ohne Slide-Animation, geladener Chat wird neu gezeichnet; v253: Quellenseite nach Änderung an Live-Quellen neu; v251: Vektor-Hinweis auf eigener Zeile; v244: Quellen zweispaltig mit Scrollbalken; v238: Darstellung aus Einstellungen entfernt; v237: Kontrollcenter, Vorbereitung im Voraus; v235: Schalter «Sprachmodell beim Start laden»; v234: Startkacheln als eigene Tasks – ✎ bearbeiten, ＋ neu, Schalter je Task, Klick fügt nur ein; v229: Skills & Rollen unter Werkzeuge; v227: kein Flackern beim Schreiben; v166: Antwortlaenge als Schieberegler)
 # v129: Senden-Knopf orange «⏳» + Hinweis, solange Vektoren berechnet werden (Frage bleibt im Eingabefeld).
 #       «＋ Neuer Chat» und «🕘 Verlauf» über dem Chat; Chats werden 30 Tage gespeichert (chatlog.py, data\chats.db;
 #       Einstellungen chats_behalten, chats_tage). «⌂» startet ebenfalls einen neuen Chat (setzt den Bezug im Worker zurück).
@@ -195,6 +195,7 @@ class SelText(tk.Text):
     def _hoehe(self, _e=None):
         """v214f: Hoehe nachziehen, bis die letzte Zeile sichtbar ist – ohne update_idletasks (keine Rekursion),
         schrittweise per after(); hoechstens ein Lauf gleichzeitig."""
+        if getattr(self, "_fest", False): return self.hoehe_genau()      # v255: gespeicherte Chats
         if getattr(self, "_h_lauf", False): self._h_nochmal = True; return   # v220: nicht verwerfen, danach nachholen
         self._h_lauf = True; self._h_nochmal = False
         try:
@@ -206,10 +207,41 @@ class SelText(tk.Text):
         tk.Text.configure(self, height=h)
         self.after(30, self._h_schritt, 0)
 
+    def hoehe_genau(self):
+        """v255: Höhe in einem Schritt aus den Anzeigezeilen (Tk «sync» rechnet alle Zeilen fertig). Für gespeicherte Chats:
+        Die schrittweise Methode (_h_schritt) misst über dlineinfo, und das liefert für Blasen ausserhalb des sichtbaren
+        Bereichs nichts – sie wuchsen dann um bis zu 80 Zeilen (Lücken) oder blieben abgeschnitten, und viele Blasen
+        gleichzeitig liessen die Oberfläche stocken."""
+        self._fest = True
+        try:
+            import math, tkinter.font as tkf
+            self.tk.call(self._w, "sync")
+            px = self.count("1.0", "end", "ypixels")                         # v256: Pixel statt Zeilen – Überschriften
+            px = (px[0] if isinstance(px, tuple) else px) or 0              # (fett, Abstand 8 px) und Quellenblöcke sind
+            zeile = tkf.Font(family=self._fam, size=self._sz).metrics("linespace") or 1   # höher als eine Normalzeile
+            tk.Text.configure(self, height=max(1, math.ceil(px / zeile)))
+        except Exception:
+            tk.Text.configure(self, height=max(1, int(self.index("end-1c").split(".")[0])))
+
     def _breite_neu(self, e):
         """Hoehenaenderungen loesen auch <Configure> aus – darauf nicht reagieren, sonst Endlosschleife (Flackern)."""
-        if e.width == getattr(self, "_w_alt", None) or getattr(self, "_h_lauf", False): return
-        self._w_alt = e.width; self.after_idle(self._hoehe)
+        if e.width == getattr(self, "_w_alt", None): return
+        self._w_alt = e.width
+        if getattr(self, "_h_lauf", False): self._h_nochmal = True; return   # v265: Breitenwechsel nicht verlieren
+        self.after_idle(self._hoehe)
+
+    def mindestens(self):
+        """v265: Nachkontrolle nach der Antwort – Höhe aus den Pixeln, nur wachsen. Die schrittweise Methode verlor
+        Breitenwechsel während ihres Laufs (z.B. wenn danach die Quellen erscheinen) – die letzten Zeilen fehlten."""
+        if getattr(self, "_h_lauf", False): self.after(300, self.mindestens); return
+        try:
+            import math, tkinter.font as tkf
+            self.tk.call(self._w, "sync")
+            px = self.count("1.0", "end", "ypixels"); px = (px[0] if isinstance(px, tuple) else px) or 0
+            zeile = tkf.Font(family=self._fam, size=self._sz).metrics("linespace") or 1
+            soll = math.ceil(px / zeile)
+            if soll > int(self.cget("height")): tk.Text.configure(self, height=soll)
+        except Exception: pass
 
     def _ganz(self):
         d = self.dlineinfo("end-1c")
@@ -777,11 +809,12 @@ class App:
         return body
 
     def _slide(self, d):
-        """d = +1 hinein, -1 hinaus; 8 Schritte à 15 ms."""
+        """d = +1 hinein, -1 hinaus. v254: in EINEM Schritt (vorher 8 à 15 ms). Unter Windows zeichnete der Chat-Bereich
+        hinter dem wandernden Panel nicht nach – es blieben Streifen («Verla Verla Verla …») stehen."""
         p = self.pnl
         if p is None: return
         try:
-            step = max(1, self.pnl_w // 8)
+            step = max(1, self.pnl_w)
             self.pnl_x = x = min(self.pnl_w, max(0, self.pnl_x + d * step))
             p.place(relx=1.0, x=-x, y=0, relheight=1.0); p.tkraise()          # v47: width nur im Konstruktor erlaubt
         except Exception:
@@ -1010,21 +1043,20 @@ class App:
         self.mic = Mikrofon(self); self.b_mic.configure(command=self.mic.toggle)
         hilfe.tip(self.b_mic, "Klicken, sprechen, nochmals klicken (max. 30 s). Der Text erscheint im Eingabefeld. Alles bleibt lokal.")
         self.follow = False                                              # v67: Bezug zur letzten Frage (einmalig)
-        tools = ctk.CTkFrame(bar, fg_color="transparent", height=24)     # v98: Werkzeugzeile (Bezug, Anhang) links unten
-        tools.grid(row=1, column=0, columnspan=3, sticky="w", padx=(14, 12), pady=(0, 10))
-        self.b_follow = ctk.CTkButton(tools, text="↳ Bezug zur letzten Frage", height=24, corner_radius=0, font=font(11),
-                                      fg_color="transparent", hover_color=BORDER, text_color=MUTED, border_width=1,
-                                      border_color=BORDER, command=self.toggle_follow)
-        self.b_follow.pack(side="left")
-        self.b_anhang = ctk.CTkButton(tools, text="📎 Datei anhängen", height=24, corner_radius=0, font=font(11),
-                                      fg_color="transparent", hover_color=BORDER, text_color=MUTED, border_width=1,
-                                      border_color=BORDER, command=self.add_anhang)
-        self.b_anhang.pack(side="left", padx=(8, 0)); self.buttons.append(self.b_anhang)
+        def _zeile(r, titel, pady):                                       # v262: Rahmen + Titel je Zeile
+            rahmen = ctk.CTkFrame(bar, fg_color="transparent", border_width=1, border_color=BORDER, corner_radius=0)
+            rahmen.grid(row=r, column=0, columnspan=3, sticky="ew", padx=(14, 12), pady=pady)
+            ctk.CTkLabel(rahmen, text=titel, width=96, anchor="w", font=font(11, "bold"),
+                         text_color=MUTED).pack(side="left", padx=(10, 4), pady=5)
+            innen = ctk.CTkFrame(rahmen, fg_color="transparent"); innen.pack(side="left", pady=5, padx=(0, 8))
+            return innen
+        tools = _zeile(1, "Live-Quellen", (0, 6))                        # v260: Zeile 1 – nur Live-Quellen
+        self.zeile2 = _zeile(2, "Funktionen", (0, 10))                   # v260: Zeile 2 – Bezug, Anhang, Agent, «Als Präsentation»
         if self.s.get("actanova"):                                       # v215: bei jedem Start aus – Einschalten
             self.s["actanova"] = False; save_settings(self.s)               # oeffnet Edge zur Anmeldung mit Karte/PIN
         self.b_acta = ctk.CTkButton(tools, text="🗂 Acta Nova", height=24, corner_radius=0, font=font(11),
                                     hover_color=BORDER, border_width=1, command=self.toggle_acta)
-        self.b_acta.pack(side="left", padx=(8, 0)); self._acta_farbe()
+        self.b_acta.pack(side="left"); self._acta_farbe()
         if self.s.get("actanova_wach"):
             try:
                 from .engine import actanova as _an0; _an0.wach_halten_starten()
@@ -1035,12 +1067,20 @@ class App:
         self.b_sp = ctk.CTkButton(tools, text="▦ SharePoint", height=24, corner_radius=0, font=font(11),
                                   hover_color=BORDER, border_width=1, command=self.toggle_sp)
         self.b_sp.pack(side="left", padx=(8, 0)); self._sp_farbe()
-        self.b_agent = ctk.CTkButton(tools, text=" Agent", width=34, height=24, corner_radius=0, font=font(11),     # v217 Pilot
-                                     hover_color=BORDER, border_width=1, command=self.toggle_agent)
+        self.b_follow = ctk.CTkButton(self.zeile2, text="↳ Bezug zur letzten Frage", height=24, corner_radius=0, font=font(11),
+                                      fg_color="transparent", hover_color=BORDER, text_color=MUTED, border_width=1,
+                                      border_color=BORDER, command=self.toggle_follow)
+        self.b_follow.pack(side="left")
+        self.b_anhang = ctk.CTkButton(self.zeile2, text="📎 Datei anhängen", height=24, corner_radius=0, font=font(11),
+                                      fg_color="transparent", hover_color=BORDER, text_color=MUTED, border_width=1,
+                                      border_color=BORDER, command=self.add_anhang)
+        self.b_anhang.pack(side="left", padx=(8, 0)); self.buttons.append(self.b_anhang)
+        self.b_agent = ctk.CTkButton(self.zeile2, text=" Agent", height=24, corner_radius=0, font=font(11),     # v217 Pilot
+                                     hover_color=BORDER, border_width=1, command=self.toggle_agent)   # v257: normale Breite
         self.b_agent.pack(side="left", padx=(8, 0)); self._agent_farbe()
         hilfe.tip(self.b_agent, "Agent: AURA sucht selbständig in mehreren Schritten (Kalender, Mail, Acta Nova falls ein)")
-        self.anh_box = ctk.CTkFrame(bar, fg_color="transparent", width=1, height=1)   # v226: eigene Zeile, sonst bei schmalem Fenster abgeschnitten
-        self.embed_hint = ctk.CTkLabel(tools, text="⏳ Vektoren werden berechnet – Fragen bitte später nochmals versuchen "
+        self.anh_box = ctk.CTkFrame(self.zeile2, fg_color="transparent", width=1, height=1)   # v257: neben Agent in Zeile 2
+        self.embed_hint = ctk.CTkLabel(bar, text="⏳ Vektoren werden berechnet – Fragen bitte später nochmals versuchen "
                                        "(oder links «Pause»).", font=font(11, "bold"), text_color=AMBER)   # v129: nur sichtbar beim Einbetten
         self.status = ctk.CTkLabel(main, text="Enter = senden  ·  Shift+Enter = neue Zeile", font=font(11),
                                    text_color=MUTED, anchor="w")
@@ -1272,7 +1312,7 @@ class App:
         sc = ctk.ScalingTracker.get_widget_scaling(self.chat) or 1.0
         for lbl in self.msgs: lbl.configure(wraplength=self._wrap() * (sc if isinstance(lbl, SelText) else 1))
 
-    def bubble(self, text, kind="a"):
+    def bubble(self, text, kind="a", scroll=True):
         """kind: q (Frage, rechts) | a (Antwort, links) | err"""
         if self.welcome: self.welcome.destroy(); self.welcome = None
         row = len(self.chat.winfo_children())
@@ -1289,7 +1329,8 @@ class App:
         else:
             lbl = ctk.CTkLabel(b, text=text, font=font(14), text_color=fg, justify="left", anchor="w", wraplength=self._wrap())
         lbl.pack(padx=16, pady=11, anchor="w"); self.msgs.append(lbl)
-        self._scroll(force=True); return b, lbl
+        if scroll: self._scroll(force=True)
+        return b, lbl
 
     def _vorschau(self, hits):
         """v160: Sofort anklickbar zeigen, welche Quellen das Modell gerade liest."""
@@ -1391,10 +1432,10 @@ class App:
         try:
             if on:
                 self.b_ask.configure(state="normal", text="⏳", image=None, fg_color=AMBER, hover_color=AMBER_HI)
-                self.embed_hint.pack(side="left", padx=(12, 0))
+                self.embed_hint.grid(row=3, column=0, columnspan=3, sticky="w", padx=(14, 12), pady=(0, 10))   # v251: eigene Zeile
             else:
                 self.b_ask.configure(text="", image=self._ic_send, fg_color=ACCENT, hover_color=ACCENT_HI)
-                self.embed_hint.pack_forget()
+                self.embed_hint.grid_remove()
         except Exception: pass
 
     def new_chat(self):
@@ -1449,21 +1490,38 @@ class App:
         except Exception as e: self.status.configure(text=f"Chat nicht lesbar: {e}"); return
         self.go_home(); self.close_panel(anim=False)
         for m in msgs:
-            self.bubble(m["frage"], "q"); b, _ = self.bubble(m["antwort"], "a")
+            self.bubble(m["frage"], "q", scroll=False); b, _ = self.bubble(m["antwort"], "a", scroll=False)   # v255: einmal am Ende
             foot = ctk.CTkFrame(b, fg_color="transparent"); foot.pack(fill="x", padx=16, pady=(0, 10))
             ctk.CTkLabel(foot, text=time.strftime("%d.%m.%Y %H:%M", time.localtime(m["t"])) + "  ·  gespeichert",
                          font=font(10), text_color=MUTED).pack(anchor="w")
             for i, q in enumerate(m["quellen"][:6], 1):
                 t = (q["label"] if q.get("label") else
-                     f"[{i}]  {str(q.get('ts', ''))[:10]}  ·  {str(q.get('source', '')).replace('_', ' ')}  ·  {q.get('title') or 'Quelle'}")[:100]
+                     f"[{i}]  {str(q.get('ts', ''))[:10]}  ·  {str(q.get('source', '')).replace('_', ' ')}  ·  {q.get('title') or 'Quelle'}")
+                t = " ".join(str(t).split())[:100]                         # v255: Zeilenumbrüche im Label gaben grosse Lücken
                 cmd = (lambda x=q["path"]: self._open_file(x)) if q.get("path") else \
                       (lambda x=q["item_id"]: self.open_original(x)) if q.get("item_id") else None
-                if cmd:
-                    ctk.CTkButton(foot, text=t, anchor="w", height=22, font=font(11), fg_color="transparent", hover_color=BORDER,
-                                  text_color=ACCENT, command=cmd).pack(anchor="w", fill="x")
-                else: ctk.CTkLabel(foot, text=t, font=font(11), text_color=MUTED, anchor="w").pack(anchor="w")
+                lb = ctk.CTkLabel(foot, text=t, font=font(11), text_color=ACCENT if cmd else MUTED, anchor="w", height=20,
+                                  cursor="hand2" if cmd else "")             # v256: Label statt Knopf – Knöpfe ausserhalb des
+                lb.pack(anchor="w", fill="x")                                # sichtbaren Bereichs wurden nicht gezeichnet (Lücken)
+                if cmd: lb.bind("<Button-1>", lambda e, c=cmd: c())
         self.chat_id = chat_id
+        self._neu_zeichnen(oben=True)                                    # v254: geladener Chat war unsichtbar
         self.status.configure(text="Gespeicherter Chat – neue Fragen werden angehängt. Für eine Folgefrage «↳ Bezug zur letzten Frage».")
+
+    def _neu_zeichnen(self, oben=False):
+        """v254: Nach dem Laden eines gespeicherten Chats Bildlaufbereich neu berechnen und den Chat-Bereich vollständig
+        neu zeichnen lassen. Vorher blieb die Fläche leer bzw. zeigte Reste des Verlauf-Panels."""
+        try:
+            self.root.update_idletasks()                                    # Breiten stehen fest ->
+            for lbl in self.msgs:                                           # v255: Höhen genau, in einem Schritt
+                if isinstance(lbl, SelText): lbl.hoehe_genau()
+            self.root.update_idletasks()
+            cv = self.chat._parent_canvas
+            cv.configure(scrollregion=cv.bbox("all"))
+            cv.yview_moveto(0.0 if oben else 1.0)
+            self.mainf.update_idletasks(); self.mainf.event_generate("<Configure>")
+            self.root.update()
+        except Exception: log.get().exception("Chat neu zeichnen")
 
     def open_original(self, item_id):
         if isinstance(item_id, str) and item_id.startswith("http"):        # Live-Quelle Intranet/SharePoint
@@ -1488,7 +1546,7 @@ class App:
                 threading.Thread(target=sp, daemon=True).start(); return
             import webbrowser; webbrowser.open(url); self.status.configure(text="Intranetseite geöffnet."); return
         if isinstance(item_id, str) and item_id.startswith("acta:"):       # Live-Quelle Acta Nova: Ablageort oeffnen
-            az = item_id[5:]
+            az, _, titel = item_id[5:].partition("|")                     # v258: Aktenzeichen + Titel
             if getattr(self.w, "current", None):
                 self._copy(az)                                             # v213: sichtbare Reaktion statt stiller Abbruch
                 messagebox.showinfo(APP_NAME, f"AURA arbeitet noch ({self.w.current}).\nAktenzeichen {az} ist kopiert – "
@@ -1498,7 +1556,7 @@ class App:
             def los():
                 try:
                     from .engine import actanova
-                    actanova.oeffnen(az); msg = f"Acta Nova: {az} geöffnet (Edge-Fenster)."
+                    actanova.oeffnen(az, titel or None); msg = f"Acta Nova: {az}{' – ' + titel if titel else ''} geöffnet (Edge-Fenster)."
                     kopie = False
                 except Exception as x:
                     kopie = True; msg = f"Acta Nova: nicht geöffnet ({x}) – Aktenzeichen kopiert."
@@ -1544,11 +1602,23 @@ class App:
             row=0, column=0, sticky="w", pady=(0, 8))
         return w
 
+    def _quellen_veraltet(self):
+        """v253: Die Quellenseite bleibt im Hintergrund offen (v47) und wird nur einmal aufgebaut. Nach einer Änderung an
+        den Live-Quellen wird sie verworfen und beim nächsten Öffnen neu aufgebaut."""
+        v = self.views.pop("quellen", None)
+        try:
+            if v is not None and v.winfo_exists(): v.destroy()
+        except Exception: pass
+        if self.view_prev == "quellen": self.view_prev = None
+
     def _url_feld(self, w, row, key, placeholder, nachher):
         mehr = key == "intranet_url"                                      # v216: mehrere Intranets, eine pro Zeile
         if mehr:
             e = ctk.CTkTextbox(w, height=96, font=font(12), border_width=2); e.grid(row=row, column=0, sticky="ew", pady=(4, 0))
-            e.insert("1.0", "\n".join(x for x in re.split(r"[\s,;]+", self.s.get(key) or "") if x) or placeholder)
+            e.insert("1.0", "\n".join(x for x in re.split(r"[\s,;]+", self.s.get(key) or "") if x))   # v253: leer bleibt leer
+            if not (self.s.get(key) or "").strip():                   # (vorher stand die Beispieladresse wie ein gespeicherter Wert im Feld)
+                ctk.CTkLabel(w, text=f"Noch nichts gespeichert. Beispiel: {placeholder}", font=font(10), text_color=MUTED,
+                             anchor="w").grid(row=row + 2, column=0, sticky="w")
         else:
             e = ctk.CTkEntry(w, placeholder_text=placeholder, height=28); e.grid(row=row, column=0, sticky="ew", pady=(4, 0))
             if self.s.get(key): e.insert(0, self.s[key])
@@ -1559,7 +1629,8 @@ class App:
             falsch = [x for x in re.split(r"[\s,;]+", u) if x and not ist_erlaubt(x, q)]   # v216: mehrere Adressen
             if falsch:
                 messagebox.showerror(APP_NAME, f"Nicht freigegeben: {', '.join(falsch)}\n\nErlaubt: " + ", ".join(sorted("https://" + h for _, h, _p in erlaubt(q))), parent=self.root); return
-            self.s = load_settings(); self.s[key] = u; save_settings(self.s); nachher()
+            self.s = load_settings(); self.s[key] = u; save_settings(self.s)
+            self._quellen_veraltet(); nachher()                       # v253: Karte «Live-Quellen» zeigt sonst den alten Stand
         ctk.CTkButton(w, text="Speichern", height=28, corner_radius=0, font=font(11, "bold"), fg_color=ACCENT,
                       hover_color=ACCENT_HI, command=save).grid(row=row + 1, column=0, sticky="w", pady=6)
 
@@ -1633,6 +1704,7 @@ class App:
             if falsch:
                 messagebox.showerror(APP_NAME, "Bitte vollständige Adressen mit https:// eintragen:\n" + "\n".join(falsch[:5]), parent=self.root); return
             self.s = load_settings(); self.s["sharepoint_sites"] = sorted({site_url(x) for x in z}); save_settings(self.s)
+            self._quellen_veraltet()                                  # v253
             self.open_live_sp()
         ctk.CTkButton(w, text="Speichern", height=28, corner_radius=0, font=font(11, "bold"), fg_color=ACCENT,
                       hover_color=ACCENT_HI, command=save).grid(row=3, column=0, sticky="w", pady=6)
@@ -1735,8 +1807,8 @@ class App:
 
     def _show_anhang(self, lst):
         for c in self.anh_box.winfo_children(): c.destroy()
-        if not lst: self.anh_box.grid_remove(); return
-        self.anh_box.grid(row=2, column=0, columnspan=3, sticky="w", padx=(14, 12), pady=(0, 10))   # v226: eigene Zeile
+        if not lst: self.anh_box.pack_forget(); return
+        self.anh_box.pack(side="left", padx=(8, 0))                          # v257: Zeile 2, rechts neben Agent
         names = ", ".join(a["name"] for a in lst)
         b = ctk.CTkButton(self.anh_box, text="▶ Als Präsentation", height=22, corner_radius=0, font=font(11), fg_color=CARD,
                           hover_color=BORDER, text_color=INK, command=self._als_praesentation)                     # v152
@@ -2293,6 +2365,7 @@ class App:
                     vis = visible(self.cur_text) or "(Keine Antwort – Token-Grenze im Denkteil erreicht)"
                     self.cur_lbl.live = False                            # v227: jetzt einmal genau einpassen
                     self.cur_lbl.configure(text=vis); self.cur_lbl._hoehe()
+                    for ms in (1500, 4000): self.cur_lbl.after(ms, self.cur_lbl.mindestens)   # v265: nichts abschneiden
                     if getattr(self, "cur_vor", None): self.cur_vor.destroy(); self.cur_vor = None   # v160: Quellen folgen unten
                     self.sources(self.cur, d[0], vis, d[1] if len(d) > 1 else None)
                     self.last_ans = self.cur; self.cur = None; self._scroll()       # v110

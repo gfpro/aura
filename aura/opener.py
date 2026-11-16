@@ -65,7 +65,8 @@ def _open_ims(ext_id, meta):                                  # v246: PDF per Wi
     f = d / f"IMS_{did}.pdf"; f.write_bytes(daten); os.startfile(str(f))
 
 HANDLERS = {"ims": _open_ims, "onenote": _open_onenote, "outlook_mail": _open_mail, "outlook_calendar": _open_event,
-            "edge_history": _open_web, "folder_docs": _open_doc, "confluence": _open_web}
+            "edge_history": _open_web, "folder_docs": _open_doc, "confluence": _open_web,
+            "jira": _open_web}                                      # v247 (F11)
 
 def open_item(item_id, report):
     """report(text) meldet Erfolg/Fehler an die Oberflaeche (thread-sicher ueber die Event-Queue)."""

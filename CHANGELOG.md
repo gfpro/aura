@@ -4,6 +4,178 @@ Neueste Version zuerst. Versionsnummern entsprechen `VERSION` in `aura/__init__.
 
 ---
 
+## v265 – 16.11.2026 · Antwort im Chat nicht mehr abgeschnitten (Basis: v264)
+
+- `gui.py` (`SelText`): Die letzten Zeilen einer Antwort fehlten teilweise. Ursache: Änderte sich die Breite der Antwortblase, während die Höhe noch schrittweise angepasst wurde (z.B. weil danach die Quellen erscheinen), ging der Breitenwechsel verloren; der Text brach in mehr Zeilen um, die Höhe blieb. Neu wird der Wechsel nachgeholt, und 1,5 s sowie 4 s nach der Antwort prüft AURA die Höhe nochmals aus den Pixeln (nur wachsen).
+- Patch enthält auch die Änderung aus v264 (Excel-Export).
+
+---
+
+## v264 – 16.11.2026 · Acta Nova: Excel-Export funktioniert wieder (Basis: v263)
+
+- `engine/actanova.py` (`exportieren`): Bei mehr als 20 Treffern liest AURA alle Treffer über den Excel-Export. Das Downloadziel wurde mit `Page.setDownloadBehavior` gesetzt; Edge beachtete das nicht und legte die Datei im normalen Download-Ordner ab. AURA fand sie nicht («Export fehlgeschlagen -> nur Seite 1») und nutzte nur die ersten 20 Treffer. Neu `Browser.setDownloadBehavior` (Rückfall auf das alte Verfahren). Das Log nennt den Grund, falls der Export scheitert, sonst die Zeilenzahl.
+
+---
+
+## v263 – 16.11.2026 · Sicherheit Live-Quellen: H5, M3, M4, M6 (Basis: v262)
+
+- `engine/actanova.py` (H5): AURA klickt «OK» nur noch in einem gefundenen Dialogfenster mit dem Brotkrümel-Hinweis. Kein Rückfall auf die ganze Seite, das Wort «Information» ist aus dem Muster entfernt. Fremde Rückfragen im Acta-Nova-Fenster werden nicht mehr bestätigt.
+- `engine/actanova.py` (M3): «Acta Nova wach halten» endet nach `actanova_wach_max_h` Stunden ohne echte Nutzung (Standard 4, 1–12). Danach greift die Leerlauf-Schliessung von Edge wieder.
+- `connectors/jira.py` (M4): «FED-LOGIN» wird nur auf einer HTTPS-Seite unter `*.admin.ch` gelesen und geklickt.
+- `engine/actanova.py`, `engine/actanova_rang.py` (M6): Suchbegriffe und Aktenzeichen stehen nicht mehr im Acta-Nova-Log und in `aura.log`, nur ihre Länge. Zur Fehlersuche: Einstellung `actanova_log_begriffe` = true. Das Log rotiert ab 512 KB (eine ältere Datei `.1`).
+- `tests/test_v263.py`: neu.
+
+---
+
+## v262 – 16.11.2026 · Acta Nova: Treffer wieder gelesen, Diagnose oberes Aktenzeichen; Chat-Leiste mit Titeln (Basis: v261)
+
+- `engine/actanova.py` (`_suchen_einmal`): Seit dem Reiter «Suchabfrage» stand «Maximale Anzahl der Suchergebnisse» auf der Seite; AURA hielt das für die Trefferseite und las sofort – 0 Dokumente bei 347 Treffern. Gewartet wird neu auf «Suchergebnisse (Anzahl: …)».
+- `engine/actanova.py` (`oeffnen`): Das obere Feld «Aktenzeichen» wird über die Beschriftung (label, Vorgänger) gesucht und das Feld im Block «Enthalten in» ausgeschlossen. Schlägt das fehl, schreibt das Log alle sichtbaren Felder mit Beschriftung.
+- `gui.py`: Beide Zeilen unter dem Eingabefeld mit Rahmen und Titel («Live-Quellen», «Funktionen»).
+
+---
+
+## v261 – 16.11.2026 · Acta Nova: Reiter «Suchabfrage» richtig öffnen (Basis: v260)
+
+- `engine/actanova.py` (`_max_treffer`): Der Reiter wurde über seinen Text angeklickt; das löste den Reiterwechsel nicht aus (Log: «Feld nicht sichtbar», 16 s Wartezeit pro Suche, weiterhin 200 Treffer). Neu klickt AURA den Befehls-Link des Reiters (`…_Tab_Command`), ersatzweise den umgebenden Link. Das Log nennt, welcher Weg genommen wurde.
+
+---
+
+## v260 – 16.11.2026 · Chat-Leiste neu geordnet, Diagnose Trefferzahl (Basis: v259)
+
+- `gui.py`: Zeile 1 unter dem Eingabefeld enthält nur noch die Live-Quellen (Acta Nova, Intranet, SharePoint). Zeile 2: «Bezug zur letzten Frage», «Datei anhängen», «Agent» und bei Anhängen «Als Präsentation».
+- `engine/actanova.py` (`_max_treffer`): Das Log zeigt neu den Wert, der nach dem Setzen im Feld «Maximale Anzahl der Suchergebnisse» steht (`max_treffer 1000: ok, Feld=…`).
+
+---
+
+## v259 – 16.11.2026 · Acta Nova: richtiges Aktenzeichen-Feld, bis 1000 Treffer (Basis: v258)
+
+- `engine/actanova.py` (`oeffnen`): Das Aktenzeichen kommt ins obere Feld «Aktenzeichen» (das Dossier selbst), nicht mehr ins Feld unter «Enthalten in». Dieses sucht IN dem Dossier und lieferte deshalb Unterdossiers bzw. mit Titel gar nichts. Erkannt wird das obere Feld daran, dass es vor dem Titelfeld steht; der Titel wird über die feste Feld-ID gesetzt. Bei «keine Suchergebnisse» wartet AURA nicht mehr bis 60 s.
+- `engine/actanova.py` (`_suchen_einmal`): Vor jeder Suche öffnet AURA den Reiter «Suchabfrage» und setzt «Maximale Anzahl der Suchergebnisse» auf 1000 (Acta-Nova-Standard: 200). Einstellung `actanova_max_treffer` (200–5000). Gelingt das nicht, wird mit dem Standard weitergesucht und im Acta-Nova-Log vermerkt.
+
+---
+
+## v258 – 16.11.2026 · Acta-Nova-Quelle öffnet genau das Dossier (Basis: v257)
+
+- `engine/actanova_rang.py`: Acta-Nova-Quellen tragen neben dem Aktenzeichen auch den Titel (`acta:<Aktenzeichen>|<Titel>`). Ältere gespeicherte Chats funktionieren weiter.
+- `engine/actanova.py`, `gui.py`: Beim Klick auf eine Acta-Nova-Quelle sucht AURA nach Aktenzeichen **und** Titel. Vorher nur nach Aktenzeichen; die Suche lieferte dann auch alle Unterdossiers mit gleichem Anfang (z.B. ar-131.1-4/1/2, /1/3), und das erste wurde geöffnet. Findet die Suche mit Titel nichts (z.B. wegen Sonderzeichen), sucht AURA nur nach Aktenzeichen. Geöffnet wird die Zeile mit genau diesem Aktenzeichen.
+
+---
+
+## v257 – 16.11.2026 · Begriffsliste löschbar; Agent auf zweiter Zeile (Basis: v256)
+
+- `anon.py`, `anon_gui.py`: Neuer Knopf «Begriffsliste löschen …» auf der Startseite von «Text anonymisieren» (nur wenn eine Liste besteht), mit Rückfrage. Die Datei wird endgültig gelöscht, ohne Kopie.
+- `gui.py`: Der Agent-Knopf hat die normale Breite und steht auf einer eigenen zweiten Zeile unter den Quellen-Schaltern. Mit Anhang erscheinen «▶ Als Präsentation» und der Anhang rechts daneben auf derselben Zeile.
+- Tests: `tests/test_v256.py` um 1 Test ergänzt.
+
+---
+
+## v256 – 16.11.2026 · Umlaute beim Import; Verlauf vollständig (Basis: v255)
+
+- `anon.py`: Begriffslisten als `.md` werden wie `.txt`/`.csv` gelesen (UTF-8, sonst Windows-1252). Vorher wurden Umlaute aus Dateien in Windows-Kodierung zu «�» («Amb�hl»). Eine einspaltige Liste mit Kopf «Name» übernimmt die Kopfzeile nicht mehr als Begriff.
+- `workflow/nodes.py`: Textdateien (txt, md, csv, json, xml, html, eml) werden in Workflows, Chat-Anhängen und im Dokumentordner ebenfalls mit Rückfall auf Windows-1252 gelesen.
+- `gui.py`: Gespeicherte Chats – Blasenhöhe aus der Pixelhöhe des Texts statt aus der Zeilenzahl (Überschriften und Quellenblöcke sind höher als eine Normalzeile; die letzten Zeilen fehlten). Quellenlinks als Beschriftung statt als Knopf: Knöpfe ausserhalb des sichtbaren Bereichs wurden unter Windows nicht gezeichnet und hinterliessen Lücken.
+- Tests: `tests/test_v256.py` (3 Tests).
+
+---
+
+## v255 – 16.11.2026 · Gespeicherte Chats vollständig und ohne Stocken (Basis: v254)
+
+- `gui.py`: Beim Laden eines gespeicherten Chats wird die Höhe jeder Antwortblase in einem Schritt aus den Anzeigezeilen berechnet. Vorher wuchs bzw. schrumpfte jede Blase zeilenweise (bis 240 Schritte à 40 ms) und mass dabei, ob die letzte Zeile sichtbar ist – für Blasen ausserhalb des sichtbaren Bereichs ging das nicht: Antworten blieben abgeschnitten, und viele Blasen gleichzeitig liessen die Oberfläche stocken. Laufende Antworten im Chat sind davon nicht betroffen.
+- `gui.py`: Beim Laden wird nur einmal am Ende gescrollt statt nach jeder Blase.
+- `gui.py`: Quellen-Labels gespeicherter Chats ohne Zeilenumbrüche (gaben grosse Lücken in der Quellenliste).
+
+---
+
+## v254 – 16.11.2026 · Confluence mit eigener Anmeldung; Verlauf wieder sichtbar (Basis: v253)
+
+- `connectors/confluence.py`: Ohne gespeicherten Token liest AURA `confluence.bit.admin.ch` über die AURA-Edge mit der eigenen Anmeldung (Smartcard/eIAM, wie Jira) statt anonym. Damit erscheinen auch Seiten mit eingeschränktem Zugriff. Anmeldung: Login-Seite öffnen, auf der eIAM-Auswahl einmal «FED-LOGIN» klicken (nur auf Seiten unter `admin.ch`); angemeldet ist AURA erst, wenn Confluence einen bekannten Benutzer meldet. Mit Token wie bisher; nur öffentliche Seiten: Einstellung `confluence_anonym` = true.
+- `gui.py`: Seitenpanels (u.a. «Verlauf») erscheinen ohne Slide-Animation. Unter Windows blieben beim Einblenden Streifen des Panels stehen.
+- `gui.py`: Nach dem Laden eines gespeicherten Chats wird der Chat-Bereich neu berechnet und neu gezeichnet und an den Anfang gescrollt. Vorher blieb die Fläche leer.
+
+Hinweis: Mit eigener Anmeldung sieht AURA mehr Confluence-Seiten. Der erste Abgleich holt entsprechend mehr; die Vektorberechnung dauert danach länger.
+
+---
+
+## v253 – 16.11.2026 · Quellenseite zeigt geänderte Live-Quellen sofort (Basis: v252)
+
+- `gui.py`: Nach dem Speichern von Intranet-Adressen, Acta-Nova-Adresse oder SharePoint-Sites wird die Quellenseite neu aufgebaut. Vorher blieb die Karte auf dem Stand vom ersten Öffnen stehen (z.B. «keine URL eingetragen», obwohl zwei Adressen gespeichert waren), bis AURA neu gestartet wurde.
+- `gui.py`: Ist noch keine Intranet-Adresse gespeichert, bleibt das Eingabefeld leer und zeigt die Beispieladresse als Hinweis darunter. Vorher stand die Beispieladresse wie ein gespeicherter Wert im Feld.
+
+---
+
+## v252 – 16.11.2026 · Sicherung der Einstellungen; Vollprüfung v246, Paket D: Abgleich (Basis: v251)
+
+- **Sicherung der Einstellungen** `config.py`: Bei jedem Start legt AURA die lesbare `settings.json` als `data\settings.sicherung.1.json` ab und behält die letzten drei Stände (`.1` ist der neueste). Nur bei geändertem Inhalt; eine defekte Datei verdrängt keine Sicherung. Wiederherstellen: AURA schliessen, Sicherung nach `settings.json` kopieren.
+- **F14** `rag.py`, `agent.py`: Die Suche kann direkt nach Quelle filtern (`quelle=`). Der Agent nutzt das für Mails; die lange ID-Liste aus v245 entfällt.
+- **F12** `connectors/ims.py`: Scheitert die Abfrage der Prozessschritte (Netz, Zeitüberschreitung, Serverfehler), wird das Dokument ohne Schritte gespeichert und beim nächsten Abgleich ergänzt – ohne das PDF jedes Mal neu zu laden. «HTTP 404» gilt als «hat keine Schritte». Gemischte Schrittnummern (Zahl/Text) führen nicht mehr zum Verlust der Schritte.
+- **F5** `connectors/ims.py`, `connectors/confluence.py`: Ein einzelnes Dokument, das sich nicht laden lässt, blockiert das Aufräumen nicht mehr. Seine bisherige Fassung bleibt erhalten; alle übrigen alten Fassungen werden entfernt.
+- `README.md`: Ordnerrechte als offene Betriebsaufgabe beschrieben; AURA ändert keine Zugriffsrechte.
+- Tests: `tests/test_v252.py` (6 Tests); `tests/test_v245.py` an F14 angepasst.
+
+Nicht in diesem Paket (bewusst zurückgestellt): Zugriffsrechte der Ordner – keine Änderung, bis sich eine IT damit befasst.
+
+---
+
+## v251 – 16.11.2026 · Einstellungen werden nie über eine nicht lesbare Datei geschrieben; Vektor-Hinweis auf eigener Zeile (Basis: v250)
+
+- `config.py`: War `settings.json` in der Sitzung nicht lesbar (fehlende Rechte, defekte Datei), speichert AURA keine Einstellungen mehr und zeigt beim Start einen Hinweis. Hintergrund: Seit v249 wird die Datei über eine temporäre Datei ersetzt; das gelingt auch dann, wenn die Datei selbst nicht lesbar ist. Nach dem Entzug der Ordnerrechte am 16.11.2026 konnte AURA so die echten Einstellungen mit Standardwerten überschreiben (unter anderem die Freigaben der Rollen).
+- `gui.py`: Der Hinweis «Vektoren werden berechnet …» steht wieder auf einer eigenen Zeile unter den Knöpfen; neben den Knöpfen wurde er abgeschnitten.
+- Tests: `tests/test_v251.py` (2 Tests).
+
+---
+
+## v250 – 16.11.2026 · Rechte-Skript entfernt, ZIP-Prüfung unter Windows (Basis: v249)
+
+- **Entfernt:** `tools/datenordner_absichern.py`. Beim Ausführen mit `--setzen` verloren die Dateien in `data\`, `logs\`, `workflows\` und `wissen\` alle Zugriffsrechte; AURA zeigte danach leere Quellen und kein Sprachmodell. Daten gingen nicht verloren. Abhilfe: `icacls C:\aura\data /reset /t /c`, ebenso für die drei anderen Ordner. Die README verweist für die Ordnerrechte jetzt auf die IT (SEC-03/M2 bleibt damit eine Betriebsaufgabe).
+- `aura/sicherheit.py`: ZIP-Einträge mit «\» im Namen werden auch unter Windows abgelehnt. Python wandelt dort «\» beim Lesen still in «/» um; die Prüfung griff deshalb nur unter Linux. Ein Ausbruch aus dem Zielordner war dadurch nicht möglich (der umgewandelte Pfad wurde weiter geprüft), aber Dokumentation und Verhalten stimmten nicht überein.
+- `tests/test_sicherheit.py`: Der Fall «\ im Namen» hat einen eigenen Test mit einem echten ZIP-Eintrag. Erster Testlauf unter Windows (16.11.2026): 105 Tests, davon 18 Meldungen aus genau diesem einen Fall (17 davon Folgefehler), 3 übersprungen (Symlinks ohne Berechtigung); DPAPI-Test bestanden.
+- `_entfernen.txt` im Paket verschiebt das Skript nach `_sicherung\`.
+
+---
+
+## v249 – 16.11.2026 · Vollprüfung v246, Paket B: Updateweg, Skripte, Einstellungen, README (Basis: v248)
+
+- **H4** `tools/patch_einspielen.py`: Versionsprüfung. Ein Paket, das älter ist als die installierte Version, wird abgelehnt, auch wenn es gültig signiert ist (bewusst zurück: `--aelter`). Bei signierten Paketen muss die Version im Manifest zur Version im Paket passen. `models\` ist gesperrt. Vorhandene, abweichende Dateien in `workflows\` und `wissen\` bleiben erhalten (ersetzen: `--vorlagen`); `_entfernen.txt` darf diese Bereiche nicht anfassen. Unbekannte Schalter werden abgelehnt.
+- **H4** `tools/patch_signieren.py`: Das Manifest trägt die Version aus dem Paket (`aura\__init__.py`), nicht mehr die des Signier-Rechners. Ein Paket ohne Versionsangabe wird nicht signiert.
+- **H4** `README.md`: «Variante A» (entzippen und überschreiben) gestrichen. `--ohne-signatur` ist als Weg für Entwicklung und Einzelplatz beschrieben; mit hinterlegtem Schlüssel wirkt der Schalter nicht.
+- **M2** `tools/datenordner_absichern.py` und `tools/confluence_token_setzen.py` werden jetzt ausgeliefert (`.gitignore` schloss sie aus). Das Token-Skript ist neu: Der Token wird unsichtbar abgefragt und nie im Klartext gespeichert. Das Rechte-Skript meldet Fehler jetzt mit Rückgabewert 1.
+- **M9** `config.py`: `settings.json` wird atomar geschrieben. Eine nicht lesbare Datei wird als `settings.defekt.json` gesichert und im Log gemeldet, statt still übergangen.
+- **D1/D2** `README.md`, `sbom.cdx.json`: Stand v249; Tabelle der Netzwerkziele je Quelle; Jira, IMS, Atlassian Cloud, Protokolle und Workflow-Grenzen nachgeführt; SBOM-Version nachgeführt.
+- **D4** `aura/engine/teams.py` wird entfernt (nicht eingebunden; per `_entfernen.txt` nach `_sicherung\` verschoben).
+- Tests: `tests/test_v249.py` (8 Tests).
+
+Offen: Sperre von `--ohne-signatur` über einen Wartungsmodus (sinnvoll erst, wenn ein Schlüssel verteilt wird); CVE-Abgleich der SBOM; doppelte `typing_extensions`.
+
+---
+
+## v248 – 16.11.2026 · Stichwortindex wird nachgeführt, Dokumentordner wird bereinigt (Basis: v247)
+
+- **O1** `db.py`: Der Stichwortindex wird über drei Datenbank-Trigger bei jedem Einfügen, Ändern und Löschen eines Textstücks nachgeführt. Vorher baute AURA ihn nach jedem Abgleich mit einer Änderung komplett neu auf (gemessen rund 10 s je 200'000 Textstücke; der Chat wartete). Beim ersten Start mit v248 wird der Index einmal neu aufgebaut. Stimmt die Zahl der Indexeinträge nicht mit der Zahl der Textstücke überein, repariert AURA den Index beim Start selbst. Es werden keine Daten verändert; der Index lässt sich jederzeit neu erzeugen.
+- Damit erledigt: **F2** (Objekte nach einem abgebrochenen Abgleich in der Stichwortsuche unsichtbar).
+- **O4/F4** `connectors/folder_docs.py`, `worker.py`: Der Dokumentordner wird bereinigt. Alte Fassungen geänderter Dateien und gelöschte Dateien verschwinden aus der Datenbank. Sicherungen: nicht lesbare Dateien behalten ihre bisherige Fassung; fehlt mehr als 30 % der Dateien (z.B. Laufwerk nicht verbunden, Ordner gewechselt), wird nichts gelöscht; ein leerer Ordner löscht nichts.
+- **M1** `README.md`: Wildcard `*.admin.ch` für die Quelle «Intranet» als bewusster Entscheid festgehalten. Edge-Leerlauf auf 5–240 min nachgeführt.
+- Tests: `tests/test_v248.py` (6 Tests).
+
+---
+
+## v247 – 16.11.2026 · Vollprüfung v246, Paket A: Workflow-Sicherheit und Steuerzeichen (Basis: v246)
+
+Bericht: `AURA_Vollpruefung_v246.md`. Befund-Nummern stammen von dort.
+
+- **H1** `workflow/nodes.py`: «Datei schreiben» nimmt nur noch feste Formate (txt, md, html, doc, json, csv). Vorher war jede Endung möglich (`.cmd`, `.hta`) und wurde mit `open` gestartet.
+- **H2** `workflow/engine.py`: Lesefreigabe nur für Dateien, die der Lauf selbst erzeugt hat (Laufordner; Markdown-Bericht im AURA-Ordner). Vorher gab jedes Ergebnisfeld `path` die genannte Datei zum Lesen frei. Die Ergebnisliste zeigt ebenfalls nur noch eigene Dateien.
+- **H3** `llm/bpe_tokenizer.py`, `llm/native.py`, `workflow/llmio.py`: Frage, Quellen und Workflow-Texte können keine Steuerzeichen des Sprachmodells mehr setzen (`<|im_end|>`, `<|im_start|>`, `</s>` …). Solche Zeichenfolgen werden vor dem Kodieren entschärft.
+- **F1** `workflow/nodes.py`, `connectors/folder_docs.py`: eine gemeinsame Ladefunktion für pypdf. Vorher scheiterten PDFs aus Dokumentordner und IMS mit «No module named 'pypdf'», wenn in der Sitzung noch kein anderes PDF gelesen worden war.
+- **F3** `worker.py`: Tagesmarke für IMS und Confluence nur, wenn die Quelle geantwortet hat.
+- **F11** `opener.py`: Jira-Tickets lassen sich öffnen.
+- **F13** `connectors/confluence.py`: Blättern endet, wenn der Server dieselbe Seite wiederholt.
+- Tests: `tests/test_v247.py` (10 Tests) neu, `tests/test_v245.py` (12 Tests) wieder im Paket.
+
+Offen aus Paket A: M5 (Rechte für importierte Workflows) – braucht eine Freigabe in der Oberfläche.
+
+---
+
 ## v246 – 15.11.2026 · IMS: Prozessschritte und Rollen, Dokumente öffnen (Basis: v245)
 
 **Prozessschritte statt Zeichnung**

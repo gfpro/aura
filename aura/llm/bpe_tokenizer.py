@@ -125,6 +125,17 @@ class BPETokenizer:
         for piece in self.split.findall(text):
             out.extend(self._bpe("".join(self.b2u[b] for b in piece.encode("utf-8"))))
 
+    def entschaerfen(self, text):
+        """v247 (H3): Inhalt (Frage, Quellen, Workflow-Text) darf keine Steuerzeichen setzen. Jede Zeichenfolge, die ein
+        Spezialtoken wäre (<|im_end|>, <|im_start|>, </s>, <think> …), bekommt ein Leerzeichen nach dem ersten Zeichen
+        und wird dadurch als gewöhnlicher Text kodiert. Die Chat-Vorlage selbst setzt ihre Steuerzeichen danach."""
+        if not text or self.added_rx is None: return text
+        for _ in range(3):
+            neu = self.added_rx.sub(lambda m: m.group(0)[:1] + " " + m.group(0)[1:], text)
+            if neu == text: break
+            text = neu
+        return text
+
     def encode(self, text, allow_special=True):
         """Text -> IDs. Spezialtokens wie <|im_start|> im Text werden als solche erkannt."""
         out = []

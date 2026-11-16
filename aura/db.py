@@ -1,4 +1,5 @@
-# aura/db.py — eine SQLite-Datenbank fuer alle Quellen. Version 20261012v73
+# aura/db.py — eine SQLite-Datenbank fuer alle Quellen. Version 20261116v248
+# v248: Stichwortindex (chunks_fts) wird über Trigger nachgeführt (fts_einrichten); rebuild_fts baut nur noch bei Bedarf neu auf.
 # v73: chunks.zitat (1 = Stueck aus dem zitierten Mailverlauf), Tabellen para_hash und aura_flags.
 # v60: WAL-Datei auf 64 MB begrenzt (journal_size_limit); «Alles zurücksetzen» löscht die Datenbank beim nächsten Start.
 # items  = ein Objekt pro Mail/Termin/Webseite/Dokument;  chunks = Textstuecke mit Vektor (float32-BLOB)
@@ -31,9 +32,8 @@ def connect(path=None):
     conn.executescript(SCHEMA)
     if "zitat" not in {r[1] for r in conn.execute("PRAGMA table_info(chunks)")}:          # v73
         conn.execute("ALTER TABLE chunks ADD COLUMN zitat INTEGER NOT NULL DEFAULT 0"); conn.commit()
-    fresh = not conn.execute("SELECT 1 FROM sqlite_master WHERE name='chunks_fts'").fetchone()
     conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(text, content='chunks', content_rowid='id')")
-    if fresh: rebuild_fts(conn)
+    fts_einrichten(conn)                                            # v248 (O1): Index wird nachgeführt statt neu aufgebaut
     if not conn.execute("SELECT 1 FROM aura_flags WHERE k='onenote_titeldatum'").fetchone():    # v196: einmalig
         from .text import titel_datum
         for i, t in conn.execute("SELECT id, title FROM items WHERE source='onenote'").fetchall():
@@ -42,8 +42,39 @@ def connect(path=None):
         conn.execute("INSERT INTO aura_flags VALUES('onenote_titeldatum', '1')"); conn.commit()
     return conn
 
-def rebuild_fts(conn):
-    conn.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')"); conn.commit()
+FTS_TRIGGER = """
+CREATE TRIGGER IF NOT EXISTS chunks_fts_ai AFTER INSERT ON chunks BEGIN
+    INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text); END;
+CREATE TRIGGER IF NOT EXISTS chunks_fts_ad AFTER DELETE ON chunks BEGIN
+    INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, old.text); END;
+CREATE TRIGGER IF NOT EXISTS chunks_fts_au AFTER UPDATE OF text ON chunks BEGIN
+    INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
+    INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text); END;
+"""
+
+def fts_stimmt(conn):
+    """Schnelle Kontrolle: gleich viele Einträge im Stichwortindex wie Textstücke."""
+    try:
+        return conn.execute("SELECT COUNT(*) FROM chunks_fts_docsize").fetchone()[0] == \
+               conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+    except sqlite3.Error: return False
+
+def fts_einrichten(conn):
+    """v248 (O1): Der Stichwortindex wird über drei Trigger bei jedem Einfügen, Löschen (auch per CASCADE) und Ändern
+    eines Textstücks nachgeführt. Vorher wurde er nach jedem Abgleich komplett neu aufgebaut (rund 10 s je 200'000
+    Textstücke, der Chat wartete so lange). Einmalig beim ersten Start mit v248 – und immer, wenn die Kontrolle
+    fts_stimmt() nicht aufgeht – wird der Index einmal vollständig neu aufgebaut. Es werden keine Daten verändert:
+    der Index lässt sich jederzeit aus den Textstücken neu erzeugen (rebuild_fts(conn, voll=True))."""
+    neu = conn.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name LIKE 'chunks_fts_a_'").fetchone()[0] < 3
+    conn.executescript(FTS_TRIGGER)
+    if neu or not fts_stimmt(conn): rebuild_fts(conn, voll=True)
+
+def rebuild_fts(conn, voll=False):
+    """v248: ohne voll nur noch speichern – der Index ist durch die Trigger bereits aktuell. voll=True baut ihn neu auf
+    (Reparatur, erste Einrichtung)."""
+    if voll or not fts_stimmt(conn):
+        conn.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')")
+    conn.commit()
 
 def known_ids(conn, source):
     return {r[0] for r in conn.execute("SELECT ext_id FROM items WHERE source=?", (source,))}
