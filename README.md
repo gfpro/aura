@@ -2,7 +2,7 @@
 
 Ein lokales «zweites Gehirn» für Windows: AURA durchsucht deine Outlook-Mails und -Termine, den Edge-Verlauf und Dokumentordner und beantwortet Fragen dazu – vollständig auf dem eigenen Rechner. Dazu kommen eine Workflow-Engine, die Word-Vorlagen aus Unterlagen ausfüllt und grafisch zusammengebaut wird, sowie Präsentationen aus angehängten Dokumenten.
 
-Stand: v265 (November 2026) · Änderungen: [CHANGELOG.md](CHANGELOG.md)
+Stand: v269 (November 2026) · Änderungen: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
@@ -15,12 +15,24 @@ Stand: v265 (November 2026) · Änderungen: [CHANGELOG.md](CHANGELOG.md)
 ## Funktionen
 
 **Fragen stellen**
-- Anschliessen von lokalen Quellen wie Outlook (lokale Mails & Kalender), Edge-Verlauf, Dokumentenordner, Confluence-Seiten mit Leserechten, OneNote (und bald noch mehr...).
+- Anschliessen von lokalen Quellen wie Outlook (lokale Mails & Kalender), Edge-Verlauf, Dokumentenordner, Confluence- und Jira-Seiten mit Leserechten, OneNote (und bald noch mehr...).
 - Suche nach Wörtern und nach Bedeutung (Vektoren), kombiniert.
 - Filter nach Person und Zeitraum aus der Frage heraus («Was schrieb X letzte Woche zum Budget?»).
 - Antworten mit Quellenangaben; ohne Sprachmodell zeigt AURA die besten Fundstellen.
 - Datei anhängen (📎): Fragen zu einem Dokument, das nur für diesen Chat gilt; Chats bleiben 30 Tage im Verlauf.
 - Optional eine **Rolle** wählen (z.B. «Beschaffungsspezialist»), die die Arbeitsweise des Sprachmodells festlegt.
+- **Live-Quellen** (Acta Nova, Intranet, SharePoint) berücksichtigen «geändert am» / «erstellt am»: Neueres wird leicht bevorzugt, bei «neuste/aktuell…» stark. Die Daten gehen ans Sprachmodell, damit Veraltetes nicht als aktuell erscheint.
+- Antworten mit Live-Quellen zeigen Zusammenfassung und Quellen; die Einzelergebnisse je System (Lokal, Acta Nova, Intranet, SharePoint) sind darunter eingeklappt und per Klick zu öffnen.
+
+**Agent & Termine**
+- Der Agent bestimmt den Termin aus dem Auftrag (Name, Thema, «heute/morgen», Wochentag, Datum), statt immer den nächsten zu nehmen.
+- Passen mehrere oder keine Termine, fragt er mit Knöpfen nach; «Ohne Termin recherchieren» sucht nur in den Mails. Einträge wie «Abwesend» oder «Mittag» gelten nicht als Termin.
+
+**Gesprochene Memos**
+- Knopf «📝 Memo» oben neben Button Tag/Nacht: diktieren (bis 10 min), Text prüfen, speichern.
+- Alle Memos eines Tages landen in `JJJJ-MM-TT_Memos.md` (ein Abschnitt je Memo mit Zeit und Thema); AURA liest sie sofort ein.
+- Verwaltung unter «Werkzeuge › Memos»: Tage ansehen, bearbeiten, löschen (Papierkorb `_geloescht`), Ablageort wählen.
+- Spracherkennung mit `whisper-large-v3-turbo` (optional, siehe Installation): erkennt auch Schweizerdeutsch, schreibt Schweizer Schreibweise (ss statt ß), bricht Wiederholungsschleifen ab.
 
 **Präsentationen**
 - Datei anhängen und «▶ Als Präsentation» klicken (oder «Mach daraus eine Präsentation» schreiben): AURA erstellt eine PowerPoint in der Vorlage der Bundesverwaltung, gegliedert nach den Kapiteln des Dokuments.
@@ -64,9 +76,10 @@ Stand: v265 (November 2026) · Änderungen: [CHANGELOG.md](CHANGELOG.md)
    | [Qwen/Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) | Schneller für Chat | `models\Qwen3.5-4B\` |
    | [Qwen/Qwen3.5-9B](https://huggingface.co/Qwen/Qwen3.5-9B) | Besser für Workflow | `models\Qwen3.5-9B\` |
    | [swiss-ai/Apertus-v1.5-8B](https://huggingface.co/swiss-ai/Apertus-v1.5-8B) | Gut für den Chat | `models\Apertus1.5-8B\` |
+   | [openai/whisper-large-v3-turbo](https://huggingface.co/openai/whisper-large-v3-turbo) | Spracherkennung für Memos (optional) | `models\whisper-large-v3-turbo\` |
 
-   Jeder Modellordner braucht `config.json`, `tokenizer.json` und die `*.safetensors`-Dateien.
-6. Doppelklick auf `AURA.pyw`. Beim ersten Start legt AURA Datenbank und Einstellungen an.
+   Jeder Sprachmodellordner braucht `config.json`, `tokenizer.json` und die `*.safetensors`-Dateien. Für Whisper: 5 Dateien, ca. 1,6 GB.
+5. Doppelklick auf `AURA.pyw`. Beim ersten Start legt AURA Datenbank und Einstellungen an.
 
 Ohne Sprachmodell funktioniert AURA ebenfalls und zeigt statt ausformulierter Antworten die besten Fundstellen.
 
@@ -147,7 +160,7 @@ Nur die eingeschalteten Quellen bauen Verbindungen auf. Alle Ziele sind https (P
 |---|---|---|---|
 | Confluence | `confluence.bit.admin.ch`, `bkdev.atlassian.net` | Seiten lesen (eigene Anmeldung in der AURA-Edge, ab v254; mit Token direkt) | `ConfluenceHosts`, `LiveOrigins_confluence` |
 | Jira | `jira.bit.admin.ch` (Anmeldung über eIAM) | Tickets lesen | `LiveOrigins_jira` |
-| IMS | `intranet.ims-ar.vbs.admin.ch` | Dokumente und Prozessschritte lesen | `LiveOrigins_ims` |
+| IMS | `intranet.ims-ar.vbs.admin.ch` | Dokumente und Prozessschritte lesen (keine Vorlagen) | `LiveOrigins_ims` |
 | Acta Nova | `www.vbs.gever.admin.ch` | Suche in der Geschäftsverwaltung | `LiveOrigins_actanova` |
 | Intranet | `intranet.ar.admin.ch`, ohne Richtlinie jeder Host unter `*.admin.ch` | Suche und Seiten lesen | `LiveOrigins_intranet` |
 | SharePoint | `portal.collab.admin.ch` | Suche | `LiveOrigins_sharepoint` |
@@ -188,4 +201,4 @@ Outlook, Kalender und OneNote laufen über die lokal installierten Programme; AU
 
 ## Lizenz
 
-Die Komponenten Dritter sowie die Modelle stehen unter eigenen Lizenzen: Qwen3.5 unter Apache 2.0, multilingual-e5-large unter MIT. AURA ist primär ein Prototyp, der für den Test im BV-Netz gedacht ist.
+Die Komponenten Dritter sowie die Modelle stehen unter eigenen Lizenzen: Qwen3.5 unter Apache 2.0, multilingual-e5-large und whisper-large-v3-turbo unter MIT. AURA ist primär ein Prototyp, der für den Test im BV-Netz gedacht ist.
