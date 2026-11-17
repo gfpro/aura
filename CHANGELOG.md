@@ -4,6 +4,54 @@ Neueste Version zuerst. Versionsnummern entsprechen `VERSION` in `aura/__init__.
 
 ---
 
+
+## v269 – 17.11.2026 · Live-Antwort: Einzelergebnisse im Akkordeon
+
+- Antwortet AURA mit Live-Quellen (Lokal, Acta Nova, Intranet, SharePoint) und einer Zusammenfassung, sieht man am Ende nur noch die **Zusammenfassung über alle Quellen** und die **Quellen**. Darunter steht **«Einzelergebnisse je Quelle»** mit einem eingeklappten Eintrag pro System (▸ Lokal, ▸ Acta Nova, …). Ein Klick klappt die Trefferliste dieser Quelle auf oder zu.
+- Während die Antwort entsteht, bleibt alles sichtbar wie bisher, das Einklappen geschieht erst am Schluss.
+- «Kopieren» und der gespeicherte Verlauf enthalten weiterhin den ganzen Text. Beim Öffnen aus dem Verlauf erscheint dieselbe Ansicht.
+- Aufklappen ohne Zittern: Der Text im Akkordeon misst seine Höhe in einem Schritt (wie gespeicherte Chats) statt zeilenweise, und die Ansicht springt nicht mehr ans Chat-Ende, sondern hält den angeklickten Eintrag sichtbar.
+- Ohne Zusammenfassung (ohne Sprachmodell) bleibt die Anzeige unverändert. Abschalten mit `"live_akkordeon": false` in `data\settings.json`.
+- Geändert: `gui.py` (`_abschnitte`, `_akkordeon`), `config.py`. Neu: `tests/test_v269.py` (läuft nur mit tkinter).
+
+## v268 – 17.11.2026 · Live-Quellen: Aktualität (geändert/erstellt)
+
+- Neu `aura/engine/aktualitaet.py`: gemeinsame Gewichtung für Acta Nova, Intranet und SharePoint. Massgebend ist das Datum «geändert am», fehlt es, «erstellt am».
+- **Immer:** kleiner Bonus für Neueres, er halbiert sich pro Jahr. Vorher gab es das nur bei Acta Nova und nur in Stufen, bei SharePoint und Intranet nur bei «neuste/aktuell…» bzw. gar nicht.
+- **Bei «neuste/aktuellste/zuletzt/letzte …»:** starker Bonus, er halbiert sich alle 90 Tage. Gilt neu auch fürs Intranet.
+- **Acta Nova:** «Geändert am» und «Erstellt am» werden getrennt gelesen. In Liste und Quellen steht «geändert …, erstellt …». Die Quellen fürs Sprachmodell nennen die letzte Änderung im Ablageort, und das Quellendatum (ts) ist gesetzt.
+- **SharePoint:** Abfrage zusätzlich mit `Created`. Der Quellentext nennt geändert und erstellt.
+- **Intranet:** Das Datum aus der Trefferliste wird gelesen, gewichtet und als «Stand der Seite» im Quellentext und als Quellendatum mitgegeben.
+- Damit kann das Sprachmodell bei Live-Quellen erkennen, wie aktuell eine Angabe ist (Regel: Vergangenes nicht als «aktuell» darstellen).
+- Neu: `tests/test_v268.py`. Geändert: `engine/actanova_rang.py`, `engine/sharepoint.py`, `engine/intranet.py`.
+
+## v267 – 17.11.2026 · Agent: richtiger Termin, Rückfrage bei Mehrdeutigkeit (F7)
+
+- Der Agent bestimmt den Termin neu aus dem Auftrag, und zwar per Code (ohne Sprachmodell). Er vergleicht Wörter mit Titel, Teilnehmenden und Ort der Termine der nächsten 30 Tage und erkennt «heute», «morgen», «übermorgen», Wochentage und TT.MM.(JJJJ). Vorher nahm er immer den nächsten Termin.
+- Allgemeiner Auftrag («Bereite meinen nächsten Termin vor») → nächster Termin, ohne Rückfrage. Genau ein passender Termin → dieser. Passen mehrere Termine, zeigt AURA eine **Rückfrage mit Knöpfen** (höchstens 4 Termine), ausser der Auftrag sagt «nächste …». Nennt der Auftrag einen Namen ohne passenden Termin oder ein Datum ohne Termin, zeigt AURA eine Rückfrage mit den nächsten Terminen.
+- Wörter zählen nur als ganzes Wort, ab 5 Zeichen auch als Wortanfang. Pronomen wie «mich», «mir» oder «uns» werden ignoriert. Vorher passte «mich» auf «Michael», und «Bereite mich für den nächsten Termin vor» nahm einen Termin zwei Tage später.
+- Einträge wie «Abwesend», «Mittag», «Ferien» oder «Blocker» gelten nicht als vorzubereitende Termine (ausser es gibt nur solche).
+- Knopf «Ohne Termin recherchieren»: Der Agent sucht dann mit den Stichwörtern aus dem Auftrag in den Mails.
+- Ein im Voraus vorbereiteter Termin wird nur noch verwendet, wenn er dem gewählten Termin entspricht.
+- Neu: `tests/test_v267.py` (9 Tests). Geändert: `agent.py`, `worker.py` (`job_agent_termin`), `gui.py` (Knöpfe der Rückfrage).
+
+## v266 – 17.11.2026 · Gesprochene Memos
+
+- Neuer Knopf **📝 Memo** oben in der Leiste neben Tag/Nacht: klicken, sprechen (bis 10 min), nochmals klicken. Während der Aufnahme zeigt der Knopf rot die Zeit (⏹ 1:23). Danach Titel und Text im Fenster «Memo prüfen» kontrollieren und speichern oder verwerfen. Es wird nie ungeprüft gespeichert.
+- Ablage: alle Memos eines Tages in einer Datei `JJJJ-MM-TT_Memos.md`, je Memo ein Abschnitt `## HH:MM · Thema`. Neue Memos werden angehängt. Ordner standardmässig `Dokumente\AURA-Memos`, anderer Ort: Werkzeuge › Memos › «Ordner wählen …» oder Quellen › Memos › «…».
+- Thema: Ist ein Sprachmodell geladen, schlägt es das Thema in 2–6 Wörtern vor. Sonst gelten die ersten Wörter des Diktats. Das Thema bleibt im Fenster änderbar.
+- Neu **Werkzeuge › Memos**: Liste der Tage (neueste zuerst, mit Anzahl Memos), Inhalt eines Tages frei bearbeiten und speichern, Datei/Ordner öffnen, Tag löschen. Gelöschte Tage kommen nach `_geloescht` (Endung `.geloescht`) und lassen sich von Hand zurückholen.
+- Neue Quelle **Memos**: Nach dem Speichern, Ändern oder Löschen wird der Memo-Ordner sofort abgeglichen und eingebettet, danach bei jedem Auto-Abgleich. Ein Klick auf die Quelle öffnet die Datei.
+- Whisper: `transcribe_lang()` erkennt lange Aufnahmen in Abschnitten bis 30 s und schneidet an der leisesten Stelle der letzten 5 s. Stille Abschnitte werden übersprungen. Spracheingabe und Memo teilen sich die Engine und laufen nie gleichzeitig.
+- Whisper bricht Wiederholungsschleifen ab (gleiche Wortfolge drei- bzw. bei 1–2 Tokens fünfmal hintereinander, z.B. «ich bin zuhause, ich bin zuhause, …»), geprüft auf Tokens und auf dem Text, da Whisper dieselben Wörter nicht immer gleich zerlegt. Die erste Fassung bleibt, geschnitten wird am Satzzeichen. Gilt auch für die Spracheingabe im Chat. Stille wird über die mittlere Lautstärke erkannt und nicht mehr an Whisper gegeben.
+- Fenster «Memo prüfen»: Ablageort auf eigener Zeile, damit «Speichern» bei langen Netzpfaden sichtbar bleibt.
+- Spracherkennungsmodell: AURA nimmt das beste vorhandene aus `models\whisper-large-v3-turbo`, `whisper-small`, `whisper-base`. Ein anderes (z.B. Schweizerdeutsch) über `"stt_modell": "<Ordnername>"` in `data\settings.json`. Die Statuszeile nennt das verwendete Modell.
+- `engine/weights.py`: F16-Gewichte (whisper-large-v3-turbo) werden über `struct` gelesen; vorher Fehler «bad typecode».
+- Schweizer Rechtschreibung: «ß» wird in Memo und Spracheingabe zu «ss» (abschaltbar mit `"stt_eszett": true`).
+- Log: je Memo Modell, Dauer und je Abschnitt Zeitbereich, Lautstärke, erkannte Zeichen und Schleifen-Abbruch – zur Fehlersuche bei langen Aufnahmen.
+- Schweizerdeutsch: mit `whisper-large-v3-turbo` in ersten Tests sauber erkannt (Ausgabe in Hochdeutsch). base/small erkennen Dialekt nicht zuverlässig.
+- Neue Dateien `aura/connectors/memos.py`, `aura/memos_gui.py`, `tests/test_v266.py`. Geändert: `mikrofon.py`, `engine/whisper_dml.py`, `engine/weights.py`, `gui.py`, `worker.py`, `opener.py`, `config.py`, `connectors/__init__.py`.
+
 ## v265 – 16.11.2026 · Antwort im Chat nicht mehr abgeschnitten (Basis: v264)
 
 - `gui.py` (`SelText`): Die letzten Zeilen einer Antwort fehlten teilweise. Ursache: Änderte sich die Breite der Antwortblase, während die Höhe noch schrittweise angepasst wurde (z.B. weil danach die Quellen erscheinen), ging der Breitenwechsel verloren; der Text brach in mehr Zeilen um, die Höhe blieb. Neu wird der Wechsel nachgeholt, und 1,5 s sowie 4 s nach der Antwort prüft AURA die Höhe nochmals aus den Pixeln (nur wachsen).

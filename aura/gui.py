@@ -100,7 +100,8 @@ def secs(v): return f"{v:.0f} s" if v >= 10 else f"{v:.1f} s"
 class SelText(tk.Text):
     """v214: Antworttext markier- und kopierbar (statt CTkLabel), mit einfacher Struktur: «- » -> Aufzaehlung,
     **fett**, Zeilen mit «|» als ausgerichtete Tabelle. API wie Label: configure(text=..., wraplength=...)."""
-    def __init__(self, master, text="", bg="#FFFFFF", fg="#000000", family="Segoe UI", size=14, wraplength=600):
+    def __init__(self, master, text="", bg="#FFFFFF", fg="#000000", family="Segoe UI", size=14, wraplength=600, fest=False):
+        self._fest = fest                                                 # v269: Höhe in einem Schritt (Akkordeon)
         sc = ctk.ScalingTracker.get_widget_scaling(master) or 1.0
         size = -max(9, round(size * sc))                                  # v214b: Pixel wie CTkFont, nicht Punkte
         super().__init__(master, wrap="word", bd=0, highlightthickness=0, relief="flat", padx=0, pady=0, height=1,
@@ -249,6 +250,7 @@ class SelText(tk.Text):
 
     def _h_schritt(self, n, schrumpfen=False):
         """v214h: erst wachsen, bis alles sichtbar ist, dann zeilenweise schrumpfen, solange noch alles sichtbar ist."""
+        if getattr(self, "_fest", False): self._h_lauf = False; return self.hoehe_genau()   # v269: kein Zeilen-Zittern
         try:
             self.yview_moveto(0); h = int(self.cget("height"))
             if not schrumpfen:
@@ -394,6 +396,8 @@ class App:
         hilfe.tip(self._item(b, "Text anonymisieren", self.open_anon, 0), hilfe.TEXTE["haupt"]["Text anonymisieren"])
         hilfe.tip(self._item(b, "Code prüfen", self.open_code, 1),                                         # v142
                   "Projektordner einlesen, Code ohne und mit Sprachmodell prüfen, Vorschläge als Diff übernehmen (mit Sicherung).")
+        hilfe.tip(self._item(b, "Memos", self.open_memos, 3),                                             # v266
+                  "Diktierte Memos ansehen, Titel und Text bearbeiten, löschen. Aufnehmen oben mit «📝 Memo».")
         hilfe.tip(self._item(b, "Skills & Rollen", self.open_skills, 2),                                   # v229: aus Einstellungen
                   "Skills und Rollen ansehen, erstellen, importieren und freigeben. Neues oder Geändertes ist aus, bis du es freigibst.")
 
@@ -919,6 +923,9 @@ class App:
                               hover_color=MUTED, text_color=INK, command=self.pick_folder).pack(side="left", padx=(0, 4))
                 ctk.CTkButton(btns, text="✕", width=26, height=24, corner_radius=0, fg_color=BORDER,      # v37: Ordner entfernen
                               hover_color=MUTED, text_color=INK, command=self.remove_folder).pack(side="left", padx=(0, 4))
+            if c.id == "memos":                                     # v266: Memo-Ordner (Standard Dokumente\AURA-Memos)
+                ctk.CTkButton(btns, text="…", width=26, height=24, corner_radius=0, fg_color=BORDER,
+                              hover_color=MUTED, text_color=INK, command=self.pick_memo_folder).pack(side="left", padx=(0, 4))
             if c.id == "onenote":                                   # v87: Abschnittsauswahl
                 ctk.CTkButton(btns, text="Abschnitte", width=76, height=24, corner_radius=0, font=font(11), fg_color=BORDER,
                               hover_color=MUTED, text_color=INK, command=lambda: self.open_folders("onenote")).pack(side="left", padx=(0, 4))
@@ -1012,9 +1019,14 @@ class App:
         self.b_modus = ctk.CTkButton(hd, text="", width=34, height=30, corner_radius=0, font=font(15), fg_color="transparent",
                                      hover_color=BORDER, text_color=INK, border_width=1, border_color=BORDER,
                                      command=self.toggle_modus)                                      # v217: Tag/Nacht oben
-        self.b_modus.grid(row=0, column=3, padx=(8, 0)); self._modus_symbol()
+        self.b_memo = ctk.CTkButton(hd, text="📝 Memo", height=30, width=96, corner_radius=0, font=font(12), fg_color="transparent",
+                                    hover_color=BORDER, text_color=INK, border_width=1, border_color=BORDER)   # v266
+        self.b_memo.grid(row=0, column=3, padx=(8, 0))
+        hilfe.tip(self.b_memo, "Memo diktieren: klicken, sprechen (bis 10 min), nochmals klicken. Danach Titel und Text prüfen und "
+                               "speichern. Ablage als Datei, AURA liest sie ein. Verwalten unter Werkzeuge › Memos. Alles bleibt lokal.")
+        self.b_modus.grid(row=0, column=4, padx=(8, 0)); self._modus_symbol()
         hilfe.tip(self.b_modus, "Tag/Nacht umschalten")
-        self.m_rolle.grid(row=0, column=4, padx=(8, 0))
+        self.m_rolle.grid(row=0, column=5, padx=(8, 0))
         hilfe.tip(self.m_rolle, "Rolle für die Antworten im Chat (freigegeben unter Einstellungen › Skills & Rollen). Die Regeln von "
                   "AURA – nur Quellen, mit Belegen – gehen immer vor.")
         self.refresh_rolle()
@@ -1042,6 +1054,8 @@ class App:
         self.b_mic.grid(row=0, column=1, padx=(0, 6), pady=10, sticky="se"); self.buttons.append(self.b_mic)
         self.mic = Mikrofon(self); self.b_mic.configure(command=self.mic.toggle)
         hilfe.tip(self.b_mic, "Klicken, sprechen, nochmals klicken (max. 30 s). Der Text erscheint im Eingabefeld. Alles bleibt lokal.")
+        from .mikrofon import Memo                                       # v266: Knopf oben in der Leiste (b_memo)
+        self.memo = Memo(self, self.mic); self.b_memo.configure(command=self.memo.toggle)
         self.follow = False                                              # v67: Bezug zur letzten Frage (einmalig)
         def _zeile(r, titel, pady):                                       # v262: Rahmen + Titel je Zeile
             rahmen = ctk.CTkFrame(bar, fg_color="transparent", border_width=1, border_color=BORDER, corner_radius=0)
@@ -1347,6 +1361,59 @@ class App:
             lb.bind("<Leave>", lambda e, l=lb: l.configure(text_color=INK))
         self._scroll()
 
+    KOPF = re.compile(r"^\s*—\s*(.+?)\s*—\s*$")
+
+    def _abschnitte(self, text):
+        """v269: Antwort mit Live-Quellen -> (Zusammenfassung inkl. Kopfzeile, [(Quelle, Text), …]).
+        Ohne Zusammenfassung oder mit Einstellung «live_akkordeon» = false -> (text, [])."""
+        if not load_settings().get("live_akkordeon", True): return text, []
+        teile, name, buf = [], None, []
+        for z in text.split("\n"):
+            m = self.KOPF.match(z)
+            if m:
+                if name is not None or "".join(buf).strip(): teile.append((name, "\n".join(buf).strip()))
+                name, buf = m.group(1), []
+            else: buf.append(z)
+        teile.append((name, "\n".join(buf).strip()))
+        zf = [t for n, t in teile if n and n.lower().startswith("zusammenfassung")]
+        einzel = [(n, t) for n, t in teile if n and not n.lower().startswith("zusammenfassung") and t]
+        if not zf or not einzel: return text, []
+        return "— Zusammenfassung über alle Quellen —\n" + zf[0], einzel
+
+    def _akkordeon(self, frame, teile):
+        """v269: Einzelergebnisse je Quelle unter den Quellen, eingeklappt; Klick auf den Namen klappt auf/zu."""
+        box = ctk.CTkFrame(frame, fg_color="transparent"); box.pack(fill="x", padx=16, pady=(0, 12))
+        ctk.CTkLabel(box, text="EINZELERGEBNISSE JE QUELLE", font=font(10, "bold"), text_color=MUTED).pack(anchor="w", pady=(2, 2))
+        for name, text in teile:
+            n = sum(1 for z in text.split("\n") if z.strip())
+            inhalt = ctk.CTkFrame(box, fg_color="transparent"); offen = [False]; lbl = [None]
+            b = ctk.CTkButton(box, text=f"▸  {name}", anchor="w", height=26, corner_radius=0, font=font(12, "bold"),
+                              fg_color=CARD, hover_color=BORDER, text_color=INK)
+            def klick(b=b, inhalt=inhalt, offen=offen, lbl=lbl, name=name, text=text):
+                offen[0] = not offen[0]
+                b.configure(text=f"{'▾' if offen[0] else '▸'}  {name}")
+                if offen[0]:
+                    inhalt.pack(fill="x", after=b)
+                    if lbl[0] is None:                                   # einmal erzeugen, Höhe in einem Schritt (fest=True)
+                        lbl[0] = SelText(inhalt, text=f"— {name} —\n{text}", bg=BUBBLE, fg=INK, family=F, size=13, fest=True,
+                                         wraplength=self._wrap() * (ctk.ScalingTracker.get_widget_scaling(self.chat) or 1.0))
+                        lbl[0].pack(pady=(2, 4), anchor="w")             # ohne fill: kein Breiten-Rückkoppeln
+                        lbl[0].hoehe_genau()
+                else: inhalt.pack_forget()
+                self._zeige(b)
+            b.configure(command=klick); b.pack(fill="x", pady=1)
+            hilfe.tip(b, f"{name}: {n} Zeilen – klicken zum Auf-/Zuklappen")
+
+    def _zeige(self, w):
+        """v269: Scrollbereich nachführen und das Element oben sichtbar halten (nicht ans Chat-Ende springen)."""
+        try:
+            self.root.update_idletasks(); cv = self.chat._parent_canvas
+            cv.configure(scrollregion=cv.bbox("all"))
+            gesamt = max(1, self.chat.winfo_height()); y = w.winfo_rooty() - self.chat.winfo_rooty()
+            oben, unten = cv.yview()
+            if not (oben * gesamt <= y <= unten * gesamt - w.winfo_height()): cv.yview_moveto(max(0.0, (y - 20) / gesamt))
+        except Exception: pass
+
     def sources(self, frame, hits, answer, tm=None):
         foot = ctk.CTkFrame(frame, fg_color="transparent"); foot.pack(fill="x", padx=16, pady=(0, 12))
         is_list = bool(tm and tm.get("list"))
@@ -1490,8 +1557,10 @@ class App:
         except Exception as e: self.status.configure(text=f"Chat nicht lesbar: {e}"); return
         self.go_home(); self.close_panel(anim=False)
         for m in msgs:
-            self.bubble(m["frage"], "q", scroll=False); b, _ = self.bubble(m["antwort"], "a", scroll=False)   # v255: einmal am Ende
+            zf, teile = self._abschnitte(m["antwort"])                    # v269
+            self.bubble(m["frage"], "q", scroll=False); b, _ = self.bubble(zf if teile else m["antwort"], "a", scroll=False)   # v255: einmal am Ende
             foot = ctk.CTkFrame(b, fg_color="transparent"); foot.pack(fill="x", padx=16, pady=(0, 10))
+            if teile: self.after_idle(lambda b=b, t=teile: self._akkordeon(b, t))   # v269: nach den Quellen
             ctk.CTkLabel(foot, text=time.strftime("%d.%m.%Y %H:%M", time.localtime(m["t"])) + "  ·  gespeichert",
                          font=font(10), text_color=MUTED).pack(anchor="w")
             for i, q in enumerate(m["quellen"][:6], 1):
@@ -1757,6 +1826,15 @@ class App:
     def pick_folder(self):
         d = filedialog.askdirectory(title="Dokumentordner waehlen", parent=self.root)
         if d: self.s["docs_folder"] = d; save_settings(self.s)
+    def pick_memo_folder(self):
+        """v266: Ablageort der Memos einmalig festlegen. Bisherige Memo-Dateien bleiben, wo sie sind."""
+        from .connectors.memos import ordner
+        d = filedialog.askdirectory(title="Ordner für Memos wählen", initialdir=str(ordner(self.s).parent), parent=self.root)
+        if not d: return
+        self.s["memo_folder"] = d; save_settings(self.s)
+        messagebox.showinfo(APP_NAME, f"Neue Memos werden hier abgelegt:\n{d}\n\nBisherige Memo-Dateien bleiben am alten Ort; "
+                            "zum Mitnehmen bitte selbst verschieben und danach «Sync» drücken.", parent=self.root)
+        self.w.submit("sync", "memos")
     def pick_model(self, label):
         self.s["llm"] = next(m[0] for m in self.models if m[1] == label); save_settings(self.s)
         if self.llm_ready: self.w.submit("unload_llm")          # altes Modell aus dem GPU-Speicher
@@ -1841,6 +1919,17 @@ class App:
         f = getattr(self, "last_ans", None)
         if f is None or not f.winfo_exists(): return
         box = ctk.CTkFrame(f, fg_color="transparent"); box.pack(fill="x", padx=16, pady=(0, 12))
+        if cands and cands[0].get("agent"):                              # v267: Rückfrage des Agenten (Termin wählen)
+            for c in cands:
+                ts = c.get("ts") or ""
+                t = (f"{ts[8:10]}.{ts[5:7]}.  {ts[11:16]}  ·  {c['title'][:70]}" if ts else c["title"])
+                ohne = c["item_id"] == -1
+                ctk.CTkButton(box, text=t, anchor="w", height=28 if not ohne else 26, corner_radius=0, font=font(12 if not ohne else 11),
+                              fg_color=CARD if not ohne else "transparent", hover_color=BORDER, text_color=INK if not ohne else MUTED,
+                              border_width=0 if not ohne else 1, border_color=BORDER,
+                              command=lambda i=c["item_id"]: self._agent_termin(q, backend, i)).pack(fill="x" if not ohne else None,
+                                                                                                    anchor="w", pady=2 if not ohne else (6, 0))
+            self._scroll(); return
         for c in cands:
             t = f"{c['ts'][:10]}  ·  {c['title'][:70]}  ·  {c['author'][:30]}"
             ctk.CTkButton(box, text=t, anchor="w", height=28, corner_radius=0, font=font(12), fg_color=CARD, hover_color=BORDER,
@@ -1849,6 +1938,12 @@ class App:
                       fg_color="transparent", hover_color=BORDER, text_color=MUTED, border_width=1, border_color=BORDER,
                       command=lambda: self._ask_force(q, backend, [])).pack(anchor="w", pady=(6, 0))
         self._scroll()
+
+    def _agent_termin(self, q, backend, termin_id):
+        """v267: Termin aus der Rückfrage des Agenten gewählt."""
+        if self.cur or self.embedding or self.b_ask.cget("state") == "disabled":
+            self.status.configure(text="Bitte warten, bis der laufende Auftrag fertig ist."); return
+        self.w.submit("agent_termin", q, backend, termin_id)
 
     def _ask_force(self, q, backend, items):
         """v110: items = [id] -> genau diese Quelle zuerst; [] -> ohne Rückfrage suchen."""
@@ -2031,6 +2126,11 @@ class App:
         from .code_gui import CodeWindow
         if getattr(self, "codewin", None) and self.codewin.alive(): self.show_view("code"); return
         self.codewin = CodeWindow(self)
+
+    def open_memos(self):                                             # v266
+        from .memos_gui import MemoWindow
+        if getattr(self, "memowin", None) and self.memowin.alive(): self.show_view("memos"); self.memowin.refresh(); return
+        self.memowin = MemoWindow(self)
 
     def _code(self, meth, *a):
         w = getattr(self, "codewin", None)
@@ -2364,10 +2464,12 @@ class App:
                 elif kind == "sources" and self.cur:
                     vis = visible(self.cur_text) or "(Keine Antwort – Token-Grenze im Denkteil erreicht)"
                     self.cur_lbl.live = False                            # v227: jetzt einmal genau einpassen
-                    self.cur_lbl.configure(text=vis); self.cur_lbl._hoehe()
+                    zf, teile = self._abschnitte(vis)                    # v269: Live-Quellen -> nur Zusammenfassung sichtbar
+                    self.cur_lbl.configure(text=zf if teile else vis); self.cur_lbl._hoehe()
                     for ms in (1500, 4000): self.cur_lbl.after(ms, self.cur_lbl.mindestens)   # v265: nichts abschneiden
                     if getattr(self, "cur_vor", None): self.cur_vor.destroy(); self.cur_vor = None   # v160: Quellen folgen unten
                     self.sources(self.cur, d[0], vis, d[1] if len(d) > 1 else None)
+                    if teile: self._akkordeon(self.cur, teile)           # v269: Einzelergebnisse je Quelle, eingeklappt
                     self.last_ans = self.cur; self.cur = None; self._scroll()       # v110
                     self._chat_save(self.cur_q, vis, d[0], d[1] if len(d) > 1 else None)   # v129
                     if getattr(self, "_k_gesendet", False): self._kachel_zurueck()    # v234
@@ -2376,6 +2478,7 @@ class App:
                 elif kind == "code": self._code("on_code", d[0])        # v142
                 elif kind == "anon_absender": self._anon("on_absender", d[0])
                 elif kind == "anhang": self._show_anhang(d[0])           # v97
+                elif kind == "memo_titel": self.memo.titel_vom_modell(d[0])      # v266
                 elif kind == "datei": self._datei_knopf(d[0])             # v152: z.B. erstellte Präsentation
                 elif kind == "rueckfrage": self._rueckfrage(*d)               # v110
                 elif kind == "folders": self._show_folders(*d)

@@ -1,8 +1,9 @@
 # aura/engine/whisper_dml.py — Version 20261104v175  (AURA)
+# v266: transcribe_lang() fuer lange Memos (Abschnitte bis 30 s, Schnitt an leiser Stelle); Abbruch von Wiederholungsschleifen.
 # v176: Encoder in Teil-Listen je Schicht (Windows bricht GPU-Laeufe ueber ca. 2 s ab), Stufe im Fehlertext.
 # Whisper (HF-safetensors) ueber DirectML in FP16, nur mit gemm/add/multiply/mvn/softmax/erf/identity aus dml.py.
 # Faltungen werden als drei gegeneinander versetzte gemm gerechnet; Decoder mit K/V-Cache (feste Kapazitaet CAP).
-import json, math, os, struct, time
+import json, math, os, re, struct, time
 from array import array
 from pathlib import Path
 from . import dml, mel
@@ -10,6 +11,46 @@ from .dml import T as TD, F32, Op, ScaleBias
 from .weights import SafeTensors
 
 def f16(v): return struct.pack(f"<{len(v)}e", *v)
+
+def _schleife(out, mal=3):
+    """v266: Endet die Ausgabe mit derselben Tokenfolge (Länge 1–40), die mindestens `mal`-mal hintereinander steht,
+    liefert die Länge, auf die gekürzt wird (erste Wiederholung bleibt). Sonst 0."""
+    n = len(out)
+    for p in range(1, 41):
+        m = mal if p > 2 else mal + 2                                   # «sehr sehr sehr» ist erlaubt, 5× nicht
+        if p * m > n: continue
+        stueck = out[n - p:]
+        if all(out[n - k * p:n - (k - 1) * p] == stueck for k in range(2, m + 1)):
+            a = n - p
+            while a - p >= 0 and out[a - p:a] == stueck: a -= p             # ganze Wiederholung zurückverfolgen
+            return a + p
+    return 0
+
+
+_SCHLEIFE_RE = None
+
+def text_schleife(text, mal=3):
+    """v266: Wie _schleife, aber auf dem Text (Whisper zerlegt dieselben Wörter nicht immer in dieselben Tokens).
+    Endet der Text mit einem Stück von 6–150 Zeichen, das mindestens `mal`-mal hintereinander steht, -> Länge bis zum
+    Ende der ersten Fassung; sonst -1."""
+    global _SCHLEIFE_RE
+    if _SCHLEIFE_RE is None: _SCHLEIFE_RE = re.compile(r"(.{6,150}?)\1{%d,}$" % (mal - 1), re.S)
+    m = _SCHLEIFE_RE.search(text[-1200:])
+    if not m: return -1
+    return len(text) - len(text[-1200:]) + m.start() + len(m.group(1))
+
+def entschleifen(text):
+    """Schneidet eine Wiederholungsschleife am Textende ab (auch eine angefangene letzte Wiederholung) und endet an
+    einem Satzzeichen der ersten Fassung, damit kein Wort zerteilt bleibt."""
+    for k in range(len(text), max(len(text) - 150, 0), -1):
+        n = text_schleife(text[:k])
+        if n < 0: continue
+        m = _SCHLEIFE_RE.search(text[:k][-1200:]); p = len(m.group(1))
+        cut = text[:n]; j = max(cut.rfind(c) for c in ",.;!?")
+        if j >= n - p: cut = cut[:j + 1]
+        return cut.rstrip(" ,;")
+    return text
+
 
 class Whisper:
     CAP = 224                                                         # max. Tokens je 30-s-Abschnitt
@@ -294,6 +335,9 @@ class Whisper:
                 if v > best and i not in ban: best, tok = v, i
             if tok == self.eot: break
             out.append(tok)
+            n = _schleife(out)                                          # v266: Wiederholungsschleife (Halluzination) abbrechen
+            if n: del out[n:]; self.timing["schleife"] = True; break
+            if len(out) % 4 == 0 and text_schleife(self.decode(out)) >= 0: self.timing["schleife"] = True; break
             if on_token: on_token(self.decode(out))
             lg = self._step(tok, t); t += 1
         t2 = time.perf_counter()
@@ -304,7 +348,37 @@ class Whisper:
         """Nur die ersten 30 s. Rueckgabe: Text; Zeiten in self.timing."""
         t0 = time.perf_counter(); s = mel.read_wav(wav)
         rows, _ = mel.log_mel(s, self.NM); self.timing = {"audio": len(s) / mel.SR, "mel": time.perf_counter() - t0}
-        self.encode(rows); return self.decode(self.generate(on_token))
+        self.encode(rows); return entschleifen(self.decode(self.generate(on_token)))
+
+    def transcribe_lang(self, wav, progress=lambda *a: None, cancelled=lambda: False):
+        """v266 (Memo): beliebig lange Aufnahme in Abschnitten von hoechstens 30 s. Geschnitten wird an der leisesten
+        Stelle in den letzten 5 s eines Abschnitts, damit moeglichst kein Wort zerteilt wird. Rueckgabe: Text."""
+        s = mel.read_wav(wav); SR = mel.SR; n = len(s); self.timing = {"audio": n / SR}
+        teile, a = [], 0
+        while a < n:
+            e = min(a + SR * 30, n)
+            if e < n:                                                   # leiseste 100 ms zwischen 25 und 30 s
+                w = SR // 10; best, cut = None, e
+                for b in range(a + SR * 25, e - w, w // 2):
+                    en = sum(v * v for v in s[b:b + w])
+                    if best is None or en < best: best, cut = en, b + w // 2
+                e = cut
+            teile.append((a, e)); a = e
+        out, info = [], []
+        for k, (a, e) in enumerate(teile):
+            if cancelled(): break
+            progress(f"Abschnitt {k + 1}/{len(teile)}", k, len(teile))
+            stueck = s[a:e]
+            rms = (sum(v * v for v in stueck) / max(len(stueck), 1)) ** 0.5
+            zeile = {"von": round(a / SR, 1), "bis": round(e / SR, 1), "rms": round(rms, 4)}
+            if rms < 0.002: zeile["uebersprungen"] = True; info.append(zeile); continue   # Stille (sonst erfindet Whisper Text)
+            rows, _ = mel.log_mel(stueck, self.NM); self.encode(rows)
+            roh = self.decode(self.generate()).strip(); t = entschleifen(roh)
+            zeile.update(zeichen=len(roh), behalten=len(t), schleife=bool(self.timing.get("schleife")), tokens=self.timing.get("tokens"))
+            self.timing.pop("schleife", None); info.append(zeile)
+            if t: out.append(t)
+        self.timing["abschnitte"] = info                                # v266: fuers Log (mikrofon.Memo)
+        return " ".join(out)
 
     def close(self):
         self.dev.close()

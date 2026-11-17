@@ -68,22 +68,18 @@ def _zeilen(block):
         name = r.get("Name") or r.get("Titel") or ""
         if r.get("Aktenzeichen") and r["Aktenzeichen"] not in name:
             name = f"{name} ({r['Aktenzeichen']})"
-        dat = None
-        for k in ("Geändert am/um", "Geändert am", "Erstellt am/um", "Erstellt am", "Registrierdatum", "Dokumentdatum", "Datum"):
-            v = r.get(k)
-            if v:
-                m = re.search(r"(\d{1,2})\.(\d{1,2})\.(\d{4})", v) or re.search(r"(\d{4})-(\d{2})-(\d{2})", v)
-                if m:
-                    try:
-                        a, b, c = (int(x) for x in m.groups())
-                        dat = datetime(c, b, a) if a <= 31 and c > 1900 else datetime(a, b, c)
-                        break
-                    except ValueError:
-                        pass
+        from .aktualitaet import datum as _d                      # v268: «geändert» und «erstellt» getrennt
+        ge = next((_d(r.get(k)) for k in ("Geändert am/um", "Geändert am", "Letzte Änderung") if _d(r.get(k))), None)
+        er = next((_d(r.get(k)) for k in ("Erstellt am/um", "Erstellt am", "Registrierdatum", "Dokumentdatum", "Datum") if _d(r.get(k))), None)
         out.append({"name": name, "container": r.get("Enthalten in", ""), "ff": r.get("Federführung", ""),
                     "status": r.get("Status") or r.get("Geschäftsobjektstatus", ""), "bem": r.get("Bemerkung", ""),
-                    "datum": dat or _datum(name)})
+                    "datum": ge or er or _datum(name), "geaendert": ge, "erstellt": er})
     return out
+
+
+def _stand(e):
+    from .aktualitaet import stand
+    return stand(e.get("geaendert"), e.get("erstellt"))
 
 
 def _ast(az):
@@ -136,12 +132,8 @@ def ranken(dossiers, dokumente, begriff, sims, eigene_oe="", kontakte=(), chrono
             p += 3 * max(0.0, (max(sims.get(x, 0) for x in osys.eltern(pos)) - s_med) / (s_max - s_med))
         if art == "dokument" and _ast(az) in dossier_aeste: p += 2
         d = e.get("datum") or _datum(e["name"])
-        if d:
-            tage = max(0, (jetzt - d).days)
-            if chrono:   # «neuste/aktuellste»: Datum ist das Hauptkriterium (bis +6, halbiert alle 90 Tage)
-                p += 6 * 0.5 ** (tage / 90)
-            else:
-                p += 1.0 if tage < 365 else 0.5 if tage < 3 * 365 else 0
+        from .aktualitaet import bonus                            # v268: «neuste/aktuellste» bis +6 (90 Tage), sonst bis +1.5 (1 Jahr)
+        p += bonus(d, chrono, 6, 1.5, jetzt)
         m = OE.search(e["ff"])
         if eigene_oe and m and m.group(1)[:4].upper() == eigene_oe[:4].upper(): p += 1
         p += _kontakt_bonus(e["ff"], kontakte)
@@ -189,7 +181,7 @@ def _liste(top):
         if info: z.append(f"   {info}")
         for _, d in g["dokumente"][:2]:
             dn, _ = _titel_az(d["name"])
-            z.append(f"   → {dn}" + (f"  ({d['datum']:%d.%m.%Y})" if d.get("datum") else ""))
+            z.append(f"   → {dn}" + (f"  ({_stand(d)})" if _stand(d) else f"  ({d['datum']:%d.%m.%Y})" if d.get("datum") else ""))
         n_dok = len(g["dokumente"])
         if n_dok > 2: z.append(f"   + {n_dok - 2} weitere Dokumente")
         bloecke.append("\n".join(z))
@@ -297,10 +289,11 @@ def antworten(w, asked, backend_id, prev, ref, t0):
             f"die {len(top)} passendsten von {len(gruppen)} Ablageorten:")
     t_search = time.perf_counter() - t0
     if top and backend_id != "extractive" and s.get("actanova_llm", False):   # Einordnung nur, wenn eingeschaltet
-        hits = [{"title": g["label"], "source": "actanova", "ts": "", "author": "", "item_id": None, "chunk_id": None,
+        hits = [{"title": g["label"], "source": "actanova", "ts": f"{g['neustes']:%Y-%m-%d}" if g.get("neustes") else "",
+                 "author": "", "item_id": None, "chunk_id": None,
                  "location": osys.pfad(g["pos"]) if g["pos"] else "",
                  "text": f"Rang {i}. Ablageort: {g['label']}. Ordnungssystem: {osys.pfad(g['pos']) if g['pos'] else '-'}. "
-                         f"Dokumente: " + "; ".join(d["name"] for _, d in g["dokumente"][:4])}
+                         f"Dokumente: " + "; ".join(d["name"] + (f" ({_stand(d)})" if _stand(d) else "") for _, d in g["dokumente"][:4])}
                 for i, g in enumerate(top, 1)]
         q = (f"{asked}\n(Die Quellen sind eine nach Regeln gewichtete Rangliste von Ablageorten in Acta Nova, nur Titel, "
              f"keine Inhalte. Sage in höchstens 3 Sätzen, wo das Thema hauptsächlich liegt und welchen Ablageort man zuerst "
@@ -321,12 +314,14 @@ def antworten(w, asked, backend_id, prev, ref, t0):
                 f"   {az}  {osys.positionen().get(az, '')}" for az, _ in best)
     w.emit("token", kopf + "\n\n" + liste + ablage + _rueckfrage(gruppen, voll))
     # v228: Text (nur Metadaten) mitgeben, damit die Zusammenfassung über alle Quellen die Ablageorte kennt
-    quellen = [{"title": g["label"], "source": "actanova", "ts": "",
+    quellen = [{"title": g["label"], "source": "actanova", "ts": f"{g['neustes']:%Y-%m-%d}" if g.get("neustes") else "",
                 "item_id": _acta_id(g), "chunk_id": None,                              # v258: mit Titel
                 "location": osys.pfad(g["pos"]) if g["pos"] else "",
                 "text": (f"Ablageort in Acta Nova, Rang {i} von {len(gruppen)} (nach Regeln gewichtet): {g['label']}. "
                          f"Ordnungssystem: {osys.pfad(g['pos']) if g['pos'] else '-'}. Enthaltene Dokumente: "
-                         + ("; ".join(_titel_az(d["name"])[0] for _, d in g["dokumente"][:4]) or "keine")
+                         + ("; ".join(_titel_az(d["name"])[0] + (f" ({_stand(d)})" if _stand(d) else "")
+                                      for _, d in g["dokumente"][:4]) or "keine")
+                         + (f". Letzte Änderung im Ablageort: {g['neustes']:%d.%m.%Y}" if g.get("neustes") else "")
                          + ". (Nur Titel, keine Inhalte.)")} for i, g in enumerate(top, 1)]
     if ablage:
         quellen.insert(0, {"title": "Ablagevorschlag gemäss Ordnungssystem", "source": "actanova", "ts": "", "item_id": "acta:" + best[0][0],

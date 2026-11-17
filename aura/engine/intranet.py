@@ -207,9 +207,14 @@ def antworten(w, asked, backend_id, prev, ref, t0):
         emb = w._embedder()
         qv = _norm(emb.query(asked))
         worte = [x.lower() for x in begriff.split()]
+        from .aktualitaet import datum as _d, bonus               # v268: Datum der Trefferliste (geändert/erstellt) mitgewichten
+        from .actanova_rang import AKTUELL
+        chrono = bool(AKTUELL.search(asked))
         for i, t in enumerate(treffer):
+            t["_datum"] = _d(t.get("datum"))
             t["score"] = _cos(qv, _norm(emb.query(f"{t['titel']}. {t['text']}"))) \
-                + (0.08 if any(x in t["titel"].lower() for x in worte) else 0) + 0.02 * (1 - i / len(treffer))
+                + (0.08 if any(x in t["titel"].lower() for x in worte) else 0) + 0.02 * (1 - i / len(treffer)) \
+                + bonus(t["_datum"], chrono, 0.15, 0.03)
         treffer.sort(key=lambda t: -t["score"])
         t_such = time.perf_counter() - t0
         # 2) beste Seiten parallel laden (je ein Tab), dann lesen; 3) beste Textstellen waehlen
@@ -236,8 +241,10 @@ def antworten(w, asked, backend_id, prev, ref, t0):
         if tab: edge.tab_zu(tab)
     stellen.sort(key=lambda x: -x[0])
     n = min(4, int(s.get("llm_top_k", 4)))                     # kurz halten: Sprachmodell ist der langsamste Teil
-    hits = [{"title": t["titel"] + (f" ({t['netz']})" if len(basen()) > 1 else ""), "source": "intranet", "ts": "", "author": t["datum"], "item_id": t["url"], "chunk_id": None,
-             "location": t["url"], "url": t["url"], "text": st} for _, t, st in stellen[:n]]
+    hits = [{"title": t["titel"] + (f" ({t['netz']})" if len(basen()) > 1 else ""), "source": "intranet",
+             "ts": f"{t['_datum']:%Y-%m-%d}" if t.get("_datum") else "", "author": t["datum"], "item_id": t["url"], "chunk_id": None,
+             "location": t["url"], "url": t["url"],
+             "text": (f"(Stand der Seite: {t['_datum']:%d.%m.%Y}) " if t.get("_datum") else "") + st} for _, t, st in stellen[:n]]
     t_search = time.perf_counter() - t0
     if backend_id != "extractive" and hits:
         q = (f"{asked}\n(Die Quellen sind Textstellen aus dem Intranet armasuisse. Antworte nur daraus und nenne die Seite. "

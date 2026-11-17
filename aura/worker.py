@@ -194,7 +194,7 @@ class Worker(threading.Thread):
         ask = 0
         if cid == "outlook_mail" and getattr(ctx, "complete", False) and not stop():
             removed, ask = self._mail_cleanup(ctx.seen, confirm)
-        if cid in ("confluence", "jira", "ims", "folder_docs") and getattr(ctx, "complete", False) and not stop():   # v78/v230/v248: alte Staende/verschwundene
+        if cid in ("confluence", "jira", "ims", "folder_docs", "memos") and getattr(ctx, "complete", False) and not stop():   # v78/v230/v248: alte Staende/verschwundene
             rows = self.conn.execute("SELECT id, ext_id FROM items WHERE source = ?", (cid,)).fetchall()
             gone = [i for i, e in rows if e not in ctx.seen]
             cur = {e.split("|")[0] for e in ctx.seen}
@@ -414,6 +414,8 @@ class Worker(threading.Thread):
                 and db.flag(self.conn, "confluence_tag") != time.strftime("%Y-%m-%d")): cids.append("confluence")
         if (s.get("ims_auto", True) and self.conn.execute("SELECT 1 FROM items WHERE source='ims' LIMIT 1").fetchone()
                 and db.flag(self.conn, "ims_tag") != time.strftime("%Y-%m-%d")): cids.append("ims")   # v240: IMS einmal pro Tag
+        from .connectors.memos import ordner as _memo_ordner           # v266: Memos bei jedem Lauf (kleiner Ordner)
+        if _memo_ordner(s).is_dir(): cids.append("memos")
         new = 0
         for cid in cids:
             try: new += self.job_sync(cid, auto=True) or 0
@@ -1050,6 +1052,33 @@ class Worker(threading.Thread):
         zeilen += ["", "Stichpunkte sind verdichtet, nicht geprüft – vor dem Weitergeben durchsehen. Gespeichert unter " + str(ziel)]
         fertig("\n".join(zeilen), ziel)
         log.get().info(f"Praesentation: {len(folien)} Folien -> {ziel}")
+
+    def job_agent_termin(self, question, backend_id, termin_id):
+        """v267: Antwort auf die Rückfrage des Agenten – gewählter Termin (oder -1 = ohne Termin)."""
+        from . import agent
+        agent.ausfuehren(self, question, backend_id, int(termin_id))
+
+    def job_memo_titel(self, text, backend_id):
+        """v266: kurzer Titel fürs Memo – nur mit bereits geladenem Sprachmodell, sonst bleibt der Vorschlag der Oberfläche."""
+        cur = getattr(self, "llm", None)
+        if backend_id == "extractive" or not cur or cur[0] != backend_id or not cur[1].loaded(): return
+        from .workflow import llmio
+        system = ("Du formulierst den Titel einer Notiz: das Thema in 2 bis 6 Wörtern, auf Deutsch, ohne Datum, "
+                  "ohne Anführungszeichen, ohne Satzzeichen am Ende. Nur was in der Notiz steht.")
+        try:
+            res, _ = llmio.structured(cur[1], system, "Notiz:\n" + text[:4000], [{"name": "titel", "max_tokens": 24, "verlaengern": False}],
+                                      cancelled=self.cancel.is_set, think_off=self._think_off(backend_id))
+            t = " ".join((res.get("titel") or "").split()).strip(" .«»\"'")
+            if t: self.emit("memo_titel", t[:80])
+        except Exception as e: log.get().warning(f"Memo-Titel: {e}")
+
+    def job_memo_einlesen(self):
+        """v266: Memo-Ordner abgleichen und neue Textstücke gleich einbetten (damit das Memo sofort gefunden wird)."""
+        first = self.conn.execute("SELECT COALESCE(MAX(id), 0) FROM chunks").fetchone()[0]
+        n = self.job_sync("memos") or 0
+        if n:
+            try: self.job_embed(min_chunk=first)
+            except Exception as e: self.progress(f"Memo gespeichert, Vektoren folgen später: {e}")
 
     def job_anhang_leeren(self):
         self.anhang = []; self.emit("anhang", [])

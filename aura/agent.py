@@ -1,4 +1,4 @@
-# AURA Agent (Pilot v217, v238: Quellen kürzen auch in der Notiz, Notizen 3 Tage; v237: Vorbereitung im Voraus; v236: Modellanzeige nach dem Lauf zurück auf «bereit»): Terminvorbereitung. Das Sprachmodell waehlt nur Werkzeug + Suchbegriff,
+# AURA Agent (Pilot v217, v267: Termin aus dem Auftrag bestimmen, Rückfrage bei Mehrdeutigkeit (F7); v238: Quellen kürzen auch in der Notiz, Notizen 3 Tage; v237: Vorbereitung im Voraus; v236: Modellanzeige nach dem Lauf zurück auf «bereit»): Terminvorbereitung. Das Sprachmodell waehlt nur Werkzeug + Suchbegriff,
 # der Code fuehrt aus (nur lesend), begrenzt die Schritte und schreibt jeden Schritt sichtbar in den Chat.
 # Jede Entscheidung wird in logs/agent_protokoll.jsonl festgehalten (v244: nur technisch, Rotation; voll nur per Einstellung).
 import json, time
@@ -74,6 +74,88 @@ def kalender(w, begriff, tage=14):
              "text": f"Ort: {r[3] or '-'}. Teilnehmende: {(r[4] or '-')[:300]}. {(r[5] or '')[:600]}"} for r in rows]
 
 
+# ---- v267 (F7): Termin aus dem Auftrag bestimmen – deterministisch, Rückfrage bei Mehrdeutigkeit
+import re as _re
+_FUELL = set("""bereite bereit vorbereiten vorbereitung vor bitte mach mache meinen meine mein meiner den die das dem der des
+ein eine einen einem zum zur für fuer mit am um im in an auf und oder von bei zu nächsten nächste nächster nächstes naechsten
+naechste naechster termin termine sitzung sitzungen meeting meetings besprechung treffen call anlass agent neu neue neuen was
+wie wer wann wo ist sind gibt es heute morgen übermorgen uebermorgen diese dieser diesen nächstem bevorstehenden anstehenden
+infos info informationen alles zusammen zusammenfassung recherchiere suche finde zeig zeige erstelle schreibe unterlagen
+notiz notizen briefing kurz kurze überblick ueberblick stand dazu mich mir ich uns wir dich dir euch ihr sie ihn ihm
+unser unsere unseren meinem bezüglich bezueglich betreffend""".split())
+_BLOCK = _re.compile(r"^\s*(abwesend|abwesenheit|ferien|urlaub|mittag|mittagessen|lunch|blocker|privat|frei|ooo|out of office)\b", _re.I)
+_TAGE = {"montag": 0, "dienstag": 1, "mittwoch": 2, "donnerstag": 3, "freitag": 4, "samstag": 5, "sonntag": 6}
+
+
+def _woerter(auftrag):
+    return [t for t in _re.findall(r"[\wÄÖÜäöüéèàç][\w\-ÄÖÜäöüéèàç]{2,}", auftrag.lower()) if t not in _FUELL and t not in _TAGE]
+
+
+def _datum(auftrag, jetzt=None):
+    """Datum aus dem Auftrag: heute, morgen, übermorgen, Wochentag (nächster), TT.MM.(JJJJ). Sonst None."""
+    jetzt = jetzt or datetime.now(); a = auftrag.lower()
+    m = _re.search(r"\b(\d{1,2})\.(\d{1,2})\.(\d{2,4})?", a)
+    if m:
+        j = int(m.group(3)) if m.group(3) else jetzt.year
+        if j < 100: j += 2000
+        try: return datetime(j, int(m.group(2)), int(m.group(1))).date()
+        except ValueError: pass
+    if _re.search(r"\b(übermorgen|uebermorgen)\b", a): return (jetzt + timedelta(days=2)).date()
+    if _re.search(r"\bmorgen\b", a): return (jetzt + timedelta(days=1)).date()
+    if _re.search(r"\bheute\b", a): return jetzt.date()
+    for t, n in _TAGE.items():
+        if _re.search(r"\b%s\b" % t, a): return (jetzt + timedelta(days=(n - jetzt.weekday()) % 7 or 7)).date() \
+            if n != jetzt.weekday() else jetzt.date()
+    return None
+
+
+def termin_wahl(w, auftrag, tage=30):
+    """-> (termin, kandidaten, grund). termin gesetzt = eindeutig. Sonst kandidaten (höchstens 4) für die Rückfrage
+    und grund (Text). Allgemeiner Auftrag ohne Stichwort und Datum -> nächster Termin."""
+    alle = kalender_alle(w, tage)
+    if not alle: return None, [], ""
+    tag = _datum(auftrag); woerter = _woerter(auftrag)
+    pool = [t for t in alle if t["ts"][:10] == tag.isoformat()] if tag else alle
+    if tag and not pool:
+        return None, alle[:4], f"Am {tag:%d.%m.%Y} habe ich keinen anstehenden Termin gefunden."
+    echte = [t for t in pool if not _BLOCK.search(t["title"])] or pool     # v267: «Abwesend», «Mittag» o.ä. sind keine Termine
+    if woerter:
+        def passt(x, text):                                     # ganzes Wort; ab 5 Zeichen auch Wortanfang (Präsentation-en)
+            return bool(_re.search(r"\b%s\b" % _re.escape(x), text) or (len(x) >= 5 and _re.search(r"\b%s" % _re.escape(x), text)))
+        def punkte(t):
+            text = f"{t['title']} {t['recipients']} {t['location']}".lower()
+            return sum(1 for x in woerter if passt(x, text))
+        bewertet = [(punkte(t), t) for t in echte]; best = max(p for p, _ in bewertet)
+        treffer = [t for p, t in bewertet if p == best and p > 0]
+        if len(treffer) == 1: return treffer[0], [], ""
+        if treffer:
+            if _re.search(r"n(ä|ae)chst", auftrag.lower()): return treffer[0], [], ""
+            return None, treffer[:4], f"Zu «{' '.join(woerter)}» passen {len(treffer)} Termine. Welchen meinst du?"
+        if _re.search(r"n(ä|ae)chst", auftrag.lower()): return echte[0], [], ""    # «nächster Termin» + Füllwörter
+        return None, echte[:4], f"Zu «{' '.join(woerter)}» habe ich keinen anstehenden Termin gefunden."
+    if len(echte) == 1 or not tag or _re.search(r"n(ä|ae)chst", auftrag.lower()): return echte[0], [], ""
+    return None, echte[:4], f"Am {tag:%d.%m.%Y} hast du {len(echte)} Termine. Welchen meinst du?"
+
+
+def kalender_alle(w, tage=30, limit=40):
+    jetzt = datetime.now(); bis = jetzt + timedelta(days=tage)
+    rows = w.conn.execute("SELECT id, title, ts, location, recipients, body FROM items WHERE source='outlook_calendar' "
+                          "AND ts >= ? AND ts <= ? ORDER BY ts LIMIT ?",
+                          (jetzt.isoformat(sep=" ", timespec="minutes"), bis.isoformat(sep=" ", timespec="minutes"), limit)).fetchall()
+    return [{"item_id": r[0], "chunk_id": None, "source": "outlook_calendar", "title": r[1] or "", "ts": r[2] or "",
+             "location": r[3] or "", "recipients": r[4] or "", "author": "",
+             "text": f"Ort: {r[3] or '-'}. Teilnehmende: {(r[4] or '-')[:300]}. {(r[5] or '')[:600]}"} for r in rows]
+
+
+def termin_von_id(w, item_id):
+    r = w.conn.execute("SELECT id, title, ts, location, recipients, body FROM items WHERE id = ? AND source='outlook_calendar'",
+                       (item_id,)).fetchone()
+    if not r: return None
+    return {"item_id": r[0], "chunk_id": None, "source": "outlook_calendar", "title": r[1] or "", "ts": r[2] or "",
+            "location": r[3] or "", "recipients": r[4] or "", "author": "",
+            "text": f"Ort: {r[3] or '-'}. Teilnehmende: {(r[4] or '-')[:300]}. {(r[5] or '')[:600]}"}
+
+
 def mail(w, begriff):
     if not begriff: return []
     if not w.conn.execute("SELECT 1 FROM items WHERE source='outlook_mail' LIMIT 1").fetchone(): return []
@@ -100,15 +182,28 @@ def _kurz(hits):
                      + ")" for h in hits) or "keine Treffer"
 
 
-def ausfuehren(w, auftrag, backend_id):
-    """v236: danach Modellanzeige zuruecksetzen (sonst bleibt «Agent» stehen)."""
-    try: return _ausfuehren(w, auftrag, backend_id)
+def ausfuehren(w, auftrag, backend_id, termin_id=None):
+    """v236: danach Modellanzeige zuruecksetzen (sonst bleibt «Agent» stehen).
+    v267: termin_id = per Rückfrage gewählter Termin; -1 = ohne Termin recherchieren; None = aus dem Auftrag bestimmen."""
+    try: return _ausfuehren(w, auftrag, backend_id, termin_id)
     finally:
         try: w._llm_state()
         except Exception: pass
 
 
-def _ausfuehren(w, auftrag, backend_id):
+def _rueckfrage(w, auftrag, backend_id, kandidaten, grund, t0):
+    """v267: Rückfrage mit Knöpfen (Ereignis «rueckfrage», Kandidaten mit agent=True)."""
+    w.emit("token", grund + "\n\nBitte wähle den Termin – oder recherchiere ohne Termin.")
+    dt = time.perf_counter() - t0
+    w.emit("sources", [], {"search": dt, "total": dt, "list": True})
+    w.emit("rueckfrage", auftrag, backend_id, [{**k, "agent": True} for k in kandidaten] + [{"agent": True, "item_id": -1,
+           "title": "Ohne Termin recherchieren", "ts": "", "author": ""}])
+    _protokoll({"start": datetime.now().isoformat(timespec="seconds"), "modell": backend_id, "auftrag": auftrag,
+                "schritte": [{"n": 0, "werkzeug": "rueckfrage", "treffer": len(kandidaten)}]})
+    w.progress("Agent: Rückfrage – bitte Termin wählen")
+
+
+def _ausfuehren(w, auftrag, backend_id, termin_id=None):
     from .workflow import llmio
     t0 = time.perf_counter()
     w.emit("answer_start", auftrag, "agent", "")
@@ -120,7 +215,13 @@ def _ausfuehren(w, auftrag, backend_id):
     belege, gemacht, verlauf = [], set(), []
     lauf = {"start": datetime.now().isoformat(timespec="seconds"), "modell": backend_id, "auftrag": auftrag, "schritte": []}
     start = []                                                   # v221: feste Startschritte durch den Code (Engine)
-    tm = kalender(w, "")
+    if termin_id == -1: tm = []                                  # v267: bewusst ohne Termin
+    elif termin_id is not None:
+        t = termin_von_id(w, termin_id); tm = [t] if t else []
+    else:                                                        # v267 (F7): Termin aus dem Auftrag, sonst nachfragen
+        t, kand, grund = termin_wahl(w, auftrag)
+        if t is None and kand: return _rueckfrage(w, auftrag, backend_id, kand, grund, t0)
+        tm = [t] if t else []
     c = _vb_laden(tm[0]) if tm and "neu" not in auftrag.lower().split() else None   # v237: im Voraus vorbereitet
     if c and c.get("text"):
         w.emit("token", f"🗂 Im Voraus vorbereitet um {c['erstellt']} – für eine neue Fassung «neu» in den Auftrag schreiben.\n"
@@ -128,6 +229,8 @@ def _ausfuehren(w, auftrag, backend_id):
         w.emit("sources", c.get("quellen") or [], {"search": time.perf_counter() - t0, "total": time.perf_counter() - t0}); return
     if tm:
         start = [("kalender", "", tm[:1]), ("mail", tm[0]["title"], None)]
+    elif termin_id == -1 and _woerter(auftrag):                  # v267: ohne Termin -> mit Stichwörtern aus dem Auftrag starten
+        start = [("mail", " ".join(_woerter(auftrag)[:4]), None)]
     for wz, bg, hits in start:
         n0 = len(lauf["schritte"]) + 1
         w.emit("token", f"🔎 Schritt {n0}: {wz} «{bg or 'nächster Termin'}»\n")
@@ -167,7 +270,7 @@ def _ausfuehren(w, auftrag, backend_id):
         w.emit("token", "\nKeine Informationen gefunden."); w.emit("sources", [], {"search": lauf["such_s"], "total": lauf["such_s"]}); _protokoll(lauf); return
     w.emit("token", "\n— Vorbereitungsnotiz —\n")
     termine = [b for b in belege if b.get("source") == "outlook_calendar"]            # v219: konkretes Ziel statt «vorbereiten»
-    ziel = termine[0] if termine else None
+    ziel = tm[0] if tm else (termine[0] if termine and termin_id != -1 else None)     # v267: gewählter Termin geht vor
     if ziel: w.emit("token", f"Termin: {ziel['title']} ({ziel['ts'][:16]})\n")
     try: mit_text = _notiz(be, ziel, belege, auftrag, lambda t: w.emit("token", t), w.cancel.is_set)
     except Exception as e: mit_text = belege[:8]; w.emit("token", f"Fehler bei der Notiz: {e}")

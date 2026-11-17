@@ -10,7 +10,7 @@ from . import edge
 
 STANDARD = "https://portal.collab.admin.ch"
 MAX_TREFFER = 40
-SEL = "Title,Path,Author,LastModifiedTime,FileType,HitHighlightedSummary,SiteTitle,SPSiteURL,SiteName"
+SEL = "Title,Path,Author,LastModifiedTime,Created,FileType,HitHighlightedSummary,SiteTitle,SPSiteURL,SiteName"
 
 JS_SUCHE = r"""(async (basis, q, n, sel) => {
   const u = basis + "/_api/search/query?querytext='" + encodeURIComponent(q.replace(/'/g, "''")) + "'&rowlimit=" + n
@@ -105,6 +105,11 @@ def amt(row):
     return (row.get("SiteTitle") or "").strip() or urlparse(row.get("Path") or "").netloc
 
 
+def _stand(g, e):
+    from .aktualitaet import stand
+    return stand(g, e)
+
+
 def _datum(v):
     try:
         return datetime.fromisoformat((v or "")[:19])
@@ -190,14 +195,17 @@ def antworten(w, asked, backend_id, prev, ref, t0):
         if qv:
             p += 2 * sum(a * b for a, b in zip(qv, _norm(emb.query(f"{row.get('Title')}. {row['_auszug']}"))))
         if any((row.get("Path") or "").lower().startswith(e) for e in eigene): p += 0.8
-        if chrono and row["_datum"]: p += 2 * 0.5 ** (max(0, (jetzt - row["_datum"]).days) / 90)
+        row["_erstellt"] = _datum(row.get("Created"))                  # v268
+        from .aktualitaet import bonus                               # v268: Aktualität immer (mild), bei «neuste …» stark
+        p += bonus(row["_datum"] or row["_erstellt"], chrono, 2, 0.4, jetzt)
         row["_score"] = p
     rows.sort(key=lambda x: -x["_score"])
     _diag(f"suche={t_such:.1f}s treffer={total} gelesen={len(rows)} gewichtet={time.perf_counter() - t1 - t_such:.1f}s")
     top = rows[:8]
     hits = [{"title": f"{x.get('Title')} ({x['_amt']})", "source": "sharepoint", "ts": (x.get("LastModifiedTime") or "")[:10],
              "author": x["_amt"], "item_id": x.get("Path"), "chunk_id": None, "location": x.get("Path"),
-             "text": f"{x.get('Title')} – {x.get('SiteTitle') or ''} – Amt {x['_amt']}: {x['_auszug']}"} for x in top]
+             "text": f"{x.get('Title')} – {x.get('SiteTitle') or ''} – Amt {x['_amt']}"
+                     + (f" – {_stand(x['_datum'], x['_erstellt'])}" if x["_datum"] or x["_erstellt"] else "") + f": {x['_auszug']}"} for x in top]
     t_search = time.perf_counter() - t0
     if backend_id != "extractive":
         q = (f"{asked}\n(Die Quellen sind Suchtreffer aus SharePoint mit Auszügen; nenne bei jeder Aussage das Amt. "

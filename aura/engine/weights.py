@@ -1,4 +1,5 @@
 # engine/weights.py — Version 20261005v01  (AURA)
+# v266: F16-Tensoren (z.B. whisper-large-v3-turbo) ueber struct statt array('e').
 # Schritt 2: Gewichte von multilingual-e5-large laden (reines Python, mmap, keine Kopie in den RAM)
 # und die Embedding-Schicht auf der CPU rechnen. Test:  py engine\weights.py
 
@@ -30,8 +31,10 @@ class SafeTensors:
         code, size = _DT[self.dtype(k)]
         mv = self.raw(k)
         end = len(mv) // size if count is None else start + count
+        if code == "e":                                                 # v266: array kennt kein Halbformat -> struct
+            return array("f", struct.unpack(f"<{end - start}e", mv[start * size: end * size]))
         arr = array(code); arr.frombytes(mv[start * size: end * size])
-        return arr if code == "f" else array("f", arr)
+        return arr
 
 def expected(cfg):
     L, H, I = cfg["num_hidden_layers"], cfg["hidden_size"], cfg["intermediate_size"]

@@ -14,6 +14,9 @@ DEFAULTS = {
     "edge_days": 90,                         # Edge-Verlauf: wie weit zurueck
     "calendar_past_days": 365, "calendar_future_days": 180,
     "docs_folder": "",                       # Dokumentordner fuer den Datei-Connector
+    "live_akkordeon": True,                  # v269: Live-Antwort -> Einzelergebnisse je Quelle eingeklappt
+    "stt_modell": "",                        # v266: Whisper-Ordner unter models\ (leer = bestes vorhandenes)
+    "memo_folder": "",                       # v266: Ordner fuer Memos (leer = Dokumente\AURA-Memos)
     "llm_top_k": 4,                          # Quellen fuer das Sprachmodell (mehr = langsamer)
     "antwort_stufe": "Kurz",                 # v163: Kurz | Normal | Ausführlich
     "llm_max_new": 250,                      # maximale Antwortlaenge in Tokens
