@@ -5,7 +5,7 @@ Ein lokales «zweites Gehirn» für Windows: AURA durchsucht deine Outlook-Mails
 <img width="2156" height="1066" alt="image" src="https://github.com/user-attachments/assets/79def2ee-81e2-4770-bcbd-ee82e76b2d6a" />
 
 
-Stand: v269 (November 2026) · Änderungen: [CHANGELOG.md](CHANGELOG.md)
+Stand: v280 (November 2026) · Änderungen: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
