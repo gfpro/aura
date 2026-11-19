@@ -1,4 +1,6 @@
-# aura/workflow_canvas.py — Leinwand im Reiter «Bauen»: Workflow als Bild bauen. Version 20261031v152
+# aura/workflow_canvas.py — Leinwand im Reiter «Bauen»: Workflow als Bild bauen. Version 20261118v280
+# (v280: Palette einklappbar, Fehler v279 behoben – Palette fehlte)
+# (v277: Knoten mit runden Ecken, Gruppenfarbe als Strich)
 # (v152: Klick auf einen Pfeil → «Verbindung löschen»)
 # (v150: Verbinden – vom Anschluss ● rechts am Knoten auf einen anderen Knoten ziehen, Wert und Feld wählen; Schrift in Pixeln)
 # (v149: Klick auf «▶ Start» = Eingaben und Zeitplan rechts; Knöpfe Wissen / Vorlage & Feldplan / Prüfpunkte am passenden Knoten)
@@ -25,12 +27,31 @@ STATUS = {"ok": ("#10B981", "Letzter Lauf: ok"), "fehler": ("#E5484D", "Letzter 
 def _kuerzen(t, n): return t if len(t) <= n else t[:n - 1] + "…"
 
 
+def _rrect(c, x0, y0, x1, y1, r, **kw):
+    """v277: Rechteck mit runden Ecken (Polygon mit Glättung) – skaliert beim Zoom wie die übrigen Elemente."""
+    r = max(0, min(r, (x1 - x0) / 2, (y1 - y0) / 2))
+    pts = (x0 + r, y0, x1 - r, y0, x1, y0, x1, y0 + r, x1, y1 - r, x1, y1, x1 - r, y1, x0 + r, y1, x0, y1, x0, y1 - r, x0, y0 + r, x0, y0)
+    return c.create_polygon(*pts, smooth=True, splinesteps=12, **kw)
+
+
 class Leinwand:
+    _alle = None                                                          # v279: offene Leinwände (für Tag/Nacht-Wechsel)
+    palette_offen = True                                                  # v280: Bausteine ein-/ausgeklappt (bleibt pro Sitzung)
+
+    @classmethod
+    def neu_einfaerben(cls):
+        for lw in list(cls._alle or ()):
+            try:
+                if lw.c.winfo_exists(): lw.c.configure(bg=lw._f(lw.G.BUBBLE)); lw.zeichnen()
+            except Exception: pass
     gewaehlt = None                                    # bleibt über das Neuzeichnen nach dem Speichern erhalten
     z = 1.0                                            # v148: Zoom, bleibt ebenfalls erhalten
 
     def __init__(self, editor, parent):
         self.ed, self.G = editor, editor.G
+        import weakref
+        if Leinwand._alle is None: Leinwand._alle = weakref.WeakSet()
+        Leinwand._alle.add(self)
         G = self.G
         parent.grid_columnconfigure(1, weight=1); parent.grid_rowconfigure(0, weight=1)
         self._palette(parent)
@@ -42,7 +63,7 @@ class Leinwand:
         sy = ctk.CTkScrollbar(mitte, command=self.c.yview); sy.grid(row=0, column=1, sticky="ns")
         sx = ctk.CTkScrollbar(mitte, orientation="horizontal", command=self.c.xview); sx.grid(row=1, column=0, sticky="ew")
         self.c.configure(yscrollcommand=sy.set, xscrollcommand=sx.set)
-        self.detail = ctk.CTkFrame(parent, fg_color=G.BUBBLE, corner_radius=8, width=270, border_width=1, border_color=G.BORDER)
+        self.detail = ctk.CTkFrame(parent, fg_color=G.BUBBLE, corner_radius=8, width=240, border_width=1, border_color=G.BORDER)
         self.detail.grid(row=0, column=2, sticky="nsew"); self.detail.grid_propagate(False)
         self.c.bind("<ButtonPress-1>", self._press); self.c.bind("<Double-Button-1>", self._doppel)
         self.c.bind("<B1-Motion>", self._ziehen); self.c.bind("<ButtonRelease-1>", self._los)        # v150: Verbinden
@@ -87,22 +108,43 @@ class Leinwand:
     # ------------------------------------------------------------------ Palette
     def _palette(self, parent):
         G = self.G
-        p = ctk.CTkScrollableFrame(parent, fg_color="transparent", width=170); p.grid(row=0, column=0, sticky="ns")
-        ctk.CTkLabel(p, text="BAUSTEINE", font=G.font(10, "bold"), text_color=G.MUTED).pack(anchor="w", pady=(0, 2))
+        # v280: Palette einklappbar – eingeklappt bleibt nur ein schmaler Knopf «+» (Bausteine einblenden)
+        zu = ctk.CTkButton(parent, text="\uE710", width=30, height=30, corner_radius=8, fg_color=G.CARD, hover_color=G.BORDER,
+                           text_color=G.INK, font=ctk.CTkFont(family="Segoe MDL2 Assets", size=13),
+                           command=lambda: self._palette_zeigen(True))
+        p = ctk.CTkScrollableFrame(parent, fg_color=G.CARD, width=150, corner_radius=8)   # v279: feste Farbe (Tag/Nacht), schmaler
+        self._pal, self._pal_zu = p, zu
+        kopf = ctk.CTkFrame(p, fg_color="transparent"); kopf.pack(fill="x", pady=(0, 2))
+        ctk.CTkLabel(kopf, text="BAUSTEINE", font=G.font(10, "bold"), text_color=G.MUTED).pack(side="left")
+        ctk.CTkButton(kopf, text="\uE76B", width=24, height=22, corner_radius=6, fg_color="transparent", hover_color=G.BORDER,
+                      text_color=G.MUTED, font=ctk.CTkFont(family="Segoe MDL2 Assets", size=11),
+                      command=lambda: self._palette_zeigen(False)).pack(side="right")
+        self._palette_zeigen(Leinwand.palette_offen)
+        try:
+            from . import hilfe
+            hilfe.tip(zu, "Bausteine einblenden")
+        except Exception: pass
         ctk.CTkLabel(p, text="Klick = neuer Schritt hinter dem gewählten", font=G.font(10), text_color=G.MUTED,
-                     wraplength=160, justify="left").pack(anchor="w", pady=(0, 6))
+                     wraplength=140, justify="left").pack(anchor="w", pady=(0, 6))
         for g in S.GRUPPEN:
             ctk.CTkLabel(p, text=g.upper(), font=G.font(10, "bold"), text_color=BAHNFARBE.get(g, G.MUTED)).pack(anchor="w", pady=(6, 2))
             for typ, m in S.BAUSTEINE.items():
                 if m.get("gruppe") != g: continue
                 b = ctk.CTkButton(p, text=m["titel"], anchor="w", height=26, corner_radius=6, font=G.font(11), fg_color=G.CARD,
-                                  hover_color=G.BORDER, text_color=G.INK, border_width=0,
+                                  bg_color=G.CARD, hover_color=G.BORDER, text_color=G.INK, border_width=0,
                                   command=lambda t=typ: self._neu(t))
                 b.pack(fill="x", pady=1)
                 try:
                     from . import hilfe
                     hilfe.tip(b, m.get("beschreibung", ""))
                 except Exception: pass
+
+    def _palette_zeigen(self, offen):
+        Leinwand.palette_offen = bool(offen)
+        try:
+            if offen: self._pal_zu.grid_remove(); self._pal.grid(row=0, column=0, sticky="ns")
+            else: self._pal.grid_remove(); self._pal_zu.grid(row=0, column=0, sticky="n", pady=2)
+        except Exception: pass
 
     def _neu(self, typ):
         i = self._index(Leinwand.gewaehlt)
@@ -169,9 +211,9 @@ class Leinwand:
         G, c = self.G, self.c; x, y = self._xy(nd["spalte"], nd["zeile"]); tag = f"n:{nd['id']}"
         sel = nd["id"] == Leinwand.gewaehlt; rot = bool(nd["probleme"]) or nd["unbekannt"]
         rand = "#E5484D" if rot else ("#6E56F8" if sel else self._f(G.BORDER))
-        c.create_rectangle(x + 3, y + 3, x + KW + 3, y + KH + 3, fill=self._f(G.BORDER), outline="", tags=(tag,))   # Schatten
-        c.create_rectangle(x, y, x + KW, y + KH, fill=self._f(G.BUBBLE), outline=rand, width=2 if (sel or rot) else 1, tags=(tag,))
-        c.create_rectangle(x, y, x + 6, y + KH, fill=BAHNFARBE.get(nd["gruppe"], "#6E56F8"), outline="", tags=(tag,))
+        _rrect(c, x + 3, y + 3, x + KW + 3, y + KH + 3, 12, fill=self._f(G.BORDER), outline="", tags=(tag,))   # Schatten
+        _rrect(c, x, y, x + KW, y + KH, 12, fill=self._f(G.BUBBLE), outline=rand, width=2 if (sel or rot) else 1, tags=(tag,))
+        _rrect(c, x + 5, y + 10, x + 9, y + KH - 10, 2, fill=BAHNFARBE.get(nd["gruppe"], "#6E56F8"), outline="", tags=(tag,))  # v277: Gruppenfarbe als Strich
         c.create_text(x + 14, y + 10, text=_kuerzen(f"{nd['index'] + 1}  {nd['titel']}", 23), anchor="nw", fill=self._f(G.INK),
                       font=self._fo(10, True), tags=(tag,))
         c.create_text(x + 14, y + 29, text=_kuerzen(f"{nd['baustein']} · {nd['id']}", 30), anchor="nw", fill=self._f(G.MUTED),
@@ -228,8 +270,8 @@ class Leinwand:
         bb2 = ctk.CTkFrame(d, fg_color="transparent"); bb2.pack(anchor="w", padx=10)
         self.ed._mini(bb2, "◀ früher", lambda: self.ed._move(i, -1)).pack(side="left", padx=2)
         self.ed._mini(bb2, "später ▶", lambda: self.ed._move(i, 1)).pack(side="left", padx=2)
-        ress = {"rag": ("Wissen", "📚 Wissen dieses Workflows …"), "word_vorlage": ("Vorlage", "📄 Vorlage & Feldplan …"),
-                "pruefliste": ("Prüfliste", "✓ Prüfpunkte …")}.get(nd["typ"])          # v149: Hilfsmittel am passenden Knoten
+        ress = {"rag": ("Wissen", "Wissen dieses Workflows …"), "word_vorlage": ("Vorlage", "Vorlage & Feldplan …"),
+                "pruefliste": ("Prüfliste", "Prüfpunkte …")}.get(nd["typ"])          # v149: Hilfsmittel am passenden Knoten
         if ress and hasattr(self.ed.ww, "ressource"):
             ctk.CTkButton(d, text=ress[1], height=28, fg_color=G.CARD, hover_color=G.BORDER, text_color=G.INK, font=G.font(11),
                           command=lambda: self.ed.ww.ressource(ress[0])).pack(anchor="w", padx=12, pady=(10, 0))

@@ -132,22 +132,22 @@ class Memo:
             mci("set aura_memo bitspersample 16 channels 1 samplespersec 16000 alignment 2 bytespersec 32000")
             mci("record aura_memo")
         except OSError as e: self.say(f"Memo: {e}"); return
-        self.rec = True; self.t0 = time.time(); self.b.configure(text="⏹ 0:00", fg_color=FARBE_AUF, text_color="#FFFFFF"); self._tick()
+        self.rec = True; self.t0 = time.time(); self.b.configure(text="● 0:00", fg_color=FARBE_AUF, text_color="#FFFFFF"); self._tick()
 
     def _tick(self):
         if not self.rec: return
         s = time.time() - self.t0
         if s >= MEMO_MAX_S: self.stop(); return
-        self.b.configure(text=f"⏹ {int(s) // 60}:{int(s) % 60:02d}")
-        self.say(f"📝 Memo-Aufnahme … {int(s) // 60}:{int(s) % 60:02d} von {MEMO_MAX_S // 60}:00. Nochmals klicken zum Beenden.")
+        self.b.configure(text=f"● {int(s) // 60}:{int(s) % 60:02d}")
+        self.say(f"Memo-Aufnahme … {int(s) // 60}:{int(s) % 60:02d} von {MEMO_MAX_S // 60}:00. Nochmals klicken zum Beenden.")
         self.b.after(500, self._tick)
 
     def stop(self):
-        self.rec = False; self.b.configure(text="📝 Memo", fg_color=self.farbe, text_color=self.ink)
+        self.rec = False; self.b.configure(text="Memo", fg_color=self.farbe, text_color=self.ink)
         d = DATA / "stt"; d.mkdir(exist_ok=True); wav = d / "memo.wav"
         try: mci("stop aura_memo"); mci(f'save aura_memo "{wav}"'); mci("close aura_memo")
         except OSError as e: self.say(f"Memo: {e}"); return
-        self.busy = True; self.res = None; self.b.configure(text="⏳ Memo"); self.status = "Memo wird erkannt …"
+        self.busy = True; self.res = None; self.b.configure(text="Memo …"); self.status = "Memo wird erkannt …"
         threading.Thread(target=self._job, args=(wav,), daemon=True).start(); self.b.after(200, self._poll)
 
     def _job(self, wav):
@@ -178,7 +178,7 @@ class Memo:
 
     def _poll(self):
         if self.res is None: self.say(self.status); self.b.after(300, self._poll); return
-        text, s, err = self.res; self.busy = False; self.b.configure(text="📝 Memo")
+        text, s, err = self.res; self.busy = False; self.b.configure(text="Memo")
         if err: self.say(f"Memo fehlgeschlagen: {err}"); return
         if not text: self.say("Memo: es wurde nichts erkannt."); return
         self.say(f"Memo erkannt mit {modell().name} ({s:.0f} s). Bitte prüfen und speichern.")

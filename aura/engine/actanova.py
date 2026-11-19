@@ -109,7 +109,7 @@ def _max_treffer(tab, n):
         wie = _js(tab, JS_REITER_SA)                                  # v261: Reiter über seinen Befehls-Link, nicht über den Text
         if not wie: _log("max_treffer: Reiter «Suchabfrage» nicht gefunden"); return False
         _log(f"max_treffer: Reiter geklickt ({wie})")
-        if not _warten(tab, "[...AN.docs()].some(d => /Maximale Anzahl/.test(d.body ? d.body.innerText : ''))", 15):
+        if not _warten(tab, "[...AN.docs()].some(d => /Maximale Anzahl/.test(d.body ? d.body.innerText : ''))", 5):   # v289: 5 statt 15 s
             _log("max_treffer: Feld nicht sichtbar"); return False
         wert = _js(tab, f"return ({JS_MAX})({int(n)});"); ok = bool(wert)
         _log(f"max_treffer {n}: {'ok, Feld=' + str(wert) if ok else 'Feld fehlt'}")   # v260: gelesener Wert
@@ -176,7 +176,10 @@ def ein_tab(warten=15.0):
     from .herkunft import ist_erlaubt
     ende = time.time() + warten
     while True:
-        offen = [t for t in edge.tabs() if ist_erlaubt(t.get("url", ""), "actanova")]
+        alle = edge.tabs()
+        offen = [t for t in alle if ist_erlaubt(t.get("url", ""), "actanova")]
+        if not offen:                                            # v286: Start-Tab steht evtl. noch auf der eIAM-Anmeldung
+            offen = [t for t in alle if _start_tab["id"] and t.get("id") == _start_tab["id"]]
         if offen or time.time() > ende:
             break
         time.sleep(0.5)
@@ -203,12 +206,15 @@ def _init_diagnose(tab):
         _log(f"init diagnose fehlgeschlagen: {x}")
 
 
-def init_haenger_loesen(tab, warten=20.0, versuche=2):
+def init_haenger_loesen(tab, warten=20.0, versuche=2, erst=6.0):
     """v213b: Haengt «DmsInitializationForm» («Client wird gestartet …»), zuerst Fenster sichtbar machen
-    (der Client initialisiert offenbar nur sichtbar – so wirkt auch das manuelle Aus/Ein), danach neu laden."""
+    (der Client initialisiert offenbar nur sichtbar – so wirkt auch das manuelle Aus/Ein), danach neu laden.
+    v282: Erster Versuch nur `erst` s. Konsole beim Hänger: «Failed to initialize content script … Receiving end does
+    not exist» (WebExtensionTrayApplicationProxyDetection) – die Acta-Nova-Erweiterung ist im zuerst geladenen Tab
+    noch nicht verbunden; erst ein erneutes Laden klappt. Langes Warten bringt also nichts."""
     for i in range(versuche + 1):
         _zeigen(tab)
-        ende = time.time() + warten
+        ende = time.time() + (min(erst, warten) if i == 0 else warten)
         while time.time() < ende:
             try: href = tab.js("location.href") or ""
             except Exception: href = ""
@@ -224,9 +230,109 @@ def init_haenger_loesen(tab, warten=20.0, versuche=2):
     return False
 
 
+ERWEITERUNG = "llpihbcbbpaijhmmfgddchmkgabhefol"      # v283: Acta-Nova-Erweiterung (ID aus der Edge-Konsole)
+
+
+def _erweiterung_da(tab):
+    """v283: Läuft der Hintergrund der Acta-Nova-Erweiterung? (True/False, oder None = nicht feststellbar)"""
+    try:
+        r = tab.ws.cdp("Target.getTargets") or {}
+        infos = r.get("targetInfos") or (r.get("result") or {}).get("targetInfos")
+        if infos is None: return None
+        return any(ERWEITERUNG in (t.get("url") or "") and t.get("type") != "page" for t in infos)
+    except Exception:
+        return None
+
+
+_start_tab = {"id": None}                              # v286: Tab, den edge_starten_leer mit Acta Nova geladen hat
+
+
+def edge_starten_leer(max_s=30.0, nachlauf=5.0):
+    """v285: Edge NICHT mehr direkt mit der Acta-Nova-Adresse starten. Bisher lud Edge die Seite (Zertifikat, PIN) schon
+    beim Start, bevor die per Richtlinie verwaltete Erweiterung «Acta Nova Client» bereit war -> «Receiving end does
+    not exist», erst der zweite Start klappte. Manuell (Edge erst offen, dann Acta Nova) klappt es immer – genau das
+    ahmt AURA jetzt nach: leer starten, auf die Erweiterung warten, kurze Nachlaufzeit, dann Acta Nova laden."""
+    if edge.laeuft(): return False
+    edge.starten("about:blank")
+    ende, gesehen = time.time() + max_s, False
+    while time.time() < ende:
+        try: gesehen = any(ERWEITERUNG in (t.get("url") or "") for t in edge.http("/json"))
+        except Exception: pass
+        if gesehen: break
+        time.sleep(0.5)
+    time.sleep(nachlauf)
+    _log(f"edge: leer gestartet, Erweiterung {'da' if gesehen else 'nicht gesehen'}, jetzt Acta Nova laden")
+    try:
+        alle = edge.tabs()
+        _log("edge: Tabs " + ", ".join((x.get("url") or "?")[:40] for x in alle))          # v287: Diagnose
+        leer = [x for x in alle if (x.get("url") or "") in ("about:blank", "") or (x.get("url") or "").startswith("edge://newtab")]
+        if leer:                                                  # v287: nur den leeren Start-Tab nehmen, nie einen
+            t = edge.Tab(leer[0])                                 # versteckten (z. B. Seite der Erweiterung)
+            try: t.navigieren(start_url(), "actanova")
+            except Exception: t.schliessen(); raise
+        else:
+            t = edge.tab_neu(start_url())
+        _start_tab["id"] = t.info.get("id")                       # v286: diesen Tab merken (kein zweiter)
+        try: edge.fenster(t, "normal"); t.ws.cdp("Page.bringToFront")
+        except Exception: pass
+        finally: t.schliessen()
+        _log("edge: Acta Nova geladen")
+    except Exception as x:
+        _log(f"edge: Acta Nova laden fehlgeschlagen: {type(x).__name__}: {str(x)[:120]}")
+    return True
+
+
+def bereit_machen(tab, anmeldung_max=300.0):
+    """v282: Nach dem Einschalten von Acta Nova: warten, bis der Mensch angemeldet ist (Adresse auf dem Acta-Nova-Host),
+    dann den bekannten Erst-Hänger sofort per Neuladen lösen. So scheitert nicht mehr die erste Frage im Chat."""
+    host = url_teil(); ende = time.time() + anmeldung_max
+    while time.time() < ende:
+        try: href = tab.js("location.href") or ""
+        except Exception: href = ""
+        if host in href: break
+        time.sleep(1.0)
+    else:
+        _log("bereit: Anmeldung nicht abgeschlossen"); return False
+    _log("bereit: angemeldet")
+    # v283: Die Seite fragt die Erweiterung, bevor deren Hintergrund läuft («Receiving end does not exist», Konsole
+    # 19.11.). Darum zuerst bis 30 s auf die Erweiterung warten und dann neu laden – erst dann klappt die Initialisierung.
+    erw = None; ende = time.time() + 30
+    while time.time() < ende:
+        erw = _erweiterung_da(tab)
+        if erw is not False: break
+        time.sleep(1.0)
+    _log(f"bereit: Erweiterung {'da' if erw else 'fehlt' if erw is False else 'nicht prüfbar'}")
+    try: href = tab.js("location.href") or ""
+    except Exception: href = ""
+    if "DmsInitializationForm" in href:                     # hängt am Start -> nach Erweiterung einmal frisch laden
+        time.sleep(1.0)
+        try: tab.navigieren(start_url(), "actanova"); _log("bereit: neu geladen")
+        except Exception as x: _log(f"bereit: neu laden fehlgeschlagen: {type(x).__name__}")
+    ok = init_haenger_loesen(tab, 30.0, 2, 6.0)
+    if ok: ok = _warten(tab, "AN.text('Suchen', true)", 20, 0.5)
+    # v284: Log 19.11. 07:15–07:19: Erweiterung «da», drei Neuladungen im selben Tab hängen; Minuten später klappt es
+    # sofort. Darum nicht mehr denselben Tab neu laden, sondern einen frischen Tab öffnen (Inhaltsskript wird neu
+    # angebunden) und den alten schliessen – bis zu 4 Runden über ca. 2 Minuten, still im Hintergrund.
+    runde = 0
+    while not ok and runde < 4:
+        runde += 1; time.sleep(10)
+        try:
+            neu = edge.tab_neu(start_url()); _log(f"bereit: frischer Tab (Runde {runde})")
+            alt, tab = tab, neu
+            edge.tab_zu(alt)
+            ok = init_haenger_loesen(tab, 20.0, 0, 20.0) and _warten(tab, "AN.text('Suchen', true)", 20, 0.5)
+        except Exception as x:
+            _log(f"bereit: frischer Tab fehlgeschlagen: {type(x).__name__}")
+    if runde:
+        try: tab.schliessen()                                  # Verbindung zum neuen Tab; der Tab selbst bleibt offen
+        except Exception: pass
+    _log(f"bereit: {'ok' if ok else 'nicht bereit'}")
+    return ok
+
+
 def verbinden():
     """Haengt sich an die offene Acta-Nova-Sitzung. Startet Edge, falls noetig (Anmeldung macht der Mensch)."""
-    edge.starten(start_url())
+    edge_starten_leer()                                            # v285: erst leer starten, dann Acta Nova
     tab = ein_tab(5.0)                                             # v213b: Doppel-Tabs vermeiden
     if tab: tab.dialog_schliessen()
     if not tab:
@@ -392,15 +498,15 @@ def _diag(text):
 def _suchen(tab, art, feld_tab, feld, begriff, protokoll, export=False):
     """v220: Bleibt die Trefferseite aus (jede 2. Suche), Startseite neu laden und genau einmal wiederholen."""
     try:
-        return _suchen_einmal(tab, art, feld_tab, feld, begriff, protokoll, export)
+        return _suchen_einmal(tab, art, feld_tab, feld, begriff, protokoll, export, streng=True)
     except ActaNovaFehler as e:
         if "Trefferseite" not in str(e) and "Suchfeld" not in str(e) and "Suchen" not in str(e): raise
         _log(f"wiederhole {_k(begriff)} ({art}) nach: {str(e)[:80]}"); protokoll.append("Neuladen + Wiederholung")
         tab.navigieren(start_url(), "actanova"); _warten(tab, "document.readyState === 'complete'", 30); time.sleep(1.5)
-        return _suchen_einmal(tab, art, feld_tab, feld, begriff, protokoll, export)
+        return _suchen_einmal(tab, art, feld_tab, feld, begriff, protokoll, export, streng=False)
 
 
-def _suchen_einmal(tab, art, feld_tab, feld, begriff, protokoll, export=False):
+def _suchen_einmal(tab, art, feld_tab, feld, begriff, protokoll, export=False, streng=False):
     f = FORM[art]
     t0 = time.perf_counter(); zeiten = {}
     _log(f"  {art}: Maske oeffnen"); _formular_oeffnen(tab, art, protokoll); zeiten["maske"] = time.perf_counter() - t0
@@ -421,7 +527,12 @@ def _suchen_einmal(tab, art, feld_tab, feld, begriff, protokoll, export=False):
     # vorher evtl. vorhandene Trefferzeilen markieren, damit wir neue erkennen
     _js(tab, "AN.docs().forEach(d => d.querySelectorAll('tr.bocListDataRow').forEach(tr => tr.setAttribute('data-aura-alt', '1'))); return true;")
     zeiten["ausfuellen"] = time.perf_counter() - t0 - zeiten["maske"]
-    _max_treffer(tab, _max_einstellung())                  # v259: mehr als 200 Treffer (Reiter «Suchabfrage»)
+    if not _max_treffer(tab, _max_einstellung()) and streng:   # v259: mehr als 200 Treffer (Reiter «Suchabfrage»)
+        # v289: Erscheint das Feld nicht, ist die Maske halb neu geladen – dann blieb der Klick auf «Suchen» wirkungslos
+        # und AURA wartete 90 s (Log 17.–19.11.). Sofort neu aufbauen; im zweiten Durchgang notfalls ohne Trefferzahl.
+        raise ActaNovaFehler("Suchfeld Trefferzahl nicht bereit – Maske neu")
+    elif not streng and not _js(tab, "return /Maximale Anzahl/.test(AN.docs().map(d => d.body ? d.body.innerText : '').join(' '));"):
+        _klick_id(tab, f["tab_basis"]); _warten(tab, "AN.el('SearchButton')", 5)   # v289: zurück auf die Grundmaske
     _log(f"  {art}: suche"); 
     if not _klick_id(tab, "SearchButton"):
         raise ActaNovaFehler("Knopf 'Suchen' fehlt")
@@ -508,8 +619,29 @@ def _xml(z, name):
     return _ET.fromstring(b)
 
 
+_NS_R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+_NS_PR = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+
+
+def _datenblatt(z):
+    """v281: Pfad des ersten Blatts ohne «#» im Namen. Rückfall: kleinste Blattnummer (numerisch, nicht alphabetisch)."""
+    try:
+        ziele = {r.get("Id"): r.get("Target", "") for r in _xml(z, "xl/_rels/workbook.xml.rels").iter(_NS_PR + "Relationship")}
+        for s in _xml(z, "xl/workbook.xml").iter(_NS + "sheet"):
+            if (s.get("name") or "").startswith("#"): continue
+            t = ziele.get(s.get(_NS_R + "id"), "").lstrip("/")
+            pfad = t if t.startswith("xl/") else "xl/" + t
+            if pfad in z.namelist(): return pfad
+    except (KeyError, ActaNovaFehler, _ET.ParseError):
+        pass
+    nr = lambda n: int(_re.search(r"(\d+)\.xml$", n).group(1)) if _re.search(r"(\d+)\.xml$", n) else 0
+    return sorted((n for n in z.namelist() if _re.match(r"xl/worksheets/sheet\d+\.xml$", n)), key=nr)[0]
+
+
 def _xlsx_zeilen(pfad):
-    """Minimaler xlsx-Leser (ohne openpyxl): erste Tabelle als Liste von Zeilen (Strings). v212: harte Grenzen."""
+    """Minimaler xlsx-Leser (ohne openpyxl): Datenblatt als Liste von Zeilen (Strings). v212: harte Grenzen.
+    v281: Acta Nova legt vorne Hilfsblätter an («#Aliases», Auswahllisten). Gelesen wird das erste Blatt, dessen
+    Name nicht mit «#» beginnt (Reihenfolge laut workbook.xml); bisher wurde stets sheet1 = «#Aliases» gelesen."""
     from .. import sicherheit as SI
     SI.pruefe_dokument(pfad, XLSX_MAX_DATEI)
     with zipfile.ZipFile(pfad) as z:
@@ -519,7 +651,7 @@ def _xlsx_zeilen(pfad):
             for si in _xml(z, "xl/sharedStrings.xml").iter(_NS + "si"):
                 shared.append("".join(t.text or "" for t in si.iter(_NS + "t"))[:5000])
                 if len(shared) > XLSX_MAX_STRINGS: raise ActaNovaFehler("Export zu gross (zu viele Texte)")
-        blatt = sorted(n for n in z.namelist() if n.startswith("xl/worksheets/sheet"))[0]
+        blatt = _datenblatt(z)
         zeilen = []
         for row in _xml(z, blatt).iter(_NS + "row"):
             if len(zeilen) >= XLSX_MAX_ZEILEN: raise ActaNovaFehler(f"Export zu gross (> {XLSX_MAX_ZEILEN} Zeilen)")
@@ -569,11 +701,18 @@ def exportieren(tab, timeout=60.0):
         if not datei:
             _log(f"export: keine Datei nach {timeout:.0f} s ({'Browser' if browser else 'Page'})"); return None
         zeilen = _xlsx_zeilen(datei)
-        kopf_i = next((i for i, z in enumerate(zeilen[:10]) if "Name" in z or "Titel" in z), None)
+        # v281: Zeile 1 = technische Namen (FormattedNumber, FileHandlingContainer …), Zeile 2 = deutsche Spalten.
+        # Das Ranking braucht die deutschen («Enthalten in», «Referenznummer») – diese Zeile zuerst suchen.
+        deutsch = ("Enthalten in", "Referenznummer", "Aktenzeichen", "Titel")
+        kopf_i = next((i for i, z in enumerate(zeilen[:10]) if any(k in z for k in deutsch)), None)
+        if kopf_i is None:
+            kopf_i = next((i for i, z in enumerate(zeilen[:10]) if "Name" in z), None)
         if kopf_i is None:
             _log("export: Kopfzeile nicht erkannt"); return None
         kopf = zeilen[kopf_i]
-        erg = [{k: v for k, v in zip(kopf, z) if k and v} for z in zeilen[kopf_i + 1:] if any(z)]
+        # v281: Export hängt Objektverweise an («… (ar-032.1-131/14) <File|guid|System.Guid>») – wie in der Bildschirmliste kürzen
+        ref = lambda v: _re.sub(r"\s*<[A-Za-z.]+\|[0-9a-fA-F-]+\|System\.Guid>\s*$", "", v)
+        erg = [{k: ref(v) for k, v in zip(kopf, z) if k and ref(v)} for z in zeilen[kopf_i + 1:] if any(z)]
         _log(f"export: {len(erg)} Zeilen"); return erg
     finally:
         shutil.rmtree(ordner, ignore_errors=True)
@@ -634,22 +773,28 @@ def oeffnen(aktenzeichen, titel=None):
         _log(f"oeffnen: Aktenzeichen in {r.get('id')}")
         mit_titel = bool(titel) and _setzen(tab, f["titel"], titel)       # v259: Titelfeld über seine ID
         treffer = "AN.docs().some(d => d.querySelector('tr.bocListDataRow'))"
-        fertig = treffer + " || /keine (Such)?ergebnisse/i.test(AN.docs().map(d => d.body ? d.body.innerText : '').join(' '))"
+        # v290: «fertig» erst auf der Trefferseite (wie bei der Suche), nicht schon, wenn die Maske irgendeinen Text zeigt
+        fertig = treffer + " || AN.el('BackButton') || /Suchergebnisse \\(Anzahl|keine (Such)?ergebnisse/i.test(AN.docs().map(d => d.body ? d.body.innerText : '').join(' '))"
         def suchen():                                                        # v259: bei «keine Suchergebnisse» nicht 60 s warten
             _js(tab, "AN.docs().forEach(d => d.querySelectorAll('tr.bocListDataRow').forEach(tr => tr.remove())); return true;")
-            _klick_id(tab, "SearchButton"); _warten(tab, fertig, 60, 0.5)
-            return bool(_js(tab, "return " + treffer + ";"))
+            geklickt = _klick_id(tab, "SearchButton")
+            ok = _warten(tab, fertig, 8, 0.5)
+            if not ok and geklickt and _js(tab, "return AN.sichtbar(AN.el('SearchButton'));"):   # v290: Klick verpufft
+                _log("oeffnen: Klick ohne Wirkung – nochmals"); _klick_id(tab, "SearchButton"); ok = _warten(tab, fertig, 50, 0.5)
+            n = _js(tab, "return AN.docs().reduce((s, d) => s + d.querySelectorAll('tr.bocListDataRow').length, 0);") or 0
+            _log(f"oeffnen: Suche {'Trefferseite' if ok else 'ohne Trefferseite'}, {n} Zeilen (Knopf {'ja' if geklickt else 'fehlt'})")
+            return n > 0
         if not suchen():
             if not mit_titel: raise ActaNovaFehler(f"Kein Dossier mit Aktenzeichen {aktenzeichen}")
             _setzen(tab, f["titel"], "")                                       # v258: Titel weg, nur Aktenzeichen
             if not suchen(): raise ActaNovaFehler(f"Kein Dossier mit Aktenzeichen {aktenzeichen}")
         genau = json.dumps(_re.escape(aktenzeichen) + r"(?![/\d])")              # v258: genau dieses, kein Unterdossier
-        _js(tab, f"""const genau = new RegExp({genau});
+        gew = _js(tab, f"""const genau = new RegExp({genau});
             const zeilen = []; for (const d of AN.docs()) zeilen.push(...d.querySelectorAll('tr.bocListDataRow'));
             const z = zeilen.find(r => genau.test(r.innerText || '')) || zeilen[0]; if (!z) return false;
             const c = z.querySelector('td[role=rowheader] a') || z.querySelector('a'); if (!c) return false;
             c.click(); return true;""")
-        _log(f"oeffnen {_k(aktenzeichen)}" + (" mit Titel" if mit_titel else ""))
+        _log(f"oeffnen {_k(aktenzeichen)}" + (" mit Titel" if mit_titel else "") + ("" if gew else " – Zeile nicht klickbar"))
     finally:
         edge.fenster(tab, "normal")
         try: tab.ws.cdp("Page.bringToFront")

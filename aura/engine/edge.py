@@ -457,8 +457,11 @@ def beenden(warten=10.0):
 
 
 CACHE_ORDNER = ("Cache", "Code Cache", "GPUCache", "DawnGraphiteCache", "DawnWebGPUCache",
-                os.path.join("Service Worker", "CacheStorage"), os.path.join("Service Worker", "ScriptCache"),
                 "Session Storage", "Sessions")                     # v212: auch Sitzungs-/Tab-Wiederherstellung
+# v288: «Service Worker\ScriptCache» und «…\CacheStorage» werden NICHT mehr gelöscht. Dort liegt auch der Hintergrund-
+# dienst der verwalteten Erweiterung «Acta Nova Client». Wurde das Skript gelöscht, die Registrierung (Service Worker\
+# Database) aber nicht, startete die Erweiterung nach dem nächsten Edge-Start oft minutenlang nicht (Log 19.11.:
+# «Erweiterung nicht gesehen» -> Acta Nova hängt bei «Client wird gestartet»; «Erweiterung da» -> klappt sofort).
 VERLAUF_DATEIEN = ("History", "History-journal", "Visited Links", "Top Sites", "Top Sites-journal",
                    "Shortcuts", "Shortcuts-journal")               # v212: Verlauf der AURA-Edge (nicht dein normales Edge)
 # BLEIBT bewusst (fuer SSO/Anmeldung noetig): Cookies, Local Storage, IndexedDB, Einstellungen. Siehe README «Sicherheit».

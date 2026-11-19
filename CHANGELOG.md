@@ -5,6 +5,131 @@ Neueste Version zuerst. Versionsnummern entsprechen `VERSION` in `aura/__init__.
 ---
 
 
+## v290 – 19.11.2026 · Acta Nova: Dossier per Klick öffnen
+
+- **Öffnen robuster:** Ein Klick auf eine Acta-Nova-Quelle wartet auf eine echte Trefferseite. Bisher galt die Suche manchmal zu früh als fertig, und Acta Nova blieb auf der Dossier-Suchmaske stehen.
+- Bleibt der Klick auf «Suchen» nach 8 s wirkungslos, klickt AURA ein zweites Mal.
+- Protokoll: Trefferseite ja/nein, Anzahl Zeilen, ob sich die Zeile anklicken liess.
+
+## v289 – 19.11.2026 · Acta Nova: kein 90-s-Hänger mehr bei der Suche
+
+- Fehlt das Feld «Maximale Anzahl der Suchergebnisse», wartet AURA nur 5 s statt 15 s.
+- Danach baut AURA die Suchmaske sofort neu auf und sucht nochmals, statt 90 s auf eine Trefferseite zu warten.
+- Fehlt das Feld auch im zweiten Durchgang, sucht AURA auf der Grundmaske mit der Standardgrenze von Acta Nova (200).
+- Ursache: Der Reiter «Suchabfrage» lädt die Maske über den Server teilweise neu. Bei langsamer Antwort blieb der Klick auf «Suchen» wirkungslos.
+
+## v288 – 19.11.2026 · Acta Nova startet beim ersten Mal
+
+- **Ursache des doppelten Starts behoben:** Beim Beenden von Edge löscht AURA `Service Worker\ScriptCache` und `Service Worker\CacheStorage` nicht mehr.
+- Dort liegt auch der Hintergrunddienst der verwalteten Erweiterung «Acta Nova Client». Fehlte das Skript, die Registrierung aber nicht, startete die Erweiterung nach dem nächsten Edge-Start oft minutenlang nicht. Acta Nova blieb dann bei «Client wird gestartet» stehen.
+- **Sicherheit:** Bewusste Abweichung von Review v212. Service-Worker-Daten besuchter Seiten bleiben im AURA-Profil (`data\edge_profil`). Übrige Caches, Sitzungen und Verlauf werden weiterhin gelöscht.
+- **Einmalig beim Update:** AURA und Edge schliessen, dann `data\edge_profil\Default\Service Worker` löschen.
+
+## v287 – 19.11.2026 · Acta Nova: richtiger Start-Tab
+
+- Acta Nova wird nur noch in den leeren Start-Tab geladen, nie in einen versteckten Tab (z. B. eine Seite der Erweiterung). Gibt es keinen leeren Tab, öffnet AURA einen neuen und holt ihn nach vorne.
+- Protokoll: offene Tabs (`edge: Tabs …`), «Acta Nova geladen» bzw. die genaue Fehlermeldung.
+
+## v286 – 19.11.2026 · Acta Nova: kein zweites Fenster
+
+- Der Start-Tab wird auch erkannt, solange er noch auf der eIAM-Anmeldung steht. Bisher öffnete `ein_tab()` nach 15 s einen zweiten Acta-Nova-Tab.
+
+## v285 – 19.11.2026 · Acta Nova: Edge zuerst leer starten
+
+- Edge startet nicht mehr direkt mit der Acta-Nova-Adresse, sondern leer. AURA wartet bis 30 s auf die Erweiterung «Acta Nova Client», dann 5 s, und lädt erst danach Acta Nova. Zertifikat und PIN erscheinen deshalb einige Sekunden später.
+- Gilt für den Schalter «Acta Nova» im Chat, für «Edge öffnen und anmelden» und für die erste Suche, wenn Edge noch zu ist.
+- Bekannt: «Edge öffnen und anmelden» blockiert die Oberfläche bis zu 35 s.
+
+## v284 – 19.11.2026 · Acta Nova: frischer Tab statt Neuladen
+
+- Hängt Acta Nova bei «Client wird gestartet», öffnet `bereit_machen()` einen frischen Tab und schliesst den alten, statt denselben Tab neu zu laden. Bis zu 4 Runden über etwa 2 Minuten.
+
+## v283 – 19.11.2026 · Acta Nova: auf die Erweiterung warten
+
+- `bereit_machen()` prüft über das DevTools-Protokoll, ob die Erweiterung «Acta Nova Client» läuft (bis 30 s), und lädt erst dann neu.
+- Protokoll: «Erweiterung da / fehlt / nicht prüfbar».
+
+## v282 – 19.11.2026 · Quellen nach System eingeklappt, Farbrand, Acta Nova bereit machen
+
+- **Quellen:** Offen bleiben nur die Belege der Zusammenfassung. Die übrigen stehen eingeklappt je System, mit Anzahl, z. B. «▸ SharePoint (8)». Die Nummern bleiben gleich. Gruppiert wird ab 7 Quellen.
+- **Zusammenfassung:** Unter dem letzten Text steht eine Leerzeile von etwa 10 px in der Blockfarbe. So ist sichtbar, dass nichts abgeschnitten ist.
+- **Acta Nova bereit machen:** Beim Einschalten wartet AURA bis zu 5 min auf die Anmeldung und löst einen Hänger bei «Client wird gestartet» nach 6 s statt nach 30 s. Bisher galt die Anmeldeseite als «init ok», und der eigentliche Hänger danach blieb ungelöst.
+
+## v281 – 18.11.2026 · Acta Nova liest alle Treffer, Anzeige ohne Lücken
+
+- **Acta-Nova-Export funktioniert:** AURA liest das Datenblatt statt des Hilfsblatts «#Aliases» und die deutsche statt der technischen Kopfzeile. Objektverweise (`<File|…|System.Guid>`) werden gekürzt. Damit werden bis zu 1000 Treffer ausgewertet statt nur der ersten Bildschirmseite. Vorher meldete das Log bei jeder Suche «Export fehlgeschlagen -> nur Seite 1».
+- **Keine Lücken mehr:** Quellenzeilen, Zeitstempel und Akkordeon «Einzelergebnisse je Quelle» sind native Labels (`ZLabel`). Sie werden auch ausserhalb des sichtbaren Bereichs gezeichnet.
+- Im Verlauf wird das Akkordeon sofort gebaut, nicht verzögert. Leere Flächen beim Öffnen gespeicherter Chats sind damit weg.
+- **Schriftart:** Consolas nur noch für echte Markdown-Tabellen (mindestens 2 Zeilen, die mit «|» beginnen). Quelltext mit «|» wurde vorher als Tabelle gesetzt.
+
+## v280 – 18.11.2026 · Bausteine wieder da, einklappbar
+
+- **Fehler v279 behoben:** Die Bausteine-Palette links der Leinwand fehlte (Platzierung versehentlich auskommentiert).
+- **Palette einklappbar:** Knopf oben rechts in «Bausteine» klappt sie ein; dann bleibt nur ein schmaler Knopf «+», der sie wieder einblendet. Zustand bleibt während der Sitzung.
+- Info-Leiste, Karte «Workflows»: keine leere Zeile mehr, wenn kein Lauf geplant ist.
+
+## v279 – 18.11.2026 · Workflows: mehr Platz, Tag/Nacht
+
+- **Mehr Platz für die Leinwand:** In «Workflows» blendet sich die Info-Leiste automatisch aus (Knopf oben rechts blendet sie bei Bedarf wieder ein); zurück im Chat erscheint sie wieder. Workflow-Liste 210 statt 250 px, Palette 150 statt 170 px, Details 240 statt 270 px.
+- **Tag/Nacht-Wechsel bei offenem Workflow:** Leinwand und Palette werden neu eingefärbt (vorher blieb die Leinwand weiss und die Palette hatte helle Kästchen mit hellen Ecken).
+- **Umschalter** «Bauen | Ausführen», «Leinwand | Liste» und Ausführlichkeit: Schrift auf dem gewählten Knopf weiss, auf den übrigen in Textfarbe (Tag-Modus vorher weiss auf grau). Neue Funktion `seg_farben()` in `gui.py`.
+
+## v278 – 18.11.2026 · Feinschliff Tag-Modus
+
+- Seitentitel (Datum) kleiner, wird nicht mehr abgeschnitten.
+- Umschalter «Übersicht | Tasks | Widgets»: Schrift auf dem gewählten (roten) Knopf weiss.
+- Tag-Modus: Randfarbe kräftiger (#B7BEB0), Aufgaben-Box und offene Menügruppe mit Rand – die Rundungen sind auf hellem Grund sichtbar.
+
+## v277 – 18.11.2026 · Einheitliche Symbole, Workflows rund
+
+- **Symbole:** keine farbigen Emoji mehr in Knöpfen. Textknöpfe nur mit Text («Verlauf», «Neuer Chat», «Memo», «Datei anhängen», Live-Quellen); Symbolknöpfe einheitlich in Segoe MDL2 (Start/Haus, Tag/Nacht als Sonne/Mond, Mikrofon, Info-Leiste). Memo-Aufnahme zeigt «● 0:12».
+- **Karte «Sprachmodell» kompakt:** Zustand und Typ in einer Zeile (z.B. «● geladen · Qwen3.5 · 8 Bit»); die Tempo-Zeile erscheint erst nach der ersten Antwort. Der Tacho rückt nach oben.
+- **Workflows rund:** Fenster und Schritte-Editor mit denselben Radien wie das Hauptfenster (Karten 12, Knöpfe 8; Seitenspalte bleibt gerade). Knoten auf der Leinwand mit runden Ecken, Gruppenfarbe als schmaler Strich links. Emoji in den Workflow-Knöpfen entfernt.
+
+## v276 – 18.11.2026 · Übersicht: Ganztägiges, Titel
+
+- **Ganztägige Termine** (Beginn 00:00, Dauer ganze Tage) zeigen «heute», «morgen» oder «Fr 20.11.» statt «Fr 00:00»; ganztägige Termine von heute bleiben sichtbar, vergangene Termine von heute nicht.
+- **Seitentitel** kurz («Mi, 18. November»), vorher abgeschnitten («Mittwoch, 18. N»).
+- Zeitfelder in der Übersicht gleich breit (auch «morgen 13:30»), Titel stehen bündig.
+
+## v275 – 18.11.2026 · Quellen wieder nebeneinander
+
+- Mindestbreite je Quellenkarte 380 statt 430 px: bei normaler Fensterbreite mit Info-Leiste wieder zwei Spalten; eine Spalte erst bei schmalem Fenster, drei bei sehr breitem.
+
+## v274 – 18.11.2026 · Inhalte passen sich dem Platz an
+
+- **Knopf Info-Leiste** oben rechts (neben der Rolle): blendet die Info-Leiste ein und aus, ohne Umweg über die Einstellungen.
+- **Quellen:** Karten ordnen sich nach der verfügbaren Breite in 1–3 Spalten an (vorher fest 2 × 480 px → rechts abgeschnitten, z.B. «Abschnitte» bei OneNote). Gilt für die abgeglichenen und die Live-Quellen.
+- **Startseite:** nutzt die volle Breite. Übersicht: Termine und Mails nebeneinander, unter 620 px untereinander; Titel werden passend zur Breite gekürzt. Tasks: 2–3 Kacheln pro Zeile.
+- Alles reagiert auf Ein-/Ausblenden der Info-Leiste und auf Grössenänderungen des Fensters. Neue Hilfsfunktion `_raster()` in `gui.py`.
+
+## v273 – 18.11.2026 · Übersicht aufgeräumt, Hauptfenster rund
+
+- **Systemmails gebündelt:** Mails mit gleichem Absender und gleichem Betreffanfang (z.B. Acta-Nova-Meldungen) erscheinen als eine Zeile «▸ 6× Die Aktivität …». Klick klappt sie auf; darunter steht nur der Teil des Betreffs, der sich unterscheidet. Aufgeklapptes verdrängt keine anderen Mails.
+- **Höhe genutzt:** Termine und Mails zeigen je nach Fensterhöhe 5 bis 12 Zeilen.
+- Termine ohne Ort zeigen «–», damit alle Zeilen gleich hoch sind.
+- **Seitentitel:** Auf der Startseite steht oben das Datum (z.B. «Mittwoch, 18. November 2026»), im Chat wieder «Fragen».
+- **Runde Formen im Hauptfenster:** Karten, Eingabefeld, Knöpfe oben, Live-Quellen, Funktionen, Seitenleiste, Info-Leiste, Aufgaben, Einstellungsfenster. Zwei feste Radien in `gui.py`: `R_KARTE = 12`, `R_KNOPF = 8`. Fensterrahmen (Seitenleisten, Hauptbereich) bleiben gerade. Workflows und übrige Fenster folgen in eigenen Paketen.
+
+## v272 – 18.11.2026 · Offizielles Bundeslogo
+
+- Wappen oben links ist nun das **Schild aus dem offiziellen Bundeslogo** (Logo_RGB_farbig, ohne Schriftzug), unverändert in Form und Farbe (#FF0000), als `assets\wappen_s30…s75.png` je Windows-Skalierung. Ersetzt das selbst gezeichnete Schild aus v271.
+
+## v271 – 18.11.2026 · Dashboard verfeinert
+
+- **Schweizer Wappen** in der geschwungenen Schildform des Bundeswappens (Kreuzarme 1/6 länger als breit), so hoch wie der grössere Schriftzug «AURA»; Untertitel darunter. Bilddateien `assets\wappen_s30…s75.png` in genau passender Grösse je Windows-Skalierung (kein Verkleinern, daher scharf).
+- **Tacho «Datenbestand» scharf:** AURA rechnet den Bogen selbst als geglättetes Bild in physischen Pixeln (ohne Zusatzpaket); vorher zeichnete Tk den Bogen ungeglättet in logischen Pixeln. Wird nur bei Änderungen neu gerechnet (rund 0,1 s).
+- **Übersicht:** Termine und Mails **nebeneinander**, je Eintrag zwei Zeilen (Titel, darunter Ort bzw. Absender). Lange Titel werden gekürzt; «AW:», «WG:», «RE:» entfallen, «ARMASUISSE» beim Absender und «Microsoft Teams-Besprechung» → «Teams». Je 5 Einträge.
+
+## v270 – 18.11.2026 · Dashboard: Übersicht, Tacho, Wappen
+
+- **Startseite mit Umschalter «Übersicht | Tasks | Widgets»** (oben in der Mitte). AURA merkt sich die zuletzt gewählte Ansicht (`startansicht` in den Einstellungen); der Schalter «Beim Start Widgets zeigen» entfällt.
+- **Übersicht:** nächste Termine (ohne «Abwesend», «Mittag» u. ä.) und letzte Mails, direkt aus der Datenbank – ohne Sprachmodell, daher sofort da. Klick öffnet das Original in Outlook. Wird nach jedem Abgleich aufgefrischt.
+- **Tasks:** die bisherige Startseite mit den eigenen Kacheln. **Widgets:** die angehefteten Workflow-Ergebnisse direkt auf der Startseite.
+- **Info-Leiste rechts, «Datenbestand»:** Tacho (Bogen 270°) mit einem farbigen Segment je Quelle, logarithmisch, damit auch kleine Quellen sichtbar sind; in der Mitte die Objekte gesamt und der Anteil mit Vektor. Darunter je Quelle Farbe, Menge und **Statuspunkt**: grün = aktuell; orange = letzter Abgleich älter als 24 h oder Vektoren unter 95 %; rot = älter als 3 Tage oder Vektoren unter 50 %. Maus auf den Punkt zeigt den Grund.
+- **Schweizer Wappen** (Schild) oben links statt des Sechseck-Logos (`assets\wappen_*.png`; fehlt die Datei, bleibt das alte Logo).
+- Neue Datei `aura/uebersicht.py`.
+
 ## v269 – 17.11.2026 · Live-Antwort: Einzelergebnisse im Akkordeon
 
 - Antwortet AURA mit Live-Quellen (Lokal, Acta Nova, Intranet, SharePoint) und einer Zusammenfassung, sieht man am Ende nur noch die **Zusammenfassung über alle Quellen** und die **Quellen**. Darunter steht **«Einzelergebnisse je Quelle»** mit einem eingeklappten Eintrag pro System (▸ Lokal, ▸ Acta Nova, …). Ein Klick klappt die Trefferliste dieser Quelle auf oder zu.

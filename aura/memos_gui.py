@@ -1,6 +1,6 @@
 # aura/memos_gui.py — Werkzeuge › Memos. Version 20261117v266
 # Liste der Tage (neueste zuerst; je Tag eine Datei mit allen Memos), Inhalt bearbeiten, löschen (nach _geloescht), Datei/Ordner öffnen.
-# Aufgenommen wird oben in der Leiste (Knopf «📝 Memo», mikrofon.Memo). Änderungen werden sofort neu eingelesen.
+# Aufgenommen wird oben in der Leiste (Knopf «Memo», mikrofon.Memo). Änderungen werden sofort neu eingelesen.
 import os
 from tkinter import messagebox
 import customtkinter as ctk
@@ -59,7 +59,7 @@ class MemoWindow:
         for c in self.lst.winfo_children(): c.destroy()
         self.knoepfe = {}; dateien = M.liste(self.app.s)
         if not dateien:
-            ctk.CTkLabel(self.lst, text="Noch keine Memos.\nAufnehmen oben mit «📝 Memo».", font=font(11), text_color=MUTED,
+            ctk.CTkLabel(self.lst, text="Noch keine Memos.\nAufnehmen oben mit «Memo».", font=font(11), text_color=MUTED,
                          justify="left").grid(row=0, column=0, sticky="w", padx=10, pady=10)
         for i, p in enumerate(dateien):
             try: n = M.anzahl(M.lesen(p))
