@@ -247,21 +247,47 @@ def _erweiterung_da(tab):
 _start_tab = {"id": None}                              # v286: Tab, den edge_starten_leer mit Acta Nova geladen hat
 
 
-def edge_starten_leer(max_s=30.0, nachlauf=5.0):
+def _erweiterung_gestartet():
+    """v299: Hintergrund der Erweiterung über die Browser-Verbindung (Target.getTargets, sieht auch Service Worker);
+    /json allein listet ihn nicht zuverlässig -> bisher oft volle Wartezeit. Rückgabe True/False."""
+    try:
+        if any(ERWEITERUNG in (t.get("url") or "") for t in edge.http("/json")): return True
+    except Exception: pass
+    ws = None
+    try:
+        ws = edge.WS(edge.http("/json/version")["webSocketDebuggerUrl"])
+        infos = (ws.cdp("Target.getTargets", timeout=3) or {}).get("targetInfos") or []
+        return any(ERWEITERUNG in (t.get("url") or "") for t in infos)
+    except Exception: return False
+    finally:
+        if ws: ws.schliessen()
+
+
+def edge_starten_leer(max_s=None, nachlauf=None):
     """v285: Edge NICHT mehr direkt mit der Acta-Nova-Adresse starten. Bisher lud Edge die Seite (Zertifikat, PIN) schon
     beim Start, bevor die per Richtlinie verwaltete Erweiterung «Acta Nova Client» bereit war -> «Receiving end does
     not exist», erst der zweite Start klappte. Manuell (Edge erst offen, dann Acta Nova) klappt es immer – genau das
     ahmt AURA jetzt nach: leer starten, auf die Erweiterung warten, kurze Nachlaufzeit, dann Acta Nova laden."""
     if edge.laeuft(): return False
-    edge.starten("about:blank")
+    t0 = time.time(); edge.starten("about:blank")
+    try:
+        from ..config import load_settings
+        st = load_settings()
+    except Exception: st = {}
+    if nachlauf is None: nachlauf = float(st.get("acta_nachlauf_s", 1.5))   # v299: bisher fest 5 s
+    # v300: Log 23.11. 18:29: auf dem leeren Tab wird die Erweiterung nie sichtbar («nicht gesehen nach 32.4 s») – sie
+    # startet erst mit der Acta-Nova-Seite. Langes Warten bringt nichts; bereit_machen() wartet danach auf die Erweiterung
+    # und laedt neu («bereit: Erweiterung da», «neu geladen», «init ok»). Darum nur noch kurz warten (Standard 3 s).
+    if max_s is None: max_s = float(st.get("acta_erweiterung_warten_s", 3.0))
     ende, gesehen = time.time() + max_s, False
     while time.time() < ende:
-        try: gesehen = any(ERWEITERUNG in (t.get("url") or "") for t in edge.http("/json"))
-        except Exception: pass
+        gesehen = _erweiterung_gestartet()                        # v299: auch Service Worker erkennen
         if gesehen: break
-        time.sleep(0.5)
+        time.sleep(0.3)
+    t_erw = time.time() - t0
     time.sleep(nachlauf)
-    _log(f"edge: leer gestartet, Erweiterung {'da' if gesehen else 'nicht gesehen'}, jetzt Acta Nova laden")
+    _log(f"edge: leer gestartet, Erweiterung {'da' if gesehen else 'nicht gesehen'} nach {t_erw:.1f} s, "
+         f"Nachlauf {nachlauf:.1f} s, jetzt Acta Nova laden")
     try:
         alle = edge.tabs()
         _log("edge: Tabs " + ", ".join((x.get("url") or "?")[:40] for x in alle))          # v287: Diagnose

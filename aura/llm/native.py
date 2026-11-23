@@ -1,4 +1,4 @@
-# aura/llm/native.py — Hugging-Face-Sprachmodelle auf der nativen GPU-Engine. Version 20261113v229 (v229: Chat nutzt den Vorspann-Cache – Schnappschuss nach Systemtext+Rolle, Messzeile DIAG vorspann; v186: offene Fragen mit eigener Belegregel; v174: Apertus-Kontext 13312, Einstellung llm_context_apertus; v171: strenge Belegpflicht, Datum der Quelle zaehlt; v170: abgeschwaecht, verworfen; v169: Belegpflicht; v167: Tokengrenze wieder aus worker.py; v166: Anweisung je Stufe; v165: Apertus-Engine, Kontext hoechstens 8192; v164: Apertus-Chat-Vorlage und Erkennung, Engine folgt; v159: LFM3 (v158) wieder entfernt, Stand wie v146; v146: freigegebene Chat-Rolle aus skills.py im Systemtext; v130: 4-Bit-Gewichte, Einstellung llm_bits 4/8/16; v118: nur noch Qwen3.5, Qwen3-Engine entfernt; v110: Quellen nur mit Link werden genannt; v106: Speicher nach Engine-Aufbau ins Log; v104: System-Prompt ohne Satzgrenze – nur die Frage beantworten, keine Fuellsaetze; v88: Qwen3.5 ueber qwen35.py, Denkmodus aus; v86: gemm fp16; v85: KV-Cache fp16, Einstellung llm_kv16; v84: splitr im Log; v83: Split-K-Varianten im Log; v28: Kontextlaenge aus Einstellungen; v44: Kernel-Wahl ins Log; v70: 8-Bit-Gewichte, Einstellung llm_int8;
+# aura/llm/native.py — Hugging-Face-Sprachmodelle auf der nativen GPU-Engine. Version 20261123v297 (v297: Ausgabe stoppt, wenn das Modell Quellenmarkierungen «<<<QUELLE n>>>» abschreibt; v295: Wiederholsperre bricht nur noch ab statt Tokens zu ersetzen – v294 verfälschte Daten/Namen; v294: Wiederholsperre; v229: Chat nutzt den Vorspann-Cache – Schnappschuss nach Systemtext+Rolle, Messzeile DIAG vorspann; v186: offene Fragen mit eigener Belegregel; v174: Apertus-Kontext 13312, Einstellung llm_context_apertus; v171: strenge Belegpflicht, Datum der Quelle zaehlt; v170: abgeschwaecht, verworfen; v169: Belegpflicht; v167: Tokengrenze wieder aus worker.py; v166: Anweisung je Stufe; v165: Apertus-Engine, Kontext hoechstens 8192; v164: Apertus-Chat-Vorlage und Erkennung, Engine folgt; v159: LFM3 (v158) wieder entfernt, Stand wie v146; v146: freigegebene Chat-Rolle aus skills.py im Systemtext; v130: 4-Bit-Gewichte, Einstellung llm_bits 4/8/16; v118: nur noch Qwen3.5, Qwen3-Engine entfernt; v110: Quellen nur mit Link werden genannt; v106: Speicher nach Engine-Aufbau ins Log; v104: System-Prompt ohne Satzgrenze – nur die Frage beantworten, keine Fuellsaetze; v88: Qwen3.5 ueber qwen35.py, Denkmodus aus; v86: gemm fp16; v85: KV-Cache fp16, Einstellung llm_kv16; v84: splitr im Log; v83: Split-K-Varianten im Log; v28: Kontextlaenge aus Einstellungen; v44: Kernel-Wahl ins Log; v70: 8-Bit-Gewichte, Einstellung llm_int8;
 #   v72: Schweizer Rechtschreibung (ß -> ss) und ohne Vorspann «Antwort:»)
 # Unterstuetzt: Qwen3.5 (Qwen3_5ForConditionalGeneration / Qwen3_5ForCausalLM, z.B. Qwen3.5-4B), Gewichte bf16 oder int8.
 import json, re, time
@@ -198,6 +198,7 @@ class NativeCausalLM(LLMBackend):
             logits = self.eng.prefill(ids, self.progress, cancelled)
             if logits is None: return
             t1 = time.perf_counter(); pos = len(ids); dec = StreamDecoder(self.tok); n = 0
+            sperre = Wiederholsperre(int((s or {}).get("wiederholsperre", 16)))   # v295
             from ..log import diag                                      # v229: Messung Vorspann-Cache
             diag("vorspann", kopf=kopf_n, wieder=getattr(self.eng, "reused", 0), total=len(ids), einlesen_s=round(t1 - t0, 1))
             out = swiss_stream(on_token)                                # v72
@@ -205,23 +206,58 @@ class NativeCausalLM(LLMBackend):
             while n < max_new and pos < self.eng.maxT and not cancelled():
                 tid = sample(logits, temp)
                 if tid in self.stop_ids: break
+                if sperre.merken(tid): break                            # v295: Schleife -> Schluss
                 txt = "" if tid in self.hide_ids else dec.push(tid)     # v165
                 if txt: out.push(txt)
+                if out.stop: break                                      # v297: Modell schreibt Quellen ab
                 n += 1
                 logits = self.eng.forward([tid], pos); pos += 1
             out.flush(); dt = time.perf_counter() - t1
-            self.timing = {"ctx": len(ids), "prefill": t1 - t0, "out": n, "gen": dt}
+            self.timing = {"ctx": len(ids), "prefill": t1 - t0, "out": n, "gen": dt, "gesperrt": sperre.gesperrt}
+            if sperre.gesperrt: diag("wiederholsperre", n=sperre.n, abbruch_nach_tokens=n)
             self.progress(f"{used} Quellen · Kontext {len(ids)} Tokens in {t1 - t0:.0f} s · Antwort {n} Tokens "
                           f"({n / dt if dt > 0 else 0:.1f}/s)")
         except DeviceLost:
             self.unload(); raise
 
 
+class Wiederholsperre:
+    """v295: Schleifenstopp. Kommt dieselbe Folge von n Tokens zum dritten Mal, wird das Schreiben beendet.
+    Ersetzt nie ein Token (v294 tat das und verfaelschte Wiederholungen von Daten und Namen, z.B. «2026» -> «226»).
+    Einmaliges Wiederholen (Antwortsatz, danach Aufzaehlung) bleibt erlaubt. n <= 1: aus."""
+    def __init__(self, n, max_mal=3):
+        self.n = n if n > 1 else 0; self.max_mal = max_mal; self.ids = []; self.zahl = {}; self.gesperrt = 0
+    def anwenden(self, logits): return                                  # v295: Logits bleiben unveraendert
+    def merken(self, tid):
+        """True = Schleife erkannt, Schreiben beenden."""
+        self.ids.append(tid)
+        if not self.n or len(self.ids) < self.n: return False
+        k = tuple(self.ids[-self.n:]); c = self.zahl.get(k, 0) + 1; self.zahl[k] = c
+        if c >= self.max_mal: self.gesperrt = 1; return True
+        return False
+
+
 class swiss_stream:
     """v72: Ausgabe an die Oberfläche in Schweizer Schreibweise (ß -> ss) und ohne einleitendes «Antwort:».
-    Hält nur die ersten Zeichen zurück, bis klar ist, ob ein Vorspann folgt."""
+    Hält nur die ersten Zeichen zurück, bis klar ist, ob ein Vorspann folgt.
+    v297: Beginnt das Modell, eine Quelle samt interner Markierung («<<<QUELLE 1>>>», «<<<ENDE QUELLE 1>>>») abzuschreiben,
+    wird die Markierung nicht angezeigt und stop gesetzt – der Aufrufer beendet das Schreiben."""
     PRE = ("antwort:", "antwort :")
-    def __init__(self, emit): self.emit, self.head, self.open = emit, "", True
+    MARKEN = ("<<<QUELLE", "<<<ENDE")
+    def __init__(self, emit):
+        self._emit, self.head, self.open = emit, "", True
+        self.puffer, self.stop = "", False
+    def emit(self, txt):                                                # v297: Markierungen abfangen
+        if self.stop: return
+        self.puffer += txt
+        while self.puffer:
+            i = self.puffer.find("<")
+            if i < 0: self._emit(self.puffer); self.puffer = ""; return
+            if i > 0: self._emit(self.puffer[:i]); self.puffer = self.puffer[i:]
+            p = self.puffer
+            if any(p.startswith(m) for m in self.MARKEN): self.stop = True; self.puffer = ""; return
+            if any(m.startswith(p) for m in self.MARKEN): return         # noch offen: auf weitere Zeichen warten
+            self._emit(p[0]); self.puffer = p[1:]
     def push(self, txt):
         txt = txt.replace("ß", "ss").replace("ẞ", "SS")
         if not self.open: self.emit(txt); return
@@ -233,3 +269,5 @@ class swiss_stream:
         if t: self.emit(t)
     def flush(self):
         if self.open and self.head.strip(): self.open = False; self.emit(self.head.lstrip())
+        if self.puffer and not self.stop: self._emit(self.puffer)
+        self.puffer = ""

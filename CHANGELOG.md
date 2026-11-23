@@ -4,63 +4,78 @@ Neueste Version zuerst. Versionsnummern entsprechen `VERSION` in `aura/__init__.
 
 ---
 
+## v300 – 23.11.2026 · Acta Nova: PIN-Eingabe nach rund 5 s
+
+- `engine/actanova.py` (`edge_starten_leer`): Im leeren Start-Tab wird die Erweiterung «Acta Nova Client» nie sichtbar, sie startet erst mit der Acta-Nova-Seite (Log 23.11.: «nicht gesehen nach 32.4 s»). AURA wartet dort nur noch 3 s statt bis zu 30 s; danach wartet `bereit_machen()` wie bisher auf die Erweiterung und lädt neu. Die PIN-Eingabe erscheint nach rund 5 statt 20–30 s.
+- Neue Einstellung `acta_erweiterung_warten_s` (Standard 3). Bleibt Acta Nova bei «Client wird gestartet» hängen: auf 10 oder 30 setzen.
+
+## v299 – 23.11.2026 · Tacho proportional, Edge-Start
+
+- `uebersicht.py`: Segmente im Tacho «Datenbestand» proportional zur Anzahl Objekte statt logarithmisch; kleine Quellen erhalten ein Mindeststück von 6° (neue Funktion `anteile()`).
+- `engine/actanova.py`: Die Erweiterung wird zusätzlich über die Browser-Verbindung gesucht (`Target.getTargets`); feste Nachlaufzeit 5 s → Einstellung `acta_nachlauf_s` (1,5 s). Das Log nennt die Wartezeit.
+
+## v298 – 23.11.2026 · «Wo findet … statt» ohne Acta Nova
+
+- `worker.py`: «Wo findet … statt?» gilt nicht mehr als Fundortfrage («wo finde» passte auch auf «wo findet»).
+- `tools/eval_antwort.py`: `--set schlüssel=wert` überschreibt Einstellungen nur für die Messung (z. B. `--set llm_top_k=4`).
+
+## v297 – 23.11.2026 · Acta Nova nur bei passenden Fragen, keine Quellenmarkierungen
+
+- `worker.py`: Ist Acta Nova eingeschaltet, wird nur noch bei Ablage-, Fundort- und Wissensfragen gesucht («wo finde/liegt …», Dossier, Ablage, Aktenzeichen, Ordnungssystem, «in Acta Nova», «Was weisst du über …», «Infos/Informationen zu …»), nie bei Abfolgefragen (Mail → Termin). Sonst Logzeile «Acta Nova uebersprungen». Gemessen: Fragen ohne Ablagebezug wieder rund 45–50 s statt 88 s.
+- `llm/native.py` (`swiss_stream`): Beginnt das Modell, eine Quelle samt interner Markierung («<<<QUELLE 1>>>») abzuschreiben, wird die Markierung nicht angezeigt und das Schreiben beendet.
+
+## v296 – 23.11.2026 · Agent nur bei Vorbereitungsaufträgen, bessere Zusammenfassung mit Live-Quellen
+
+- `worker.py`: Der eingeschaltete Agent springt nur noch bei Vorbereitungsaufträgen an («bereite mich vor», «Vorbereitung …», «Briefing», «Was muss ich für … wissen?», «Worum geht es beim Termin …?»). Sachfragen laufen durch den normalen Chat. Vorher wurde jede Frage zur Terminvorbereitung (2–4 min, oft am Thema vorbei).
+- Zusammenfassung über alle Quellen: lokale Belege zuerst und so viele wie im normalen Chat (`llm_top_k`), Live-Quellen höchstens 2 je Quelle; Acta-Nova-Ablageorte und «Ablagevorschlag» nur bei Ablagefragen. Hat der Graph eine Abfolgefrage beantwortet, entfällt die Zusammenfassung. Vorher verdrängten Acta-Nova-Treffer gute Mail-Belege («nichts gefunden»).
+
+## v295 – 23.11.2026 · Wiederholsperre: Abbruch statt Ersetzen
+
+- `llm/native.py` (`Wiederholsperre`): Kommt dieselbe Folge von 16 Tokens zum dritten Mal, endet das Schreiben (Einstellung `wiederholsperre`, 0 = aus). Behebt Schleifen wie 17-mal dieselbe Zeile. Einmaliges Wiederholen bleibt erlaubt.
+- v294 hatte Tokens ersetzt und dabei Daten und Namen verfälscht («2026» → «226») – verworfen.
+
+## v293–v294 – 23.11.2026 · Frist in zusammengesetzten Wörtern, Messung mit Sprachmodell
+
+- `rag.py` (`FACETS`): «Eingabefrist», «Antwortfrist» usw. wählen in der Mail die Stelle mit der Frist. Der Fristfragen-Weg in `worker.py` (`DEADLINE`) bleibt bei «Frist…» (v293 verdrängte dort den Beleg).
+- Neu `tools/eval_antwort.py`: ganzer Chat-Weg mit Sprachmodell gegen `eval\fragen_v2.txt` – Pflichtbegriffe in der Antwort, Sekunden gesamt und bis zum ersten Wort. Agent und Live-Quellen für die Messung aus (`--agent`, `--live` zum Gegentest), `--modelle`, `--n`.
+
+## v291–v292 – 22.11.2026 · Messung der Suche, Stückwahl
+
+- Neu `tools/eval_suche.py` und `eval\fragen_v2.txt` (46 Fragen + 4 Intranet, mit Kategorie und Pflichtbegriffen): misst nur die Suche (BM25, Vektor, hybrid), den Graph-Weg und ob Beleg und Pflichtbegriffe beim Modell ankommen.
+- `rag.py` (`stueck_wahl`): Für die zwei besten Treffer werden alle Stücke des Objekts gegen die Frage gewertet; das beste ersetzt den Treffer, das zweitbeste wird angehängt (Einstellung `stueck_wahl`, Standard 2). Gemessen +1 Frage für rund 80 Tokens.
+- `rag.py` (`threads`): höchstens ein Treffer je Mail-Verlauf (Einstellung `je_thread`); gemessen ohne Nutzen, Standard 0 (aus).
+
+**Messergebnis 22./23.11.** (Qwen3.5-4B, ohne Live-Quellen, 46 Fragen, von Hand bewertet): rund 34 richtig in Ø 31 s mit `llm_top_k` 4 (5 Quellen: 34 in 49 s; 3 Quellen: 33 in 34 s). Qwen3.5-9B nicht genauer, aber rund 50 % langsamer. Abfolgefragen über den Graphen 6/6 in unter 1 s. Empfehlung: Qwen3.5-4B und «Max. Quellen» 4.
+
+---
 
 ## v290 – 19.11.2026 · Acta Nova: Dossier per Klick öffnen
 
-- **Öffnen robuster:** Ein Klick auf eine Acta-Nova-Quelle wartet auf eine echte Trefferseite. Bisher galt die Suche manchmal zu früh als fertig, und Acta Nova blieb auf der Dossier-Suchmaske stehen.
-- Bleibt der Klick auf «Suchen» nach 8 s wirkungslos, klickt AURA ein zweites Mal.
-- Protokoll: Trefferseite ja/nein, Anzahl Zeilen, ob sich die Zeile anklicken liess.
+- Ein Klick auf eine Acta-Nova-Quelle wartet auf eine echte Trefferseite; bleibt «Suchen» nach 8 s wirkungslos, klickt AURA ein zweites Mal. Neue Protokollzeilen (Trefferseite, Zeilen, Klick).
 
-## v289 – 19.11.2026 · Acta Nova: kein 90-s-Hänger mehr bei der Suche
+## v289 – 19.11.2026 · Acta Nova: kein 90-s-Hänger mehr
 
-- Fehlt das Feld «Maximale Anzahl der Suchergebnisse», wartet AURA nur 5 s statt 15 s.
-- Danach baut AURA die Suchmaske sofort neu auf und sucht nochmals, statt 90 s auf eine Trefferseite zu warten.
-- Fehlt das Feld auch im zweiten Durchgang, sucht AURA auf der Grundmaske mit der Standardgrenze von Acta Nova (200).
-- Ursache: Der Reiter «Suchabfrage» lädt die Maske über den Server teilweise neu. Bei langsamer Antwort blieb der Klick auf «Suchen» wirkungslos.
+- Fehlt das Feld «Maximale Anzahl der Suchergebnisse», wartet AURA 5 statt 15 s und baut die Maske sofort neu auf; fehlt es erneut, wird mit der Standardgrenze (200) gesucht.
 
 ## v288 – 19.11.2026 · Acta Nova startet beim ersten Mal
 
-- **Ursache des doppelten Starts behoben:** Beim Beenden von Edge löscht AURA `Service Worker\ScriptCache` und `Service Worker\CacheStorage` nicht mehr.
-- Dort liegt auch der Hintergrunddienst der verwalteten Erweiterung «Acta Nova Client». Fehlte das Skript, die Registrierung aber nicht, startete die Erweiterung nach dem nächsten Edge-Start oft minutenlang nicht. Acta Nova blieb dann bei «Client wird gestartet» stehen.
-- **Sicherheit:** Bewusste Abweichung von Review v212. Service-Worker-Daten besuchter Seiten bleiben im AURA-Profil (`data\edge_profil`). Übrige Caches, Sitzungen und Verlauf werden weiterhin gelöscht.
-- **Einmalig beim Update:** AURA und Edge schliessen, dann `data\edge_profil\Default\Service Worker` löschen.
+- `engine/edge.py`: `Service Worker\ScriptCache` und `…\CacheStorage` werden beim Beenden nicht mehr gelöscht (Hintergrunddienst der Erweiterung «Acta Nova Client»). Bewusste Abweichung von Review v212. Einmalig: AURA und Edge schliessen, `data\edge_profil\Default\Service Worker` löschen.
 
-## v287 – 19.11.2026 · Acta Nova: richtiger Start-Tab
+## v285–v287 – 19.11.2026 · Acta Nova: Edge-Start neu geordnet
 
-- Acta Nova wird nur noch in den leeren Start-Tab geladen, nie in einen versteckten Tab (z. B. eine Seite der Erweiterung). Gibt es keinen leeren Tab, öffnet AURA einen neuen und holt ihn nach vorne.
-- Protokoll: offene Tabs (`edge: Tabs …`), «Acta Nova geladen» bzw. die genaue Fehlermeldung.
+- Edge startet leer, Acta Nova wird erst danach in den leeren Start-Tab geladen (kein zweites Fenster). Diagnose `edge: Tabs …`.
 
-## v286 – 19.11.2026 · Acta Nova: kein zweites Fenster
+## v282–v284 – 19.11.2026 · Acta Nova bereit machen, Quellenliste
 
-- Der Start-Tab wird auch erkannt, solange er noch auf der eIAM-Anmeldung steht. Bisher öffnete `ein_tab()` nach 15 s einen zweiten Acta-Nova-Tab.
-
-## v285 – 19.11.2026 · Acta Nova: Edge zuerst leer starten
-
-- Edge startet nicht mehr direkt mit der Acta-Nova-Adresse, sondern leer. AURA wartet bis 30 s auf die Erweiterung «Acta Nova Client», dann 5 s, und lädt erst danach Acta Nova. Zertifikat und PIN erscheinen deshalb einige Sekunden später.
-- Gilt für den Schalter «Acta Nova» im Chat, für «Edge öffnen und anmelden» und für die erste Suche, wenn Edge noch zu ist.
-- Bekannt: «Edge öffnen und anmelden» blockiert die Oberfläche bis zu 35 s.
-
-## v284 – 19.11.2026 · Acta Nova: frischer Tab statt Neuladen
-
-- Hängt Acta Nova bei «Client wird gestartet», öffnet `bereit_machen()` einen frischen Tab und schliesst den alten, statt denselben Tab neu zu laden. Bis zu 4 Runden über etwa 2 Minuten.
-
-## v283 – 19.11.2026 · Acta Nova: auf die Erweiterung warten
-
-- `bereit_machen()` prüft über das DevTools-Protokoll, ob die Erweiterung «Acta Nova Client» läuft (bis 30 s), und lädt erst dann neu.
-- Protokoll: «Erweiterung da / fehlt / nicht prüfbar».
-
-## v282 – 19.11.2026 · Quellen nach System eingeklappt, Farbrand, Acta Nova bereit machen
-
-- **Quellen:** Offen bleiben nur die Belege der Zusammenfassung. Die übrigen stehen eingeklappt je System, mit Anzahl, z. B. «▸ SharePoint (8)». Die Nummern bleiben gleich. Gruppiert wird ab 7 Quellen.
-- **Zusammenfassung:** Unter dem letzten Text steht eine Leerzeile von etwa 10 px in der Blockfarbe. So ist sichtbar, dass nichts abgeschnitten ist.
-- **Acta Nova bereit machen:** Beim Einschalten wartet AURA bis zu 5 min auf die Anmeldung und löst einen Hänger bei «Client wird gestartet» nach 6 s statt nach 30 s. Bisher galt die Anmeldeseite als «init ok», und der eigentliche Hänger danach blieb ungelöst.
+- Neu `bereit_machen()`: wartet auf Anmeldung (bis 5 min) und Erweiterung (bis 30 s), löst «Client wird gestartet» per Neuladen.
+- Offen bleiben nur die Belege der Zusammenfassung; übrige Quellen eingeklappt je System (ab 7 Quellen).
 
 ## v281 – 18.11.2026 · Acta Nova liest alle Treffer, Anzeige ohne Lücken
 
-- **Acta-Nova-Export funktioniert:** AURA liest das Datenblatt statt des Hilfsblatts «#Aliases» und die deutsche statt der technischen Kopfzeile. Objektverweise (`<File|…|System.Guid>`) werden gekürzt. Damit werden bis zu 1000 Treffer ausgewertet statt nur der ersten Bildschirmseite. Vorher meldete das Log bei jeder Suche «Export fehlgeschlagen -> nur Seite 1».
-- **Keine Lücken mehr:** Quellenzeilen, Zeitstempel und Akkordeon «Einzelergebnisse je Quelle» sind native Labels (`ZLabel`). Sie werden auch ausserhalb des sichtbaren Bereichs gezeichnet.
-- Im Verlauf wird das Akkordeon sofort gebaut, nicht verzögert. Leere Flächen beim Öffnen gespeicherter Chats sind damit weg.
-- **Schriftart:** Consolas nur noch für echte Markdown-Tabellen (mindestens 2 Zeilen, die mit «|» beginnen). Quelltext mit «|» wurde vorher als Tabelle gesetzt.
+- Excel-Export liest das Datenblatt (bis 1000 Treffer statt nur Seite 1). Quellenzeilen und Akkordeon als native Labels (keine Lücken im Verlauf); Consolas nur für echte Tabellen.
+
+---
+
 
 ## v280 – 18.11.2026 · Bausteine wieder da, einklappbar
 

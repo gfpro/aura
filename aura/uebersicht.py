@@ -1,10 +1,11 @@
-# aura/uebersicht.py — Startseite «Übersicht» (nächste Termine, letzte Mails) und Tacho «Datenbestand» der Info-Leiste. Version 20261118v276
+# aura/uebersicht.py — Startseite «Übersicht» (nächste Termine, letzte Mails) und Tacho «Datenbestand» der Info-Leiste. Version 20261123v299
+# v299: Tacho-Segmente proportional zur Objektzahl (bisher logarithmisch); kleine Quellen erhalten ein Mindeststück von 6°.
 # v271: Tacho als geglättetes Bild in physischen Pixeln (scharf); Termine und Mails nebeneinander, zweizeilig.
 # v276: Ganztägige Termine «morgen» / «Fr 20.11.» statt 00:00; Zeitfelder gleich breit.
 # v274: Breite folgt dem verfügbaren Platz; unter 620 px Termine und Mails untereinander.
 # v273: Systemmails gebündelt («6× …», aufklappbar), Zeilenzahl nach Fensterhöhe, «–» bei fehlendem Ort, Datum als Seitentitel.
 # v270: Neu. Nur Anzeige: liest die Datenbank direkt (eigene kurze Verbindung, nur SELECT), kein Sprachmodell, keine Jobs im Worker.
-#       Tacho: Bogen 270°, Segment je Quelle (logarithmisch, damit kleine Quellen sichtbar bleiben), Mitte = Objekte gesamt.
+#       Tacho: Bogen 270°, Segment je Quelle (v299: proportional mit Mindeststück), Mitte = Objekte gesamt.
 #       Statuspunkt je Quelle: grün / orange / rot nach Alter des letzten Abgleichs und Anteil Textstücke mit Vektor.
 import math, sqlite3, tkinter as tk
 from datetime import datetime, timedelta
@@ -54,6 +55,21 @@ def status(x, jetzt=None):
 
 
 # ------------------------------------------------------------------ Tacho (Info-Leiste rechts)
+def anteile(werte, frei, minimum=6.0):
+    """v299: Bogenlänge je Quelle proportional zur Objektzahl. Quellen unter dem Mindeststück erhalten «minimum» Grad,
+    der Rest wird unter den übrigen proportional verteilt (wiederholt, bis alles passt)."""
+    n = len(werte)
+    if not n: return []
+    if minimum * n >= frei: return [frei / n] * n
+    fix, ext = set(), [0.0] * n
+    while True:
+        rest = frei - minimum * len(fix)
+        summe = sum(w for i, w in enumerate(werte) if i not in fix) or 1.0
+        neu = {i for i, w in enumerate(werte) if i not in fix and rest * w / summe < minimum}
+        if not neu:
+            for i, w in enumerate(werte): ext[i] = minimum if i in fix else rest * w / summe
+            return ext
+        fix |= neu
 class Tacho:
     """Bogen 270° als selbst gerechnetes Bild (Kantenglättung, physische Pixel je Windows-Skalierung) auf einem tk.Canvas.
     v271: tk.Canvas zeichnet Bögen ohne Glättung und in logischen Pixeln → unscharf/treppig. Ohne Pillow (DLLs gesperrt)."""
@@ -99,13 +115,11 @@ class Tacho:
             except Exception: sc = 1.0
             W, H = round(self.size * sc), round(self.size * 0.82 * sc)
             on = [(c, st[c.id]) for c in connectors if c.id in st and st[c.id].get("items", 0) > 0]
-            gew = [math.log10(1 + x.get("items", 0)) for _, x in on]
-            summe = sum(gew) or 1.0
             luecke = 2.5 if len(on) > 1 else 0.0
             frei = 270.0 - luecke * max(0, len(on) - 1)
+            exts = anteile([x.get("items", 0) for _, x in on], frei)   # v299: proportional, Mindeststück
             segmente, pos = [], 0.0
-            for (c, _), g in zip(on, gew):
-                ext = frei * g / summe
+            for (c, _), ext in zip(on, exts):
                 segmente.append((pos, pos + ext, QUELL_FARBE.get(c.id, "#A3AD9F"))); pos += ext + luecke
             if not segmente: segmente = [(0.0, 270.0, _farbe(self.leer))]
             bg = _farbe(self.bg)

@@ -21,6 +21,11 @@ DEFAULTS = {
     "antwort_stufe": "Kurz",                 # v163: Kurz | Normal | Ausführlich
     "llm_max_new": 250,                      # maximale Antwortlaenge in Tokens
     "llm_temperature": 0.0,                  # 0 = immer das wahrscheinlichste Wort (schnell, sachlich)
+    "acta_erweiterung_warten_s": 3.0,        # v300: Warten auf die Acta-Nova-Erweiterung im leeren Tab (bisher 30 s, sie erscheint dort nie)
+    "acta_nachlauf_s": 1.5,                  # v299: Wartezeit nach dem Erkennen der Acta-Nova-Erweiterung (bisher fest 5 s)
+    "wiederholsperre": 16,                   # v295: Abbruch, wenn eine Folge von so vielen Tokens zum 3. Mal kommt (0 = aus)
+    "stueck_wahl": 2,                        # v292: in so vielen Top-Objekten bestes + zweitbestes Stueck waehlen (0 = aus)
+    "je_thread": 0,                          # v291 (v292: Standard aus, gemessen ohne Nutzen): hoechstens so viele Quellen je Mail-Verlauf ans Modell (0 = aus)
     "graph_suche": True,                     # v190: Abfolgefragen über den Graphen ergänzen (v194: Standard ein)
     "llm_int8": True,                        # v125: 8-Bit-Gewichte (Standard); false nur als Gegenprobe
 }

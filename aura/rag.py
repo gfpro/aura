@@ -1,4 +1,7 @@
 # aura/rag.py — hybride Suche: BM25 (SQLite FTS5) + Vektoren (e5), kombiniert per Reciprocal Rank Fusion.
+# v293: Frist-Erkennung auch in zusammengesetzten Woertern («Eingabefrist»).
+# v292: stueck_wahl(): bestes und zweitbestes Stueck in den Top-Objekten (Einstellung «stueck_wahl»).
+# v291: threads(): unter den Quellen fuers Modell hoechstens ein Treffer je Mail-Verlauf (Einstellung «je_thread»).
 # v120: Auftrags-/Zeitwoerter («nenne», «letzten», «zeig mir» ...) sind Stoppwoerter fuer BM25 und seltene Woerter;
 #       Bindestrich-Begriffe («KI-Massnahmenplan») zusaetzlich als Wortgruppe (findet auch «KI Massnahmenplan»).
 # v110: Stoppwoerter/Zahlen nicht in BM25; rare_items() (seltene Woerter -> Garantie oder Rueckfrage); Datum TT.MM.JJJJ als Bonus.
@@ -82,8 +85,8 @@ class Retriever:
 
     # Frage-Typ -> Textstellen, die innerhalb einer gefundenen Mail bevorzugt werden (statt nur des aehnlichsten Stuecks)
     _MON = "januar|februar|märz|maerz|april|mai|juni|juli|august|september|oktober|november|dezember"
-    FACETS = [(r"\bfrist\w*|\bdeadline\w*|\bbis wann\b|\bstichtag\w*|\btermin(e|lich)?\b.*\b(abgabe|eingabe|antwort)",
-               r"spätestens|spaetestens|\bfrist|deadline|stichtag|\bbis (zum |am |spätestens )?\d{1,2}\.\s?(\d{1,2}\.|" + _MON + ")"
+    FACETS = [(r"\b\w*frist\w*|\bdeadline\w*|\bbis wann\b|\bstichtag\w*|\btermin(e|lich)?\b.*\b(abgabe|eingabe|antwort)",
+               r"spätestens|spaetestens|frist|deadline|stichtag|\bbis (zum |am |spätestens )?\d{1,2}\.\s?(\d{1,2}\.|" + _MON + ")"
                r"|\bab dem \d{1,2}\.")]
 
     def facet(self, question):
@@ -307,6 +310,68 @@ class Retriever:
                     f"SELECT id FROM items WHERE id IN ({','.join(str(int(x)) for x in boost[i:i + 500])}) AND {self.MIT_TEXT}")]
                 boost = ohne
         return {"who": who, "intent": it or None, "items": items, "boost": boost or None, "vorne": list(dict.fromkeys(vorne))[:4]}
+
+    PRE = re.compile(r"^\s*((aw|wg|re|fw|fwd|antw|weiterl|tr|rv|sv|i|r)\s*:\s*)+", re.I)
+
+    def threads(self, conn, hits, n, je_thread=1):
+        """v291: Unter den ersten n hoechstens je_thread Treffer pro Mail-Verlauf (Outlook-ConversationID,
+        sonst Betreff ohne AW:/WG:). Ueberzaehlige rutschen hinter die n. Andere Quellen: je Objekt ein Schluessel."""
+        if je_thread <= 0 or len(hits) <= 1: return hits
+        ids = [h["item_id"] for h in hits if h.get("source") == "outlook_mail" and h.get("item_id")]
+        conv = {}
+        try:
+            for i in range(0, len(ids), 500):
+                part = ids[i:i + 500]
+                for iid, cid in conn.execute("SELECT id, json_extract(meta, '$.conversation_id') FROM items WHERE id IN "
+                                             f"({','.join('?' * len(part))})", part):
+                    if cid: conv[iid] = cid
+        except Exception as e: diag("threads_ohne_conversation_id", fehler=str(e))
+        def key(h):
+            if h.get("source") != "outlook_mail": return ("o", h.get("item_id") or id(h))
+            if h.get("item_id") in conv: return ("c", conv[h["item_id"]])
+            t = re.sub(r"\s+", " ", self.PRE.sub("", (h.get("title") or "").lower())).strip()
+            return ("t", t) if len(t) >= 8 else ("o", h.get("item_id") or id(h))
+        front, back, cnt = [], [], {}
+        for h in hits:
+            k = key(h)
+            if len(front) < n and cnt.get(k, 0) < je_thread: front.append(h); cnt[k] = cnt.get(k, 0) + 1
+            else: back.append(h)
+        return front + back
+
+    def stueck_wahl(self, conn, hits, query, qvec=None, n=2, zweit_min=0.6, max_stuecke=40):
+        """v292: Fuer die ersten n Treffer alle Stuecke des Objekts gegen die Frage werten (Vektor + Inhaltswoerter,
+        als Rangfusion). Das beste Stueck ersetzt den Treffer; das zweitbeste wird angehaengt, wenn es mindestens
+        zweit_min x so gut ist und nicht direkt daneben liegt (Nachbarn kommen spaeter ohnehin dazu). n <= 0: aus."""
+        if n <= 0 or not hits: return hits
+        tw = self.terms(query); qv = list(qvec) if qvec is not None else None
+        for h in hits[:n]:
+            iid = h.get("item_id")
+            if not iid: continue
+            rows = conn.execute("SELECT id, ord, text, vec FROM chunks WHERE item_id = ? ORDER BY ord LIMIT ?", (iid, max_stuecke)).fetchall()
+            if len(rows) < 2: continue
+            listen = []
+            if qv:
+                vs = []
+                for cid, o, t, blob in rows:
+                    if not blob: continue
+                    v = array("f"); v.frombytes(blob)
+                    if len(v) == len(qv): vs.append((sum(map(operator.mul, qv, v)), cid))
+                listen.append([c for _, c in sorted(vs, reverse=True)])
+            if tw:
+                tl = [(sum(1 for w in tw if w in (t or "").lower()), cid) for cid, o, t, _ in rows]
+                listen.append([c for s_, c in sorted(tl, key=lambda x: -x[0]) if s_ > 0])
+            sc = {}
+            for lst in listen:
+                for r, cid in enumerate(lst): sc[cid] = sc.get(cid, 0.0) + 1.0 / (RRF_K + r + 1)
+            if not sc: continue
+            rang_ = sorted(sc, key=sc.get, reverse=True); info = {cid: (o, t) for cid, o, t, _ in rows}
+            best = rang_[0]
+            if best != h.get("chunk_id"): h["chunk_id"], h["text"] = best, info[best][1]
+            if len(rang_) > 1:
+                zw = rang_[1]
+                if sc[zw] >= zweit_min * sc[best] and abs(info[zw][0] - info[best][0]) > 1:
+                    h["text"] = h["text"] + " … " + info[zw][1]
+        return hits
 
     def search(self, conn, query, qvec=None, k=6, mode="hybrid", per_item=1, items=None, prefer=None,
                recency=0.0, half_days=180, quote_weight=1.0, boost=None, boost_weight=0.5, quelle=None):
