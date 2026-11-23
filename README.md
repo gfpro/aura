@@ -2,10 +2,10 @@
 
 Ein lokales «zweites Gehirn» für Windows: AURA durchsucht deine Outlook-Mails und -Termine, den Edge-Verlauf und Dokumentordner und beantwortet Fragen dazu – vollständig auf dem eigenen Rechner. Dazu kommen eine Workflow-Engine, die Word-Vorlagen aus Unterlagen ausfüllt und grafisch zusammengebaut wird, sowie Präsentationen aus angehängten Dokumenten.
 
-<img width="2156" height="1066" alt="image" src="https://github.com/user-attachments/assets/79def2ee-81e2-4770-bcbd-ee82e76b2d6a" />
+<img width="2224" height="1277" alt="image" src="https://github.com/user-attachments/assets/639d58b6-5e06-4677-b5c7-0876181b0f7e" />
 
 
-Stand: v280 (November 2026) · Änderungen: [CHANGELOG.md](CHANGELOG.md)
+Stand: v300 (November 2026) · Änderungen: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
